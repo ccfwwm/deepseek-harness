@@ -69,6 +69,8 @@ import { discoverModels } from './discovery.ts'
 export { PiAiAdapter } from './adapter.ts'
 export type { PiAiAdapterOptions } from './adapter.ts'
 export { Config } from './config.ts'
+// Public rc8 export used by first-party adapters that construct managed routes.
+export { resolveProfiles } from './config.ts'
 export type {
   PiAiCompatProfile,
   PiAiModality,

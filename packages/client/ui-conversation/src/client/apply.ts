@@ -50,7 +50,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 /** Services required by the conversation plugin. */
 export const inject = [
   'slots', 'layout', 'sessions', 'workspaces', 'locale', 'connection', 'remote', 'settingsScope',
-  'conversationEvents', 'conversationViews',
+  'remote.zerowallFiles', 'conversationEvents', 'conversationViews',
 ]
 
 // Static no-session sources for the composer-bar hooks compartment: module
@@ -212,6 +212,7 @@ export function apply(ctx: Context): void {
     },
     inject: (sessionId: SessionId | undefined): ConversationInjected => ({
       hooks: { composerBlock: sessionId === undefined ? ABSENT_BLOCK : composerBlocks.storeFor(sessionId) },
+      startSession: () => { workspaces.startSession() },
       selectWorkspace: async (workspaceId) => {
         const nextId = await workspaces.connectWorkspace(workspaceId)
         if (sessionId !== undefined && nextId !== sessionId) {
@@ -320,6 +321,18 @@ export function apply(ctx: Context): void {
               // and naming it beats echoing the rejected MIME type back.
               return t('image.unsupportedType')
             }
+            return error instanceof Error ? error.message : String(error)
+          }
+        },
+        addFiles: async (files) => {
+          try {
+            const documents = await conversation.createDraftFiles(files)
+            if (!shell.addImages(documents.map(file => file.id))) {
+              conversation.releaseDraftImages(documents)
+              return t('file.busy')
+            }
+            return null
+          } catch (error: unknown) {
             return error instanceof Error ? error.message : String(error)
           }
         },

@@ -291,23 +291,26 @@ export function ModelSelect(
                       <div className={css.groupTitle} id={headingId}>{group.name}</div>
                       {group.models.map((model) => {
                         const selected = state.current?.provider === group.id && state.current.model === model.id
+                        const unavailable = group.unavailableReason !== undefined
                         return (
                           <button
                             ref={itemRef()}
                             type="button"
                             role="menuitemradio"
                             aria-checked={selected}
-                            className={clsx(css.option, selected && css.selected)}
+                            className={clsx(css.option, selected && css.selected, unavailable && css.unavailable)}
                             key={model.id}
                             title={model.name}
-                            disabled={busy}
+                            disabled={busy || unavailable}
                             onClick={() => { choose({ provider: group.id, model: model.id }) }}
                           >
                             <span className={css.optionCopy}>
                               <span className={css.modelName}>{model.name}</span>
-                              {model.description !== undefined && (
-                                <span className={css.description}>{model.description}</span>
-                              )}
+                              {unavailable
+                                ? <span className={css.description}>不可用：{group.unavailableReason}</span>
+                                : model.description !== undefined && (
+                                  <span className={css.description}>{model.description}</span>
+                                )}
                             </span>
                             <span className={css.check}>
                               {selected ? <IconCheckOutline16 /> : null}

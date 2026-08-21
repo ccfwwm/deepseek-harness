@@ -297,6 +297,38 @@ function Loaded({ injected }: { injected: ModelsSectionFace }): ReactNode {
         {configured.map((row) => {
           const target = targetOf(row)
           const namespace = state.namespaces.get(target.settingsNs)
+          if (target.settingsNs === '') {
+            return (
+              <li key={row.entry.provider} className={styles['rowCard']}>
+                <div className={styles['rowHead']}>
+                  <span className={styles['rowIdentity']}>
+                    <span className={styles['rowName']}>{row.entry.displayName}</span>
+                    <span className={styles['rowTag']}>{t('managedTag')}</span>
+                    <span
+                      className={`${styles['credentialDot']} ${styles['credentialDotConfigured']}`}
+                      role="img"
+                      aria-label={t('credentialConfigured')}
+                      title={t('credentialConfigured')}
+                    />
+                  </span>
+                </div>
+                {row.unavailableReason === undefined
+                  ? <ul className={styles['providerModelList']}>
+                    {(row.models ?? []).map(model => (
+                      <li key={model.id}>
+                        <strong>{model.name}</strong>
+                        {model.id === model.name ? null : <code>{model.id}</code>}
+                        <span>{providerUsable(row) ? t('available') : t('unavailable')}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  : <p className={styles['unavailableReason']}>{t('unavailable')}: {row.unavailableReason}</p>}
+                {(row.models?.length ?? 0) === 0 && row.unavailableReason === undefined
+                  ? <p className={styles['unavailableReason']}>{t('noModels')}</p>
+                  : null}
+              </li>
+            )
+          }
           /* v8 ignore next -- the join marks a row configured only when its namespace resolved */
           if (namespace === undefined) return null
           if (needsSetup(row, anyUsable) && !dismissedSetup.has(row.entry.provider)) {

@@ -178,6 +178,7 @@ export const modelProviderGroupSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   models: z.array(modelCatalogModelSchema),
+  unavailableReason: z.string().optional(),
 }) satisfies z.ZodType<Wire<ModelProviderGroup>>
 
 /** One provider-local catalog failure. */
@@ -283,6 +284,21 @@ export const imageMediaTypeSchema = z.union([
 export const promptContentPartSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('text'), text: z.string() }),
   z.object({ type: z.literal('image'), mediaType: imageMediaTypeSchema, data: z.string(), name: z.string().optional() }),
+  z.object({
+    type: z.literal('file'),
+    attachmentId: z.string().min(1),
+    name: z.string().min(1),
+    mediaType: z.string().min(1),
+    bytes: z.number().int().nonnegative(),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+    parser: z.string().min(1),
+    status: z.union([z.literal('parsed'), z.literal('needs_vision')]),
+    textChars: z.number().int().nonnegative(),
+    preview: z.string(),
+    pageCount: z.number().int().nonnegative().optional(),
+    sheetCount: z.number().int().nonnegative().optional(),
+    warning: z.string().optional(),
+  }),
 ])
 
 /** session.prompt request payload, including optional browser-local request provenance. */

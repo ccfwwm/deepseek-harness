@@ -20,14 +20,18 @@ import type { PlatformModule } from './platform.ts'
  * @returns module specifier → exported entity (one entry per platform word).
  */
 export function getStaticModules(): Record<string, unknown> {
-  // The satisfies pin is the projection contract: a word added to
-  // PLATFORM_MODULES without a static import here (or vice versa) fails to
-  // compile instead of drifting into a runtime require miss.
-  return {
+  const singleton = {
     'react': React,
     'react/jsx-runtime': ReactJsxRuntime,
     'react-dom': ReactDom,
     'react-dom/client': ReactDomClient,
+  }
+  ;(globalThis as typeof globalThis & { __DSH_REACT_SINGLETON__?: typeof singleton }).__DSH_REACT_SINGLETON__ = singleton
+  // The satisfies pin is the projection contract: a word added to
+  // PLATFORM_MODULES without a static import here (or vice versa) fails to
+  // compile instead of drifting into a runtime require miss.
+  return {
+    ...singleton,
     '@deepseek-ai/cordis': Cordis,
     '@deepseek-ai/dsh-client-ui-slots': UiSlots,
     '@deepseek-ai/dsh-client-ui-primitives': UiPrimitives,

@@ -346,6 +346,9 @@ export class SessionRuntime implements ISessions {
       }, 'sessions: conversation registry rebuild')
     }
     rootCtx.reflect.provide('sessions', this, undefined)
+    // Project a cold history snapshot immediately. The authoritative list
+    // refresh still runs in the background and will replace it atomically.
+    this.projectList()
   }
 
   /**
@@ -715,11 +718,12 @@ export class SessionRuntime implements ISessions {
       }
     }
     const persisted = this.selection.getSnapshot().sessionId
-    // No current (cleared, or masked gap) wipes the persisted cell — a reload
-    // stays on empty; the in-memory selection still resurfaces a masked id.
-    if (current === undefined) {
+    // During pending/cached startup the list has not yet established a live
+    // baseline. Do not erase a persisted selection merely because the cold
+    // projection has not validated it yet.
+    if (current === undefined && phase === 'ready') {
       if (persisted !== undefined) this.selection.set({})
-    } else if (byId[current] !== undefined
+    } else if (current !== undefined && byId[current] !== undefined
       && (persisted !== current
         || this.selection.getSnapshot().subagentAddress?.childSessionId !== currentAddress?.childSessionId
         || this.selection.getSnapshot().subagentAddress?.parentSessionId !== currentAddress?.parentSessionId

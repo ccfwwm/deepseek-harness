@@ -116,6 +116,31 @@
   height: 0;
 }
 
+.fileAttachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 12px 0;
+}
+
+.fileChip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--dsw-alias-border-secondary);
+  border-radius: 6px;
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-base);
+}
+
+.fileChip span { overflow: hidden; max-width: 220px; text-overflow: ellipsis; white-space: nowrap; }
+.fileChip small { color: var(--dsw-alias-label-tertiary); }
+.fileChip button { display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; }
+.hiddenFileInput { display: none; }
+
 /* The draft's scrollport, and the ONLY scrolling box in the composer: the
    caret is the textarea's and every visible glyph is the backdrop's, so the two
    layers stay together only by riding one offset the browser applies to both at

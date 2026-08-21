@@ -20,3 +20,15 @@ export function displayPresetName(name: string): string {
 export function displayPermissionPreset(value: string, name: string): string {
   return value === FULL_ACCESS_PRESET ? 'Full access' : displayPresetName(name)
 }
+
+/** Translate the three shipped presets while preserving host-defined labels. */
+export function localizedPermissionPreset(
+  value: string,
+  name: string,
+  t: (key: 'preset.readOnly' | 'preset.workspaceWrite' | 'preset.fullAccess') => string,
+): string {
+  if (value === 'read-only') return t('preset.readOnly')
+  if (value === 'workspace-write') return t('preset.workspaceWrite')
+  if (value === FULL_ACCESS_PRESET) return t('preset.fullAccess')
+  return displayPresetName(name)
+}

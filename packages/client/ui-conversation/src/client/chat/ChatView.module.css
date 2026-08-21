@@ -44,6 +44,10 @@
   gap: 16px;
 }
 
+.outboundRow { display: flex; justify-content: flex-end; padding: 8px 16px; }
+.outboundBubble { max-width: min(78%, 720px); padding: 10px 14px; border-radius: 12px; background: var(--dsw-alias-bg-fill-brand, #e6f0ff); color: var(--dsw-alias-label-primary); white-space: pre-wrap; }
+.outboundAttachment { margin-top: 4px; font-size: 12px; opacity: .75; }
+
 /* Settled-flow identity boundary. It is neutral today and becomes the natural
    measurement/mount unit for a virtualizer without changing the column gap. */
 .flowItem {

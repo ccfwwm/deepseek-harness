@@ -86,6 +86,45 @@
   color: var(--dsw-alias-label-primary);
 }
 
+.providerModelList {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 8px 0 0;
+  border-top: 1px solid var(--dsw-alias-border-l3);
+  list-style: none;
+}
+
+.providerModelList li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.providerModelList strong {
+  overflow-wrap: anywhere;
+}
+
+.providerModelList code {
+  grid-column: 1 / -1;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+}
+
+.providerModelList span,
+.unavailableReason {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+}
+
+.unavailableReason {
+  margin: 0;
+  line-height: 18px;
+}
+
 /* Reads as an annotation on the name, not as a second name: caption size and
    the secondary label tone, so it never competes with the row's own title. It
    sits inside `rowIdentity` with the credential dot, which is what keeps it

@@ -29,9 +29,11 @@ import type { SessionRemotes } from './remotes.ts'
  * arrived", not "nothing exists") → `ready` (at least one pull landed).
  * Monotone: `ready` never steps back — later pull failures and reconnect
  * re-pulls ride the `state`/`error` axis, which is where failure is modeled
- * (no `error` phase here; that would duplicate `state`).
+ * (no `error` phase here; that would duplicate `state`). `cached` is a local
+ * cold-start snapshot only: it is renderable history, never an authoritative
+ * baseline, and is replaced by the first successful list pull.
  */
-export type SessionListPhase = 'pending' | 'ready'
+export type SessionListPhase = 'pending' | 'cached' | 'ready'
 
 /** Request-local content hit returned to sidebar search consumers. */
 export interface SessionSearchResultItem {
@@ -174,6 +176,12 @@ export class SessionManager {
     this.selected = restoredSelection
     if (restoredAddress !== undefined) this.addresses.set(restoredAddress.childSessionId, restoredAddress)
     this.listSnapshotCache = this.buildListSnapshot()
+    const cold = readColdSessionSnapshot()
+    if (cold !== undefined) {
+      this.summaries = cold
+      this.listPhase = 'cached'
+      this.listSnapshotCache = this.buildListSnapshot()
+    }
   }
 
   // ---- Selection ----
@@ -468,6 +476,7 @@ export class SessionManager {
           this.summaries = summaries
           this.listState = 'idle'
           this.listPhase = 'ready'
+          writeColdSessionSnapshot(this.summaries)
           // Covers the empty-mutations pull (a plain baseline carries no edge).
           this.syncCompletedNotifications()
           // Push running/blank bits down to instantiated Sessions (the list is the authoritative summary source).
@@ -1073,6 +1082,36 @@ export class SessionManager {
       jobsBySession: Object.fromEntries(this.jobsBySession),
       currentAddress: current === undefined ? undefined : this.addresses.get(current),
     }
+  }
+}
+
+/**
+ * Keep a bounded, non-secret history projection in the renderer so a cold
+ * Electron start can paint the sidebar before the potentially slow host
+ * session.list scan finishes. The live pull remains authoritative.
+ */
+function readColdSessionSnapshot(): SessionSummary[] | undefined {
+  try {
+    if (typeof localStorage === 'undefined') return undefined
+    const raw = localStorage.getItem('dsh.sessions.cold-snapshot')
+    if (raw === null || raw.length > 2_000_000) return undefined
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return undefined
+    if (!parsed.every(item => item !== null && typeof item === 'object'
+      && typeof (item as { sessionId?: unknown }).sessionId === 'string'
+      && typeof (item as { updatedAt?: unknown }).updatedAt === 'number')) return undefined
+    return parsed as SessionSummary[]
+  } catch {
+    return undefined
+  }
+}
+
+function writeColdSessionSnapshot(items: readonly SessionSummary[]): void {
+  try {
+    if (typeof localStorage === 'undefined') return
+    localStorage.setItem('dsh.sessions.cold-snapshot', JSON.stringify(items.slice(0, 500)))
+  } catch {
+    // Cold-start optimization must never affect the live session baseline.
   }
 }
 

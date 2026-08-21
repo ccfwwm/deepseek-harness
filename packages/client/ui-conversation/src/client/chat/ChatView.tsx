@@ -22,6 +22,14 @@ import { ChatNodeSeat } from './ChatNodeSeat.tsx'
 import { formatRunDuration } from './message-chrome.ts'
 import css from './ChatView.module.css'
 
+type ConversationSnapshotWithOutbound = {
+  outbound?: readonly { attemptId: string; text: string; attachments: readonly { name: string; mediaType: string; size: number }[]; status: 'sending' | 'accepted' | 'failed' }[]
+}
+
+type ConversationSnapshotWithRunningClock = ConversationSnapshotWithOutbound & {
+  runningStartedAt?: number | null
+}
+
 const FOLLOW_THRESHOLD = 24
 
 /** Active column host when present; otherwise the view-local scroller. */
@@ -151,6 +159,21 @@ function TurnStatus({ startTime, t }: {
   )
 }
 
+function OutboundBubble({ text, attachments, status }: {
+  text: string
+  attachments: readonly { name: string; mediaType: string; size: number }[]
+  status: 'sending' | 'accepted' | 'failed'
+}) {
+  return (
+    <div className={css.outboundRow} data-pending-outbound={status === 'sending' || undefined} data-outbound-status={status}>
+      <div className={css.outboundBubble}>
+        {text !== '' && <div>{text}</div>}
+        {attachments.map((attachment, index) => <div key={`${attachment.name}:${index}`} className={css.outboundAttachment}>{attachment.name}</div>)}
+      </div>
+    </div>
+  )
+}
+
 /**
  * The chat view slot entry: pure component over the composed props; each
  * ordered business Node crosses the keyed renderer seat.
@@ -163,9 +186,11 @@ export function ChatView({
   const nodeStore = useSession(s => s.chat.nodes)
   const timeline = useSession(s => s.chat.timeline)
   const inbox = useSession(s => s.queue)
+  const outbound = useSession(s => (s as ConversationSnapshotWithOutbound).outbound ?? [])
   // Workspace root off the session list row: path summaries display relative to it.
   const cwd = useSessions(s => s.byId[sessionId]?.cwd)
   const running = useSession(s => s.running)
+  const runningStartedAt = useSession(s => (s as ConversationSnapshotWithRunningClock).runningStartedAt ?? null)
   const openState = useSession(s => s.openState)
   const openError = useSession(s => s.openError)
   const hasMore = useSession(s => s.hasMore)
@@ -214,7 +239,10 @@ export function ChatView({
     owner => renderSlot('conversation.message.images', { ...owner, loadImage }),
     [loadImage, renderSlot],
   )
-  const runningTurnStart = useMemo(() => runningTurnStartTime(timeline), [timeline])
+  const runningTurnStart = useMemo(
+    () => runningStartedAt ?? runningTurnStartTime(timeline),
+    [runningStartedAt, timeline],
+  )
 
   const listRef = useRef<HTMLDivElement | null>(null)
   const columnRef = useRef<HTMLDivElement | null>(null)
@@ -444,6 +472,9 @@ export function ChatView({
               renderSlot={renderSlot}
               t={t}
             />
+          ))}
+          {outbound.map(item => (
+            <OutboundBubble key={item.attemptId} text={item.text} attachments={item.attachments} status={item.status} />
           ))}
           {/* No pending placeholders: questions (ui-user-questions) and approvals
               (ApprovalPanel) both take over the composer, so a flow card would

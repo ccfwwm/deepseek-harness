@@ -6,7 +6,7 @@ import { bindSnapshotSelector } from '@deepseek-ai/dsh-client-test-runtime'
 import type { SettingsNamespaceView } from '@deepseek-ai/dsh-api-remotes/client'
 import { SettingsSchemaService } from '@deepseek-ai/dsh-client-ui-settings/src/client/schema.ts'
 import { PermissionRow, type PermissionRowProps } from '../src/client/PermissionRow.tsx'
-import { en } from '../src/client/locales.ts'
+import { en, zh } from '../src/client/locales.ts'
 import { SettingsDescribeMirror } from '@deepseek-ai/dsh-client-ui-settings/src/client/settings-mirror.ts'
 import { PermissionPresetSettingsController } from '../src/client/settings-store.ts'
 
@@ -54,19 +54,38 @@ const runtime = {
   useWorkspaces: (() => { throw new Error('unused') }) as never,
 }
 
-function mount(controller: PermissionPresetSettingsController) {
+function mount(controller: PermissionPresetSettingsController, translate: PermissionRowProps['t'] = t) {
   return render(
     <PermissionRow
       {...runtime}
       load={() => controller.load()}
       select={preset => controller.select(preset)}
       usePermission={bindSnapshotSelector(controller.store)}
-      t={t}
+      t={translate}
     />,
   )
 }
 
 describe('PermissionRow', () => {
+  it('renders shipped presets and the risk gate in Simplified Chinese', async () => {
+    const controller = derivedController({
+      settings: {
+        describe: () => Promise.resolve(ok({ writable: true, hasDocument: false, namespaces: [view('read-only')] })),
+        mutate: vi.fn(() => Promise.resolve(ok(view('danger-full-access', 1)))),
+      },
+    })
+    const zhDictionary: Record<string, string> = zh
+    const translate: PermissionRowProps['t'] = key => zhDictionary[key] ?? key
+    mount(controller, translate)
+    const button = await screen.findByRole('button', { name: '只读' })
+    fireEvent.click(button)
+    expect(screen.getAllByRole('menuitem').map(item => item.textContent))
+      .toEqual(['只读', '工作区写入', '完全访问'])
+    fireEvent.click(screen.getByRole('menuitem', { name: '完全访问' }))
+    expect(screen.getByRole('dialog', { name: '确认启用完全访问？' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '启用完全访问' })).toBeTruthy()
+  })
+
   it('loads the descriptor, opens the menu, and selects a new default', async () => {
     const mutate = vi.fn(() => Promise.resolve(ok(view('workspace-write', 1))))
     const controller = derivedController({

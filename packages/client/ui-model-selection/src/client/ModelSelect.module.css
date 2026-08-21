@@ -190,6 +190,10 @@
   cursor: default;
 }
 
+.option.unavailable {
+  opacity: 0.65;
+}
+
 .optionCopy {
   display: flex;
   flex: 1;

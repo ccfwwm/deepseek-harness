@@ -36,6 +36,7 @@ function styleInjectionModule(
   fileId: string,
   css: string,
   classMap?: Readonly<Record<string, string>>,
+  exportCss = false,
 ): string {
   const source = [
     `const css = ${JSON.stringify(css)};`,
@@ -48,7 +49,9 @@ function styleInjectionModule(
     '  document.head.appendChild(tag);',
     '}',
   ]
-  source.push(classMap === undefined ? 'export {};' : `export default ${JSON.stringify(classMap)};`)
+  source.push(classMap === undefined
+    ? (exportCss ? `export default ${JSON.stringify(css)};` : 'export {};')
+    : `export default ${JSON.stringify(classMap)};`)
   return source.join('\n')
 }
 
@@ -505,6 +508,7 @@ function clientConfig(id: string, entry: string): UserConfig {
       async load(virtualId: string) {
         if (!virtualId.startsWith(CSS_VIRTUAL_PREFIX)) return null
         const fileId = virtualId.slice(CSS_VIRTUAL_PREFIX.length, -CSS_VIRTUAL_SUFFIX.length)
+          .replace(/\.mjs\?in(?:line)?$/, '')
         // The virtual id otherwise hides the physical stylesheet from Rolldown's watch graph.
         this.addWatchFile(fileId)
         const source = await readFile(fileId)
@@ -531,6 +535,7 @@ function clientConfig(id: string, entry: string): UserConfig {
       async load(virtualId: string) {
         if (!virtualId.startsWith(INLINE_CSS_VIRTUAL_PREFIX)) return null
         const fileId = virtualId.slice(INLINE_CSS_VIRTUAL_PREFIX.length, -CSS_VIRTUAL_SUFFIX.length)
+          .replace(/\.mjs\?in(?:line)?$/, '')
         this.addWatchFile(fileId)
         const source = await readFile(fileId)
         const { code } = transform({ filename: fileId, code: source, minify: true })
@@ -539,17 +544,20 @@ function clientConfig(id: string, entry: string): UserConfig {
     }, {
       name: 'dsh-css-global-inline',
       resolveId(source: string, importer: string | undefined) {
-        if (!source.endsWith('.css') || source.endsWith('.module.css')) return null
-        const abs = importer !== undefined ? sourceAssetPath(source, importer) : source
+        if (source.includes(INLINE_CSS_QUERY) || source.startsWith('\0')) return null
+        const bareSource = source
+        if (!bareSource.endsWith('.css') || bareSource.endsWith('.module.css')) return null
+        const abs = importer !== undefined ? sourceAssetPath(bareSource, importer) : bareSource
         return GLOBAL_CSS_VIRTUAL_PREFIX + abs + CSS_VIRTUAL_SUFFIX
       },
       async load(virtualId: string) {
         if (!virtualId.startsWith(GLOBAL_CSS_VIRTUAL_PREFIX)) return null
         const fileId = virtualId.slice(GLOBAL_CSS_VIRTUAL_PREFIX.length, -CSS_VIRTUAL_SUFFIX.length)
+          .replace(/\.mjs\?in(?:line)?$/, '')
         this.addWatchFile(fileId)
         const source = await readFile(fileId)
         const { code } = transform({ filename: fileId, code: source, minify: true })
-        return styleInjectionModule(id, fileId, code.toString())
+        return styleInjectionModule(id, fileId, code.toString(), undefined, true)
       },
     }],
     outputOptions: {
@@ -580,7 +588,8 @@ const SOURCEMAP_COMMENT = /\n\/\/# sourceMappingURL=.*\s*$/
 
 /** Resolve an emitted JS asset import against its source-tree counterpart. */
 function sourceAssetPath(source: string, importer: string): string {
-  const emitted = resolvePath(dirname(importer), source)
+  const cleanSource = source.replace(/\.mjs\?in(?:line)?$/, '').replace(/\?inline$/, '')
+  const emitted = resolvePath(dirname(importer), cleanSource)
   if (existsSync(emitted)) return emitted
   const boundary = emitted.indexOf(TYPES_MARKER)
   if (boundary < 0) return emitted

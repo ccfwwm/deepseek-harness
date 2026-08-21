@@ -24,7 +24,15 @@ export const inject = ['slots', 'workspaces']
  * @param ctx - client root context.
  */
 export function apply(ctx: ClientContext): void {
-  const injected = (): NativeFlowInjected => ({ pick: () => ctx.workspaces.pickDirectory() })
+  const injected = (): NativeFlowInjected => ({
+    // Electron owns a native folder dialog in the desktop shell. Prefer it
+    // over the DSH Win32 worker, which can exit before returning in ASAR.
+    pick: async () => {
+      const desktop = (globalThis as { zerowallDesktop?: { chooseDirectory?: () => Promise<string | null> } }).zerowallDesktop
+      if (typeof desktop?.chooseDirectory === 'function') return desktop.chooseDirectory()
+      return ctx.workspaces.pickDirectory()
+    },
+  })
   // Both declaration lifetimes must be live before the pair installs; the
   // generator makes the two registrations one transactional effect. The
   // outer/inner nesting order is arbitrary; neither hole has precedence.

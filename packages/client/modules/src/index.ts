@@ -296,6 +296,13 @@ export class ClientModuleRegistry extends Service {
   static inject = ['webServer', 'loader']
 
   private readonly table = new Map<string, WebPluginRecord>()
+  /**
+   * Keep composed bundle paths available while a loader disposal event races
+   * the already-published boot graph. The authoritative loader state is
+   * rebuilt on restart; a transient disposal must not invalidate the current
+   * browser manifest.
+   */
+  private readonly bundlePaths = new Map<string, string>()
   // Negative verdicts (unresolvable specifier — builtins like cordis:include,
   // subpath rows — or a package without a web `dsh.client` declaration) are
   // cached as null and never expire: plugin-set changes take effect on restart.
@@ -373,7 +380,7 @@ export class ClientModuleRegistry extends Service {
    * @returns the path, or undefined for an unknown id.
    */
   clientPath(id: string): string | undefined {
-    return this.table.get(id)?.meta.clientPath
+    return this.table.get(id)?.meta.clientPath ?? this.bundlePaths.get(id)
   }
 
   /**
@@ -501,7 +508,12 @@ export class ClientModuleRegistry extends Service {
         break
       }
     }
-    if (!qualifies) return this.table.delete(entryName)
+    if (!qualifies) {
+      // A config/HMR disposal can briefly remove a no-op client entry after
+      // its boot row has been composed. Keep the row stable for this process;
+      // a restart rebuilds the table from the authoritative loader state.
+      return false
+    }
     if (this.table.has(entryName)) return false
     const meta = this.resolveMeta(entryName)
     if (meta === null) return false
@@ -509,6 +521,7 @@ export class ClientModuleRegistry extends Service {
     // its rev) untouched; only rebuilt() re-reads the bundle.
     const rev = this.initialBundleRevision(entryName, meta.clientPath)
     this.table.set(entryName, { entry: graphRow(entryName, rev, meta), meta })
+    this.bundlePaths.set(entryName, meta.clientPath)
     return true
   }
 

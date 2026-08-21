@@ -2505,9 +2505,14 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         summary.updatedAt = Date.now()
         // First accepted prompt appends events: the summary stops being blank.
         summary.blank = false
-        const userText = content.map(b => (b.type === 'text' ? b.text : '')).join('')
+        const userText = content.map(b => {
+          if (b.type === 'text') return b.text
+          if (b.type === 'file') return `[Uploaded file: ${b.name}]`
+          return ''
+        }).join('')
         const durable: ContentBlock[] = content.map((block) => {
           if (block.type === 'text') return block
+          if (block.type === 'file') return { type: 'text', text: `[Uploaded file: ${block.name}]` }
           const attachment: ImageAttachmentRef = {
             attachmentId: `fixture:${randomUuid()}` as AttachmentIdType,
             mediaType: block.mediaType,

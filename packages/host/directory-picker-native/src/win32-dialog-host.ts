@@ -9,6 +9,7 @@
 
 import { spawn, type StdioOptions } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { sep } from 'node:path'
 import type { Win32DialogWorkerData } from './win32-dialog-worker.ts'
 
 /**
@@ -21,13 +22,22 @@ import type { Win32DialogWorkerData } from './win32-dialog-worker.ts'
  * @returns the spawned child process.
  */
 export function spawnDialogWorker(data: Win32DialogWorkerData): ReturnType<typeof spawn> {
-  const env = { ...process.env, DSH_DIALOG_TITLE: data.title }
+  const env = { ...process.env, DSH_DIALOG_TITLE: data.title, ELECTRON_RUN_AS_NODE: '1' }
   const stdio: StdioOptions = ['ignore', 'inherit', 'inherit', 'ipc']
   /* v8 ignore next 3 -- the built-output arm: tests always run unbuilt (src/) */
   if (!import.meta.url.endsWith('.ts')) {
-    return spawn(process.execPath, [fileURLToPath(new URL('./worker.cjs', import.meta.url))], { env, stdio, windowsHide: true })
+    return spawn(process.execPath, [dialogWorkerPath()], { env, stdio, windowsHide: true })
   }
   return spawn(process.execPath, ['--import', import.meta.resolve('tsx/esm'), fileURLToPath(new URL('./win32-dialog-worker.ts', import.meta.url))], { env, stdio, windowsHide: true })
+}
+
+/** Resolve the physical worker path when Electron has mounted the module in ASAR. */
+export function dialogWorkerPath(moduleUrl: string = import.meta.url): string {
+  const bundled = fileURLToPath(new URL('./worker.cjs', moduleUrl))
+  const marker = `${sep}app.asar${sep}`
+  return bundled.includes(marker)
+    ? bundled.replace(marker, `${sep}app.asar.unpacked${sep}`)
+    : bundled
 }
 
 export { closeThreadWindows } from './win32-dialog-bindings.ts'

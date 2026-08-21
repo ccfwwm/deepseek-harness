@@ -10,7 +10,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { ChangeEvent, KeyboardEvent, MouseEvent, ReactNode } from 'react'
 import clsx from 'clsx'
 import {
-  IconPlusOutline16, IconWarningOutline16, Toast, Tooltip,
+  IconCloseOutline16, IconPaperclipOutline16, IconPlusOutline16, IconWarningOutline16, Toast, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 // Type-only: the `plan` projection key merge (the TodoDock posture — the
 // composer reads a host-computed value; the domain owns the key).
@@ -37,7 +37,7 @@ const INERT_DECORATIONS: DraftDecorations = { token: null, chips: [], textRefs: 
 export type InputBarProps = ComposerBarProps
 
 export function InputBar({
-  useSession, useInput, inputActions, keyboard, addImages, removeImage, draftImages,
+  useSession, useInput, inputActions, keyboard, addImages, addFiles, removeImage, draftImages,
   resolveSubmitMode, toggleCommandMenu, stop, command, t,
   renderSlot, useNotices, useLexicon, useMenuLauncher,
   useProjection, sessionId, variant, disabled: inert = false, blocked,
@@ -70,6 +70,7 @@ export function InputBar({
   // prompt failures): the seq keys the Toast so an identical repeated message
   // restarts the hold-then-fade cycle instead of reusing the faded one.
   const [toast, setToast] = useState<{ seq: number; text: string } | null>(null)
+  const [preparingFiles, setPreparingFiles] = useState<readonly string[]>([])
   const toastSeq = useRef(0)
   const showToast = useCallback((text: string) => {
     toastSeq.current += 1
@@ -96,6 +97,7 @@ export function InputBar({
     if (notice?.level === 'error') showToast(notice.text)
   }, [notice, showToast])
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const cardRef = useRef<HTMLDivElement | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const mirrorRef = useRef<HTMLDivElement | null>(null)
@@ -413,7 +415,7 @@ export function InputBar({
       .filter(item => item.kind === 'file')
       .map(item => item.getAsFile())
       .filter((file): file is File => file !== null)
-    if (files.length > 0) intakeImages(files)
+    if (files.length > 0) intakeAttachments(files)
     const text = e.clipboardData.getData('text/plain')
     if (text === '') {
       if (files.length > 0) e.preventDefault()
@@ -437,34 +439,58 @@ export function InputBar({
   // never enters the rail — no more submit-time failure rolling the rail
   // back. The host enforces the same limits at submit for callers that bypass
   // this composer.
-  const intakeImages = useCallback((files: readonly File[]): void => {
-    if (addImages === undefined || files.length === 0) return
+  const intakeAttachments = useCallback((files: readonly File[]): void => {
+    if (files.length === 0) return
+    const images = files.filter(file => file.type.startsWith('image/'))
+    const documents = files.filter(file => !file.type.startsWith('image/'))
+    if (documents.length > 0 && addFiles !== undefined) {
+      setPreparingFiles(documents.map(file => file.name || t('file.pending')))
+      void addFiles(documents).then((failure) => {
+        setPreparingFiles([])
+        if (failure !== null) showToast(failure)
+      }, (error: unknown) => {
+        setPreparingFiles([])
+        showToast(error instanceof Error ? error.message : String(error))
+      })
+    } else if (documents.length > 0) {
+      // Older/plugin-less compositions expose only the historical image
+      // intake face. Preserve its rejection semantics until the file parser
+      // plugin is present, while the normal rc8 composition uses addFiles.
+      if (addImages !== undefined) {
+        const failure = addImages(files)
+        if (failure !== null) showToast(failure)
+      } else {
+        showToast(t('file.unavailable'))
+      }
+    }
+    if (images.length === 0) return
+    if (addImages === undefined) return
     const rejected = ((): string | null => {
       if (imageLimits !== undefined) {
         // Format precedes limits (DeepSeek Chat's filter order): a batch with
         // a non-image must announce the format problem, not a count or size
         // it could never pass anyway — addImages rejects it authoritatively.
-        if (files.some(file => !(imageLimits.mediaTypes as readonly string[]).includes(file.type))) {
-          return addImages(files)
+        if (images.some(file => !(imageLimits.mediaTypes as readonly string[]).includes(file.type))) {
+          return addImages(images)
         }
-        if (attachments.length + files.length > imageLimits.maxImagesPerMessage) {
+        if (attachments.length + images.length > imageLimits.maxImagesPerMessage) {
           return t('image.tooMany', { count: imageLimits.maxImagesPerMessage })
         }
-        if (files.some(file => file.size > imageLimits.maxImageBytes)) {
+        if (images.some(file => file.size > imageLimits.maxImageBytes)) {
           return t('image.fileTooLarge', { size: imageSizeText(imageLimits.maxImageBytes) })
         }
         const total = attachments.reduce((sum, attachment) => sum + attachment.file.size, 0)
-          + files.reduce((sum, file) => sum + file.size, 0)
+          + images.reduce((sum, file) => sum + file.size, 0)
         if (total > imageLimits.maxMessageImageBytes) {
           return t('image.totalTooLarge', { size: imageSizeText(imageLimits.maxMessageImageBytes) })
         }
       }
-      return addImages(files)
+      return addImages(images)
     })()
     if (rejected !== null) showToast(rejected)
-  }, [addImages, attachments, imageLimits, showToast, t])
+  }, [addFiles, addImages, attachments, imageLimits, showToast, t])
 
-  const canAcceptDrop = !locked && !machineBusy && addImages !== undefined
+  const canAcceptDrop = !locked && !machineBusy && (addImages !== undefined || addFiles !== undefined)
 
   const onSelect = (e: React.SyntheticEvent<HTMLTextAreaElement>): void => {
     // Any caret/selection gesture ends a live paste attempt (the machine
@@ -635,13 +661,32 @@ export function InputBar({
         {renderSlot('conversation.input.attachments', {
           attachments,
           canAcceptDrop,
-          onAddImages: intakeImages,
+          onAddImages: intakeAttachments,
           onRemoveImage: (id) => { removeImage?.(id) },
           dropLimits: imageLimits === undefined ? undefined : {
             count: imageLimits.maxImagesPerMessage,
             size: imageSizeText(imageLimits.maxImageBytes),
           },
         })}
+        {(attachments.some(attachment => attachment.kind === 'file') || preparingFiles.length > 0) && (
+          <div className={css.fileAttachments}>
+            {attachments.filter((attachment): attachment is Extract<typeof attachment, { kind: 'file' }> => attachment.kind === 'file').map(attachment => (
+              <div key={attachment.id} className={css.fileChip} data-status={attachment.prepared.status}>
+                <IconPaperclipOutline16 size={14} />
+                <span>{attachment.file.name}</span>
+                <small>{attachment.prepared.status === 'needs_vision' ? t('file.needsVision') : t('file.parsed')}</small>
+                <button type="button" aria-label={attachment.file.name} onClick={() => { removeImage?.(attachment.id) }}>
+                  <IconCloseOutline16 size={12} />
+                </button>
+              </div>
+            ))}
+            {preparingFiles.map((name, index) => (
+              <div key={`${name}:${index}`} className={css.fileChip} data-status="parsing">
+                <IconPaperclipOutline16 size={14} /><span>{name}</span><small>{t('file.parsing')}</small>
+              </div>
+            ))}
+          </div>
+        )}
         {/* One scrollport, two text layers. The hidden mirror renders draft+'\n' and stretches the
             stack to the draft's FULL height (counting rows by '\n' cannot see soft wraps); the
             absolutely-positioned backdrop and textarea ride that height, and .scroll — capped at 14
@@ -706,6 +751,24 @@ export function InputBar({
                 onClick={onToggleCommandMenu}
               >
                 <IconPlusOutline16 size={14} />
+              </button>
+            </Tooltip>
+            <input
+              ref={fileInputRef}
+              className={css.hiddenFileInput}
+              type="file"
+              multiple
+              accept="image/png,image/jpeg,image/webp,image/gif,.pdf,.docx,.pptx,.xlsx,.txt,.md,.csv,.tsv,.json"
+              onChange={(event) => {
+                intakeAttachments([...(event.currentTarget.files ?? [])])
+                event.currentTarget.value = ''
+              }}
+            />
+            <Tooltip label={t('file.attach')} side="top" delayMs={500}>
+              <button type="button" className={css.add} aria-label={t('file.attach')} disabled={locked || machineBusy} onMouseDown={keepFocus} onClick={() => {
+                fileInputRef.current?.click()
+              }}>
+                <IconPaperclipOutline16 size={14} />
               </button>
             </Tooltip>
             <div className={css.modes}>

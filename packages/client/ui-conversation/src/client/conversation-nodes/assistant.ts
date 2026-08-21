@@ -280,7 +280,10 @@ export const assistantDefinition: ConversationNodeDefinition<AssistantState> = {
     if (match.event.type === 'step/start') return 'none'
     if (match.event.type !== 'assistant/chunk') return 'immediate'
     const type = match.event.data.chunk.type
-    return type === 'usage' || type === 'finish' ? 'none' : 'animation-frame'
+    // The transport already coalesces provider chunks. Publish text and
+    // reasoning deltas immediately so a second animation-frame delay cannot
+    // hide the user's live response behind a stale status label.
+    return type === 'usage' || type === 'finish' ? 'none' : 'immediate'
   },
   buildLocationData: (context, scope) => {
     if (scope !== 'step') return null

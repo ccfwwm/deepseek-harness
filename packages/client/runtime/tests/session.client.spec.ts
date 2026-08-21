@@ -877,6 +877,43 @@ describe('remaining branches', () => {
     expect(session.getSnapshot().promptError).toBeNull()
   })
 
+  it('does not let delayed status frames from a cancelled turn revive running or its timer', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    const { api, session } = makeSession()
+    api.onHistory = () => histResponse(plainTurn(0, 1, 'a', 'b'))
+    await session.open()
+
+    await session.prompt([{ type: 'text', text: 'first' }], 'queue')
+    const firstStartedAt = session.getSnapshot().runningStartedAt
+    expect(firstStartedAt).toBe(1_000)
+    await session.cancel()
+    expect(session.getSnapshot()).toMatchObject({ running: false, runningStartedAt: null })
+
+    // host/session-status carries no turn identity, so both delayed edges are
+    // ignored until the event stream proves a newer turn.
+    session.handleRunning(true)
+    session.handleRunning(false)
+    expect(session.getSnapshot()).toMatchObject({ running: false, runningStartedAt: null })
+
+    vi.setSystemTime(2_000)
+    await session.prompt([{ type: 'text', text: 'second' }], 'queue')
+    expect(session.getSnapshot().runningStartedAt).toBe(2_000)
+    session.handleRunning(false)
+    expect(session.getSnapshot().running).toBe(true)
+
+    // Old turn lifecycle frames must not settle the new local generation.
+    session.handleMuxEnvelope('old-start' as never, { type: 'session/event', sessionId: SID, event: ev.turnStart(6, 1) })
+    session.handleMuxEnvelope('old-end' as never, { type: 'session/event', sessionId: SID, event: ev.turnEnd(7, 1) })
+    expect(session.getSnapshot().running).toBe(true)
+
+    // A strictly newer durable turn unlocks authoritative status updates.
+    session.handleMuxEnvelope('new-start' as never, { type: 'session/event', sessionId: SID, event: ev.turnStart(8, 2) })
+    expect(session.getSnapshot().running).toBe(true)
+    session.handleRunning(false)
+    expect(session.getSnapshot()).toMatchObject({ running: false, runningStartedAt: null })
+  })
+
   it('dispose is a reserved no-op on resident instances', () => {
     const { session } = makeSession()
     expect(() => { session.dispose() }).not.toThrow()

@@ -22,13 +22,28 @@ import type { ComposerSubmitGesture, InputSubmitMode } from './composer-submissi
 import type { ChatNode, ChatNodeKind } from './chat-nodes.ts'
 import type { CallId, SelectionTarget, ViewTab } from './views.ts'
 
-/** Browser-owned image that has not crossed the durable host boundary. */
-export interface ComposerAttachment {
-  kind: 'image'
-  id: DraftAttachmentId
-  file: File
-  previewUrl: string
-}
+/** Browser-owned attachment prepared for one pending prompt. */
+export type ComposerAttachment =
+  | { kind: 'image'; id: DraftAttachmentId; file: File; previewUrl: string }
+  | {
+    kind: 'file'
+    id: DraftAttachmentId
+    file: File
+    prepared: {
+      attachmentId: string
+      name: string
+      mediaType: string
+      bytes: number
+      sha256: string
+      parser: string
+      status: 'parsed' | 'needs_vision'
+      textChars: number
+      preview: string
+      pageCount?: number
+      sheetCount?: number
+      warning?: string
+    }
+  }
 
 /** Input state handed to the optional attachment presentation plugin. */
 export interface ComposerAttachmentsOwnerProps {
@@ -451,6 +466,8 @@ export type ChatStore = ReturnType<typeof createChatStore>
 
 /** Business callbacks injected into the conversation slot. */
 export interface ConversationInjected {
+  /** Start a blank session without requiring a Workspace/project. */
+  startSession?: () => void
   /**
    * Connect the selected Workspace and open its reusable/new blank session.
    * When a blank session is already current, carry its draft to the target.
@@ -535,6 +552,8 @@ export interface ComposerBarInjected {
   keyboard: ComposerKeyboard | undefined
   /** Create previews and append image ids to the session input. */
   addImages: ((files: readonly File[]) => string | null) | undefined
+  /** Parse supported documents through the host file service. */
+  addFiles?: (files: readonly File[]) => Promise<string | null>
   /** Release one preview and remove its id from session input. */
   removeImage: ((id: DraftAttachmentId) => void) | undefined
   /** Resolve ordered input ids to browser-owned draft images. */

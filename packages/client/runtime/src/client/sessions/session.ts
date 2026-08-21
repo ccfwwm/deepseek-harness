@@ -15,7 +15,7 @@ import { ConversationNodeAssembler } from './conversation-assembler.ts'
 import type { ConversationRuntime } from './conversation-assembler.ts'
 import type { ConversationEventInput, ConversationPublication } from '../contract/conversation.ts'
 import type {
-  ChatSnapshot, ComposerPhase, ConversationSnapshot, OpenState, PromptError,
+  ChatSnapshot, ComposerPhase, ConversationSnapshot, OpenState, OutboundMessage, PromptError,
 } from './conversation.ts'
 import { EMPTY_CHAT_SNAPSHOT } from './conversation.ts'
 import type { PendingInteraction } from './pending.ts'
@@ -81,11 +81,26 @@ export class Session implements SessionFace {
   private pending = new Map<string, PendingInteraction>()
   private pendingRev = 0
   private pendingCache: { rev: number; value: PendingInteraction[] } | null = null
+  private outbound: OutboundMessage[] = []
+  private outboundCounter = 0
   /** Authoritative stream-only inbox snapshot; pending work never hits history. */
   private readonly queueMirror = new SessionQueueMirror()
   /** Session-owned business Context engine over the contiguous raw window. */
   private readonly conversation: ConversationNodeAssembler
   private running = false
+  /** A stop/error/turn-end is terminal until a new prompt or turn/start. */
+  private cancelledTurn = false
+  private terminalTurn = false
+  private activeTurnObserved = false
+  /**
+   * A cancelled turn can still have delayed host status frames in flight.
+   * While set, status frames are ignored until a strictly newer durable
+   * turn/start arrives. The sentinel -1 covers a cancel before any event has
+   * landed (for example while the first prompt is being admitted).
+   */
+  private blockedTurnAfterCancel: number | null = null
+  /** Local prompt-generation clock used by the composer status row. */
+  private runningStartedAt: number | null = null
   private address: SubagentAddress | undefined
   private parentAvailable = false
   /**
@@ -105,6 +120,10 @@ export class Session implements SessionFace {
   private liveBuffer: { event: SessionEvent; view: ToolEventView | undefined }[] = []
   /** Gap repair in flight; live events detour to the buffer until the tail page lands. */
   private stitching = false
+  /** Status and event streams are independent; repair the durable tail after an idle edge. */
+  private completionRepairTimer: ReturnType<typeof setTimeout> | null = null
+  /** Repair a lost terminal/status edge without leaving the UI stuck indefinitely. */
+  private tailWatchdogTimer: ReturnType<typeof setTimeout> | null = null
   /** subscribed.lastSeq baseline (gap detection; null when no subscribed frame arrived — degrade to the liveBuffer dedup path). */
   private subscribedLastSeq: number | null = null
 
@@ -260,7 +279,31 @@ export class Session implements SessionFace {
       this.options.onEngaged?.(this)
       this.notifier.markDirty()
     }
+    this.cancelledTurn = false
+    this.terminalTurn = false
+    this.activeTurnObserved = true
+    // Do not clear blockedTurnAfterCancel here. A prompt accepted immediately
+    // after stop must not allow the previous turn's delayed status frame to
+    // resurrect the old timer. The next durable turn/start clears the block.
+    this.runningStartedAt = Date.now()
+    this.setRunning(true)
     return result
+  }
+
+  beginOutbound(input: Pick<OutboundMessage, 'text' | 'attachments'>): string {
+    const attemptId = `${this.sessionId}:${Date.now().toString(36)}:${(++this.outboundCounter).toString(36)}`
+    this.outbound = [...this.outbound, { ...input, attemptId, status: 'sending' }]
+    this.notifier.markDirty()
+    return attemptId
+  }
+
+  settleOutbound(attemptId: string, status: 'accepted' | 'failed', error?: string): void {
+    const current = this.outbound.find(item => item.attemptId === attemptId)
+    if (current === undefined) return
+    this.outbound = this.outbound.map(item => item.attemptId === attemptId
+      ? { ...item, status, ...(error === undefined ? {} : { error }) }
+      : item)
+    this.notifier.markDirty()
   }
 
   /**
@@ -329,6 +372,17 @@ export class Session implements SessionFace {
     if (!result.ok) {
       this.promptError = { op: 'stop', error: result.error }
       this.notifier.markDirty()
+    } else {
+      this.cancelledTurn = true
+      this.terminalTurn = true
+      this.blockedTurnAfterCancel = this.latestTurnNumber() ?? -1
+      this.runningStartedAt = null
+      this.setRunning(false)
+      this.clearTailWatchdog()
+      if (this.outbound.length > 0) {
+        this.outbound = []
+        this.notifier.markDirty()
+      }
     }
     return result
   }
@@ -523,6 +577,11 @@ export class Session implements SessionFace {
    * @param running - the new running state.
    */
   handleRunning(running: boolean): void {
+    // host/session-status has no turn number. After cancellation it is
+    // therefore unsafe to accept either edge until the durable event stream
+    // identifies the next turn. This prevents a delayed old `true` frame (or
+    // its matching `false`) from reviving or re-anchoring the UI timer.
+    if (this.blockedTurnAfterCancel !== null) return
     // Turn-start conversion: a blank session never runs, so the first
     // running:true proves another side's first message landed.
     if (running && this.blankBit) {
@@ -530,8 +589,53 @@ export class Session implements SessionFace {
       this.notifier.markDirty()
     }
     if (running) this.firstPromptPendingTurn = false
+    if ((this.cancelledTurn || (this.terminalTurn && this.activeTurnObserved)) && running) return
+    if (running) this.firstPromptPendingTurn = false
+    if (running) {
+      this.activeTurnObserved = true
+      this.notifier.markDirty()
+    }
+    const wasRunning = this.running
+    this.setRunning(running)
+    if (wasRunning && !running) this.scheduleCompletionRepair()
+  }
+
+  private scheduleCompletionRepair(): void {
+    if (this.openState !== 'open' || this.completionRepairTimer !== null) return
+    this.completionRepairTimer = setTimeout(() => {
+      this.completionRepairTimer = null
+      void this.repairGap()
+    }, 80)
+  }
+
+  private scheduleTailWatchdog(): void {
+    if (this.tailWatchdogTimer !== null) return
+    this.tailWatchdogTimer = setTimeout(() => {
+      this.tailWatchdogTimer = null
+      if (!this.running || this.openState !== 'open') return
+      void this.repairGap().finally(() => {
+        if (this.running) this.scheduleTailWatchdog()
+      })
+    }, 10_000)
+  }
+
+  private clearTailWatchdog(): void {
+    if (this.tailWatchdogTimer === null) return
+    clearTimeout(this.tailWatchdogTimer)
+    this.tailWatchdogTimer = null
+  }
+
+  private setRunning(running: boolean): void {
+    if (running && this.blankBit) {
+      this.blankBit = false
+      this.firstPromptPendingTurn = false
+    }
     if (this.running === running) return
     this.running = running
+    if (!running) this.runningStartedAt = null
+    else if (this.runningStartedAt === null) this.runningStartedAt = Date.now()
+    if (running) this.scheduleTailWatchdog()
+    else this.clearTailWatchdog()
     this.notifier.markDirty()
   }
 
@@ -587,11 +691,19 @@ export class Session implements SessionFace {
    */
   handleAgentError(message: string): void {
     this.lastAgentError = message
+    this.cancelledTurn = true
+    this.terminalTurn = true
+    this.setRunning(false)
+    this.clearTailWatchdog()
     this.notifier.markDirty()
   }
 
-  /** No-op because session instances remain resident. */
-  dispose(): void {}
+  /** Release timers when the resident session is pruned. */
+  dispose(): void {
+    if (this.completionRepairTimer !== null) clearTimeout(this.completionRepairTimer)
+    this.completionRepairTimer = null
+    this.clearTailWatchdog()
+  }
 
   /** Rebuild the current window after a low-frequency Definition or view registration change. */
   rebuildConversationRegistry(): void {
@@ -659,7 +771,28 @@ export class Session implements SessionFace {
     this.views = entries.map(e => e.view)
     this.baseSeq = this.events[0]?.seq ?? 0
     this.hasMore = hasMore
+    for (const event of this.events) this.retireOutbound(event)
     if (this.events.some(event => event.type === 'turn/start')) this.firstPromptPendingTurn = false
+    let boundary: 'start' | 'end' | undefined
+    for (const event of this.events) {
+      if (event.type === 'turn/start') boundary = 'start'
+      else if (event.type === 'turn/end') boundary = 'end'
+    }
+    const boundaryTurn = this.latestTurnNumber()
+    if (boundary === 'end' && (this.blockedTurnAfterCancel === null
+      || boundaryTurn === null
+      || boundaryTurn > this.blockedTurnAfterCancel)) {
+      this.terminalTurn = true
+      this.setRunning(false)
+    } else if (boundary === 'start' && (this.blockedTurnAfterCancel === null
+      || boundaryTurn === null
+      || boundaryTurn > this.blockedTurnAfterCancel)) {
+      this.terminalTurn = false
+      this.cancelledTurn = false
+      this.activeTurnObserved = true
+      this.runningStartedAt = Date.now()
+      this.setRunning(true)
+    }
     this.conversation.replaceWindow(entries.map(conversationInput), hasMore)
     if (projections !== undefined) this.projections.seed(projections)
     const buffered = this.liveBuffer
@@ -674,6 +807,32 @@ export class Session implements SessionFace {
     if (tailSeq !== null && event.seq <= tailSeq) return 'none' // replay overlap, drop
     this.events.push(event)
     this.views.push(view)
+    this.retireOutbound(event)
+    if (event.type === 'turn/start') {
+      const turn = event.data.turn
+      if (this.blockedTurnAfterCancel !== null && turn <= this.blockedTurnAfterCancel) {
+        // Keep the old event for conversation reconstruction, but do not let
+        // it unlock status or the running clock after a stop.
+      } else {
+        this.blockedTurnAfterCancel = null
+        this.cancelledTurn = false
+        this.terminalTurn = false
+        this.activeTurnObserved = true
+        this.runningStartedAt = event.time
+        this.setRunning(true)
+      }
+    }
+    if (event.type === 'turn/end') {
+      const turn = event.data.turn
+      if (this.blockedTurnAfterCancel !== null && turn <= this.blockedTurnAfterCancel) {
+        // A delayed terminal edge from the cancelled turn must not stop a
+        // prompt that has already been admitted for the next turn.
+      } else {
+        this.terminalTurn = true
+        this.blockedTurnAfterCancel = null
+        this.setRunning(false)
+      }
+    }
     if (event.type === 'turn/start') this.firstPromptPendingTurn = false
     const queueChanged = this.queueMirror.acceptDurable(event)
     const publication = this.conversation.append({ event, view })
@@ -697,13 +856,55 @@ export class Session implements SessionFace {
       void this.repairGap()
       return
     }
-    this.scheduleConversation(this.appendLive(event, view))
+    this.scheduleConversation(this.appendLive(event, view), event.type === 'assistant/chunk')
   }
 
   /** Route assembler cadence into the Session's existing microtask/RAF notifier. */
-  private scheduleConversation(publication: ConversationPublication): void {
-    if (publication === 'immediate') this.notifier.markDirty()
+  private scheduleConversation(publication: ConversationPublication, streaming = false): void {
+    if (publication === 'immediate') {
+      // Assistant text/reasoning deltas are already coalesced by the provider
+      // stream. A second animation-frame gate makes a 20-50ms upstream stream
+      // visibly arrive in larger chunks (and leaves the status row stale). A
+      // microtask flush still collapses same-tick bursts while publishing each
+      // provider chunk as soon as it reaches the browser.
+      void streaming
+      this.notifier.markDirty()
+    }
     else if (publication === 'animation-frame') this.notifier.markFrameDirty()
+  }
+
+  /** Remove accepted optimistic rows once their matching durable user event lands. */
+  private retireOutbound(event: SessionEvent): void {
+    if (event.type === 'turn/start') {
+      const index = this.outbound.findIndex(item => item.status === 'accepted')
+      if (index >= 0) {
+        this.outbound = this.outbound.filter((_item, candidate) => candidate !== index)
+        this.notifier.markDirty()
+      }
+      return
+    }
+    if (event.type !== 'user/message') return
+    const content = (event.data as { content?: readonly { type?: string; text?: string }[] }).content ?? []
+    const text = content.filter(block => block.type === 'text').map(block => block.text ?? '').join('')
+    const index = this.outbound.findIndex(item => item.status !== 'failed' && (
+      (item.text !== '' && text.endsWith(item.text))
+      || (item.text === '' && item.attachments.length > 0 && text.includes('[Uploaded file:'))
+    ))
+    if (index >= 0) {
+      this.outbound = this.outbound.filter((_item, candidate) => candidate !== index)
+      this.notifier.markDirty()
+    }
+  }
+
+  /** Latest durable turn number currently present in the event window. */
+  private latestTurnNumber(): number | null {
+    let latest: number | null = null
+    for (const event of this.events) {
+      if (event.type === 'turn/start' || event.type === 'turn/end') {
+        latest = latest === null ? event.data.turn : Math.max(latest, event.data.turn)
+      }
+    }
+    return latest
   }
 
   /** Resync-lite: repull the tail page and stitch the liveBuffer through the shared
@@ -749,14 +950,16 @@ export class Session implements SessionFace {
       runningCalls: legacy.runningCalls,
       pending: this.pendingCache.value,
       queue: this.queueMirror.snapshot(),
+      outbound: this.outbound,
       running: this.running,
+      runningStartedAt: this.runningStartedAt,
       subagent: this.address === undefined
         ? null
         : { address: this.address, parentAvailable: this.parentAvailable },
       composerPhase: derivePhase(
         hasVisibleConversationContent(chat)
           || (!this.blankBit && !this.firstPromptPendingTurn)
-          || this.running
+          || (this.running && !this.firstPromptPendingTurn)
           || this.pendingCache.value.length > 0,
         this.promptAttempted,
       ),

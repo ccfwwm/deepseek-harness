@@ -182,7 +182,11 @@ export class WorkspaceRuntime implements IWorkspaces {
       : workspace.items.find(item => item.sessionIds.includes(current))?.workspaceId
     const target = workspaceId ?? currentWorkspaceId ?? workspace.recentWorkspaceId
     if (target === undefined) {
-      this.sessions.clear()
+      // A workspace is optional. Keep first-run conversations usable.
+      void this.sessions.create({}).then(
+        sessionId => { this.sessions.open(sessionId) },
+        reason => { console.warn('new session without workspace failed:', reason) },
+      )
       return
     }
     void this.connectWorkspace(target).then(

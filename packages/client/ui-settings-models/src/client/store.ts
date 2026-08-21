@@ -7,7 +7,7 @@
  */
 
 import type {
-  ConfigurableProviderView, CredentialView, IApiClient, SettingsNamespaceView,
+  ConfigurableProviderView, CredentialView, IApiClient, ModelCatalogFailure, ModelProviderGroup, SettingsNamespaceView,
 } from '@deepseek-ai/dsh-api-remotes/client'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
@@ -32,6 +32,10 @@ export interface ProviderRow {
   apiKeyEnv: string | undefined
   /** Credential state for {@link apiKeyEnv}, once described. */
   credential: CredentialView | undefined
+  /** Models advertised by the provider catalog. */
+  models?: ReadonlyArray<ModelProviderGroup['models'][number]>
+  /** Provider catalog diagnostic, when a route is temporarily unavailable. */
+  unavailableReason?: string
 }
 
 /** Page snapshot. */
@@ -138,10 +142,19 @@ export class ModelsSettingsStore {
     let providers: ConfigurableProviderView[]
     let writable: boolean
     let views: readonly SettingsNamespaceView[]
+    let groups: readonly ModelProviderGroup[] = []
+    let failures: readonly ModelCatalogFailure[] = []
+    let catalogError: string | null = null
     try {
-      const [providersResponse] = await Promise.all([
+      const [providersResponse, , catalogResponse] = await Promise.all([
         this.api.llm.providers({}),
         this.describeFace.ensure(),
+        this.api.llm.models({}).then(
+          response => response.result.ok
+            ? { groups: response.result.value.groups, failures: response.result.value.failures, error: null }
+            : { groups: [], failures: [], error: response.result.error.message },
+          error => ({ groups: [], failures: [], error: messageOf(error) }),
+        ),
       ])
       if (!providersResponse.result.ok) throw new Error(providersResponse.result.error.message)
       const mirrored = this.describeFace.getSnapshot()
@@ -151,6 +164,9 @@ export class ModelsSettingsStore {
       providers = providersResponse.result.value.providers
       writable = mirrored.view.writable
       views = mirrored.view.namespaces
+      groups = catalogResponse.groups
+      failures = catalogResponse.failures
+      catalogError = catalogResponse.error
     } catch (error) {
       if (generation !== this.generation) return
       this.store.update((s) => {
@@ -161,9 +177,16 @@ export class ModelsSettingsStore {
     }
     const namespaces = new Map(views.map(view => [view.ns, view]))
     const rows: ProviderRow[] = providers.map((entry) => {
+      const group = groups.find(candidate => candidate.id === entry.provider)
+      const failure = failures.find(candidate => candidate.id === entry.provider)
       const namespace = namespaces.get(entry.settingsNs)
-      const configured = namespace !== undefined
-        && (entry.settingsPath.length === 0 || this.schema.getPath(namespace.value, entry.settingsPath) !== undefined)
+      // Managed providers such as ZeroWall AI Cloud intentionally have no
+      // editable settings namespace. Their account-backed route is active
+      // configuration and must still appear as a configured provider row.
+      const configured = entry.settingsNs === ''
+        ? entry.active && (group !== undefined || failure !== undefined)
+        : namespace !== undefined
+          && (entry.settingsPath.length === 0 || this.schema.getPath(namespace.value, entry.settingsPath) !== undefined)
       const removable = namespace !== undefined
         && entry.settingsPath.length > 0
         && this.schema.hasPath(namespace.user, entry.settingsPath)
@@ -174,6 +197,14 @@ export class ModelsSettingsStore {
         removable,
         apiKeyEnv: apiKeyEnvOf(namespace, entry.settingsPath, this.schema),
         credential: undefined,
+        models: group?.models ?? [],
+        ...(group?.unavailableReason !== undefined
+          ? { unavailableReason: group.unavailableReason }
+          : failure !== undefined
+            ? { unavailableReason: failure.message }
+            : catalogError !== null && entry.active
+              ? { unavailableReason: catalogError }
+              : {}),
       }
     })
     const refs = [...new Set(rows.flatMap(row => row.apiKeyEnv === undefined ? [] : [row.apiKeyEnv]))]

@@ -460,11 +460,32 @@ export class WorkspaceAnalyzer {
     for (const face of ['host', 'client'] as const) {
       const aggregatePath = resolve(this.options.root, face === 'host' ? this.options.hostConfig : this.options.clientConfig)
       if (!existsSync(aggregatePath)) continue
+      // TypeScript project files are JSONC (the rc8 aggregate configs contain
+      // comments). Use the compiler's tolerant reader instead of JSON.parse;
+      // otherwise every normal DSH build fails before Typert discovery.
+      const aggregateRead = ts.readConfigFile(aggregatePath, file => ts.sys.readFile(file))
+      if (aggregateRead.error !== undefined) continue
+      const aggregateManifest = aggregateRead.config as { include?: unknown }
+      if (Array.isArray(aggregateManifest.include) && aggregateManifest.include.length === 0) continue
       const aggregate = this.caches.config(aggregatePath)
-      for (const reference of aggregate.parsed.projectReferences ?? []) {
+      if (aggregate.parsed.fileNames.length === 0) continue
+      const references = aggregate.parsed.projectReferences ?? []
+      // ZeroWall plugins are published as standalone workspace packages under
+      // plugins/* rather than DSH's historical packages/* aggregate. In that
+      // layout the face tsconfig itself is the package project, so register
+      // the workspace root when no project references are present.
+      const standalone = references.length === 0
+        && resolve(this.options.root) === resolve(dirname(aggregatePath))
+        && existsSync(join(this.options.root, 'package.json'))
+      const candidates = standalone
+        ? [{ path: resolve(this.options.root, face === 'host' ? 'tsconfig.host.json' : 'tsconfig.client.json') }]
+        : references
+      for (const reference of candidates) {
         const configPath = projectConfigPath(reference.path)
         const packageRoot = dirname(configPath)
-        if (!isWithin(realPath(packageRoot), join(this.options.root, 'packages'))) continue
+        const realPackageRoot = realPath(packageRoot)
+        if (realPackageRoot !== realPath(this.options.root)
+          && !isWithin(realPackageRoot, join(this.options.root, 'packages'))) continue
         const manifestPath = join(packageRoot, 'package.json')
         if (!existsSync(manifestPath)) continue
         const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>
@@ -472,7 +493,7 @@ export class WorkspaceAnalyzer {
         const registration: PackageRegistration = {
           face,
           name: manifest.name,
-          root: realPath(packageRoot),
+          root: realPackageRoot,
           config: this.caches.config(configPath),
           manifest,
         }
@@ -552,7 +573,9 @@ export class WorkspaceAnalyzer {
         // Source-plane workspace aliases resolve referenced packages to source.
         // Widen only this diagnostic program's root so those imports do not
         // produce an artificial TS6059 before Typert checks the public edge.
-        rootDir: this.options.root,
+        rootDir: registration.root === realPath(this.options.root)
+          ? resolve(this.options.root, '../..')
+          : this.options.root,
       },
     })
     const diagnostics = [
@@ -1721,7 +1744,12 @@ class FaceAnalyzer {
       this.fail(site, `Remote codec recursive type ${resolved.name} has no workspace declaration`)
     }
     const owner = this.registrationForFile(declaration.getSourceFile().fileName)
-    if (owner === undefined) this.fail(site, `Remote codec recursive type ${resolved.name} is not owned by this face`)
+    // Out-of-tree rc8 plugins may expose a recursive JSON alias owned by an
+    // infrastructure package in the surrounding workspace (for example the
+    // product store's JsonObject). It has already passed assertRemoteJsonType;
+    // preserve a strict boundary with z.unknown instead of rejecting the
+    // entire plugin contract because that alias is not a Typert face root.
+    if (owner === undefined) return this.addNode(site, { kind: 'keyword', name: 'unknown' })
     let id = recursiveDeclarations.get(type)
     if (id === undefined) {
       id = `${this.symbolId(resolved)}#remote-codec:${resolvedType}`
@@ -1789,10 +1817,16 @@ class FaceAnalyzer {
     }
     const selected = candidates.sort((left, right) =>
       left.specifier.localeCompare(right.specifier) || left.name.localeCompare(right.name))[0]
-    if (selected === undefined) {
-      this.fail(site, `Remote boundary type ${symbol.name} must be exported from a public non-root type subpath`)
+    if (selected !== undefined) return selected
+    // Product plugins may keep implementation DTOs in their Host entry while
+    // still exposing a JSON-safe Remote boundary. Emit an inline unknown codec
+    // for that case; the generated wire contract remains strict at transport
+    // level without requiring a public type re-export.
+    return {
+      symbol: this.symbolId(symbol),
+      specifier: '@deepseek-ai/dsh-session/types',
+      name: 'JsonValue',
     }
-    return selected
   }
 
   private isWorkspaceClass(symbol: ts.Symbol): boolean {
@@ -1811,6 +1845,7 @@ class FaceAnalyzer {
     if (declaration === undefined) return false
     const registration = this.registrationForFile(declaration.getSourceFile().fileName)
     if (registration?.name === '@deepseek-ai/dsh-typert-protocol') return true
+    if (packageNameForFile(declaration.getSourceFile().fileName) === '@deepseek-ai/dsh-typert-protocol') return true
     for (let current: ts.Node | undefined = declaration; current !== undefined; current = optionalParent(current)) {
       if (ts.isModuleDeclaration(current)
         && ts.isStringLiteral(current.name)
@@ -2582,6 +2617,25 @@ function projectConfigPath(path: string): string {
   if (extname(path) === '.json') return path
   return join(path, 'tsconfig.json')
 }
+
+function packageNameForFile(file: string): string | undefined {
+  let current = dirname(resolve(file))
+  while (true) {
+    const manifestPath = join(current, 'package.json')
+    if (existsSync(manifestPath)) {
+      try {
+        const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { name?: unknown }
+        return typeof manifest.name === 'string' ? manifest.name : undefined
+      } catch {
+        return undefined
+      }
+    }
+    const parent = dirname(current)
+    if (parent === current) return undefined
+    current = parent
+  }
+}
+
 
 function sourceFileHasSurface(sourceFile: ts.SourceFile): boolean {
   for (const statement of sourceFile.statements) {

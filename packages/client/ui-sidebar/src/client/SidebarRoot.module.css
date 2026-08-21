@@ -313,6 +313,24 @@
 
 .footerActions {
   display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 6px;
+}
+
+/* Several ZeroWall actions share this footer. Keep labels horizontal and
+   allow compact rows instead of shrinking to one character per line. */
+.footerActions > * {
+  flex: 1 1 132px;
+  min-width: 0;
+}
+
+.footerActions button {
+  min-width: 0;
+  width: 100%;
+  white-space: nowrap;
+  writing-mode: horizontal-tb;
+  text-orientation: mixed;
 }
 
 .collapsed .footArea {
@@ -324,6 +342,10 @@
   display: flex;
   justify-content: center;
   width: auto;
+}
+
+.collapsed .footerActions > * {
+  flex: 0 0 auto;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -87,6 +87,21 @@ export interface SessionProjectionsBlock {
 export type PromptContentPart =
   | { type: 'text'; text: string }
   | { type: 'image'; mediaType: ImageMediaType; data: string; name?: string }
+  | {
+    type: 'file'
+    attachmentId: string
+    name: string
+    mediaType: string
+    bytes: number
+    sha256: string
+    parser: string
+    status: 'parsed' | 'needs_vision'
+    textChars: number
+    preview: string
+    pageCount?: number
+    sheetCount?: number
+    warning?: string
+  }
 
 /** Complete model selection for one session. */
 export interface ModelSelection {
@@ -136,6 +151,8 @@ export interface ModelProviderGroup {
   name: string
   /** Models in provider-preferred order. */
   models: ModelCatalogModel[]
+  /** Optional provider diagnostic when the route is present but unavailable. */
+  unavailableReason?: string
 }
 
 /** A provider whose asynchronous catalog lookup failed. */

@@ -40,6 +40,7 @@ export interface IConversation {
    * @returns completion; business failures reject (and land in promptError).
    */
   send(text: string): Promise<void>
+  resolveImage(sessionId: SessionId, attachment: ImageAttachmentRef): Promise<string>
   /**
    * Apply one edit, remove, or strict steer operation to a pending queue occurrence.
    * @param itemId - agent-owned inbox occurrence identity.
@@ -60,13 +61,20 @@ export interface IConversation {
 }
 
 /** Create one browser-only draft descriptor; only its id enters input state. */
-function browserDraftAttachment(file: File): ComposerAttachment {
+function browserDraftAttachment(file: File): Extract<ComposerAttachment, { kind: 'image' }> {
   return {
     kind: 'image',
     id: crypto.randomUUID() as DraftAttachmentId,
     previewUrl: URL.createObjectURL(file),
     file,
   }
+}
+
+type PreparedFile = Extract<ComposerAttachment, { kind: 'file' }>['prepared']
+interface FilesRemote {
+  prepare(input: { name: string; mediaType?: string; data: string }): Promise<
+    { ok: true; value: PreparedFile } | { ok: false; error: { code: string; message: string } }
+  >
 }
 
 interface ImageUrlEntry {
@@ -129,8 +137,17 @@ export class ConversationController extends Service implements IConversation {
    */
   async send(text: string): Promise<void> {
     const session = this.scopedSession('send')
-    const result = await session.prompt([{ type: 'text', text }], 'queue')
-    if (!result.ok) throw new Error(`conversation.send failed: ${result.error.code}: ${result.error.message}`)
+    const attemptId = session.beginOutbound?.({ text, attachments: [] })
+    try {
+      const result = await session.prompt([{ type: 'text', text }], 'queue')
+      if (!result.ok) throw new Error(`conversation.send failed: ${result.error.code}: ${result.error.message}`)
+      if (attemptId !== undefined) session.settleOutbound?.(attemptId, 'accepted')
+    } catch (error) {
+      if (attemptId !== undefined) {
+        session.settleOutbound?.(attemptId, 'failed', error instanceof Error ? error.message : String(error))
+      }
+      throw error
+    }
   }
 
   /**
@@ -153,12 +170,27 @@ export class ConversationController extends Service implements IConversation {
     if (attachments.length !== imageIds.length) {
       throw new Error('conversation.sendSession: one or more draft images are no longer available')
     }
-    const uploaded = await this.serializeImages(attachments.map(attachment => attachment.file))
-    const content = [...uploaded, ...(text === '' ? [] : [{ type: 'text' as const, text }])]
-    const result = await session.prompt(content, mode, signal)
-    if (!result.ok) return { kind: 'error' }
-    this.releaseDraftImages(attachments)
-    return { kind: 'success' }
+    const attemptId = session.beginOutbound?.({
+      text,
+      attachments: attachments.map((attachment) => attachment.kind === 'image'
+        ? { name: attachment.file.name || 'image', mediaType: attachment.file.type, size: attachment.file.size }
+        : { name: attachment.prepared.name, mediaType: attachment.prepared.mediaType, size: attachment.prepared.bytes }),
+    })
+    try {
+      const uploaded = await this.serializeAttachments(attachments)
+      const content = [...uploaded, ...(text === '' ? [] : [{ type: 'text' as const, text }])]
+      const result = await session.prompt(content, mode, signal)
+      if (!result.ok) {
+        if (attemptId !== undefined) session.settleOutbound?.(attemptId, 'failed', `${result.error.code}: ${result.error.message}`)
+        return { kind: 'error' }
+      }
+      if (attemptId !== undefined) session.settleOutbound?.(attemptId, 'accepted')
+      this.releaseDraftImages(attachments)
+      return { kind: 'success' }
+    } catch (error) {
+      if (attemptId !== undefined) session.settleOutbound?.(attemptId, 'failed', error instanceof Error ? error.message : String(error))
+      throw error
+    }
   }
 
   /**
@@ -168,12 +200,28 @@ export class ConversationController extends Service implements IConversation {
    */
   createDraftImages(files: readonly File[]): readonly ComposerAttachment[] {
     for (const file of files) imageMediaType(file.type)
-    return files.map((file) => {
+    return files.map((file): Extract<ComposerAttachment, { kind: 'image' }> => {
       const attachment = browserDraftAttachment(file)
       this.draftAttachments.set(attachment.id, attachment)
       this.createdImageUrls.add(attachment.previewUrl)
       return attachment
     })
+  }
+
+  async createDraftFiles(files: readonly File[]): Promise<readonly ComposerAttachment[]> {
+    const remote = (this.ctx.get('remote') as unknown as { zerowallFiles?: FilesRemote } | undefined)?.zerowallFiles
+    if (remote === undefined) throw new Error('File service is unavailable in this application build.')
+    const prepared = await Promise.all(files.map(async (file): Promise<ComposerAttachment> => {
+      const response = await remote.prepare({
+        name: file.name || 'uploaded-file',
+        ...(file.type === '' ? {} : { mediaType: file.type }),
+        data: bytesToBase64(new Uint8Array(await file.arrayBuffer())),
+      })
+      if (!response.ok) throw new Error(`${response.error.code}: ${response.error.message}`)
+      return { kind: 'file', id: crypto.randomUUID() as DraftAttachmentId, file, prepared: response.value }
+    }))
+    for (const attachment of prepared) this.draftAttachments.set(attachment.id, attachment)
+    return prepared
   }
 
   /**
@@ -213,8 +261,10 @@ export class ConversationController extends Service implements IConversation {
     const attachment = this.draftAttachments.get(id)
     if (attachment === undefined) return
     this.draftAttachments.delete(id)
-    this.createdImageUrls.delete(attachment.previewUrl)
-    revokePreview(attachment.previewUrl)
+    if (attachment.kind === 'image') {
+      this.createdImageUrls.delete(attachment.previewUrl)
+      revokePreview(attachment.previewUrl)
+    }
   }
 
   /**
@@ -333,8 +383,24 @@ export class ConversationController extends Service implements IConversation {
   }
 
   /** Convert browser files to canonical base64 prompt parts. */
-  private serializeImages(images: readonly File[]): Promise<Parameters<SessionFace['prompt']>[0]> {
-    return Promise.all(images.map(async file => ({ type: 'image' as const, ...await this.encodeImage(file) })))
+  private serializeAttachments(attachments: readonly ComposerAttachment[]): Promise<Parameters<SessionFace['prompt']>[0]> {
+    return Promise.all(attachments.map(async attachment => attachment.kind === 'image'
+      ? { type: 'image' as const, ...await this.encodeImage(attachment.file) }
+      : {
+        type: 'file' as const,
+        attachmentId: attachment.prepared.attachmentId,
+        name: attachment.prepared.name,
+        mediaType: attachment.prepared.mediaType,
+        bytes: attachment.prepared.bytes,
+        sha256: attachment.prepared.sha256,
+        parser: attachment.prepared.parser,
+        status: attachment.prepared.status,
+        textChars: attachment.prepared.textChars,
+        preview: attachment.prepared.preview,
+        ...(attachment.prepared.pageCount === undefined ? {} : { pageCount: attachment.prepared.pageCount }),
+        ...(attachment.prepared.sheetCount === undefined ? {} : { sheetCount: attachment.prepared.sheetCount }),
+        ...(attachment.prepared.warning === undefined ? {} : { warning: attachment.prepared.warning }),
+      })) as Promise<Parameters<SessionFace['prompt']>[0]>
   }
 
   /** Canonical base64 wire form of one browser image file. */

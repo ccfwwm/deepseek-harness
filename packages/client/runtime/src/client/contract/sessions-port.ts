@@ -24,7 +24,7 @@ export interface SessionsPortList {
   ids: SessionId[]
   byId: Record<SessionId, SessionsPortSummary>
   current: SessionId | undefined
-  phase: 'pending' | 'ready'
+  phase: 'pending' | 'cached' | 'ready'
 }
 
 /** The sessions-service face injected into sibling domains. */
@@ -36,7 +36,7 @@ export interface SessionsPort {
    * @param opts - target workspace.
    * @returns the new session id.
    */
-  create(opts: { workspaceId: WorkspaceId }): Promise<SessionId>
+  create(opts?: { workspaceId?: WorkspaceId; cwd?: string }): Promise<SessionId>
   /**
    * Select a session as current.
    * @param id - session id (must exist in the list store).

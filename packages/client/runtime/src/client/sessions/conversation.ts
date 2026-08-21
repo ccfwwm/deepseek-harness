@@ -324,6 +324,14 @@ export interface QueuedMessage {
   readonly text: string | null
 }
 
+export interface OutboundMessage {
+  readonly attemptId: string
+  readonly text: string
+  readonly attachments: readonly { readonly name: string; readonly mediaType: string; readonly size: number }[]
+  readonly status: 'sending' | 'accepted' | 'failed'
+  readonly error?: string
+}
+
 /** In-progress assistant output (chunk accumulator product). */
 export interface PartialAssistant {
   turn: number
@@ -448,7 +456,13 @@ export interface ConversationSnapshot {
   pending: readonly PendingInteraction[]
   /** Authoritative transient inbox snapshot, including queued and steering placements. */
   queue: readonly QueuedMessage[]
+  outbound?: readonly OutboundMessage[]
   running: boolean
+  /** Browser-side start of the currently active prompt generation. This is
+   * deliberately separate from the durable turn/start timestamp: after a
+   * stop and immediate resend, the old turn may remain open in the history
+   * window while the new prompt is already admitted. */
+  runningStartedAt?: number | null
   /**
    * Catalog-discovered continuation address. Its parent availability controls
    * human input; null means ordinary session transport.
