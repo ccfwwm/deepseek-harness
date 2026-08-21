@@ -217,7 +217,11 @@ export class ConversationController extends Service implements IConversation {
   }
 
   async createDraftFiles(files: readonly File[]): Promise<readonly ComposerAttachment[]> {
-    const remote = (this.ctx.get('remote') as unknown as { zerowallFiles?: FilesRemote } | undefined)?.zerowallFiles
+    // Gateway namespaces are their own `remote.<ns>` services, and this one is
+    // deliberately outside the plugin's inject list, so it must be read by
+    // service name: property access through `remote` throws "without inject"
+    // instead of answering `undefined` for an optional capability.
+    const remote = this.ctx.get('remote.zerowallFiles') as FilesRemote | undefined
     if (remote === undefined) throw new FileServiceUnavailableError()
     const prepared = await Promise.all(files.map(async (file): Promise<ComposerAttachment> => {
       const response = await remote.prepare({

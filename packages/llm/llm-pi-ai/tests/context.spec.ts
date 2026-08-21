@@ -43,6 +43,45 @@ describe('pi-ai request context conversion', () => {
     expect(toPiContext({ ...base, tools: [] })).toEqual({ messages: [] })
   })
 
+  it('states required on every object node of an outgoing tool schema', () => {
+    const parameters = {
+      type: 'object',
+      properties: {
+        filter: {
+          type: 'object',
+          properties: { name: { type: 'string' } },
+        },
+        rows: {
+          type: 'array',
+          items: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+        },
+      },
+    }
+    const context = toPiContext({
+      provider: 'openai',
+      model: 'gpt-4.1',
+      messages: [],
+      tools: [
+        { name: 'get_goal', description: 'read', parameters: { type: 'object', properties: {} } },
+        { name: 'search', description: 'search', parameters },
+      ],
+    })
+    expect(context.tools?.[0]?.parameters).toEqual({ type: 'object', properties: {}, required: [] })
+    expect(context.tools?.[1]?.parameters).toEqual({
+      type: 'object',
+      required: [],
+      properties: {
+        filter: { type: 'object', required: [], properties: { name: { type: 'string' } } },
+        rows: {
+          type: 'array',
+          items: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+        },
+      },
+    })
+    // The harness-owned schema is untouched; the statement lives on the copy.
+    expect(parameters).not.toHaveProperty('required')
+  })
+
   it('converts complete text-only history and rejects nested images without storage', () => {
     const callId = CallId('call-1')
     expect(toPiContext(request([

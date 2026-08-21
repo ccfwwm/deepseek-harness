@@ -10,7 +10,11 @@ import { makeTranslate, SlotTestRuntime } from '@deepseek-ai/dsh-client-test-run
 import type { QueuedMessage, SessionFace } from '@deepseek-ai/dsh-client-runtime/client'
 import { ComposerBlockRegistry } from '../src/client/input/blocks.ts'
 import { InputHub } from '../src/client/input/hub.ts'
-import { ConversationController, UnsupportedImageMediaTypeError } from '../src/client/service.ts'
+import {
+  ConversationController,
+  FileServiceUnavailableError,
+  UnsupportedImageMediaTypeError,
+} from '../src/client/service.ts'
 import { zh } from '../src/client/locales.ts'
 
 async function bench(readAttachment?: SessionFace['readAttachment']) {
@@ -112,6 +116,25 @@ describe('ConversationController', () => {
     ])).toThrow(UnsupportedImageMediaTypeError)
     expect(created).not.toHaveBeenCalled()
     created.mockRestore()
+    await b.runtime.dispose()
+  })
+
+  it('reads the optional file remote by service name, not as a remote property', async () => {
+    const b = await bench()
+    const file = new File([Uint8Array.of(1)], 'notes.txt', { type: 'text/plain' })
+    // Absent capability: the localized notice, never cordis' "without inject".
+    await expect(b.root.createDraftFiles([file])).rejects.toThrow(FileServiceUnavailableError)
+    const prepare = vi.fn(() => Promise.resolve({
+      ok: true as const,
+      value: {
+        attachmentId: 'att-1', name: 'notes.txt', mediaType: 'text/plain', bytes: 1,
+        sha256: 'a'.repeat(64), parser: 'text', status: 'parsed', textChars: 1, preview: 'x',
+      },
+    }))
+    b.runtime.ctx.reflect.provide('remote.zerowallFiles', { prepare })
+    const [attachment] = await b.root.createDraftFiles([file])
+    expect(prepare).toHaveBeenCalledOnce()
+    expect(attachment).toMatchObject({ kind: 'file', prepared: { attachmentId: 'att-1' } })
     await b.runtime.dispose()
   })
 

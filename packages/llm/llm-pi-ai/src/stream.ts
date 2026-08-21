@@ -15,6 +15,80 @@ import type { AssistantMessage, AssistantMessageEvent, Usage as PiUsage } from '
 import { toPiReplayState } from './replay.ts'
 
 /**
+ * Presentation-side delta smoothing.
+ *
+ * Several OpenAI-compatible gateways (DeepSeek's managed endpoint among them)
+ * buffer a whole paragraph — sometimes a whole reply — and emit it as a single
+ * SSE delta even though the request asked to stream. Every layer below is
+ * faithfully per-chunk, so a coarse producer surfaces as text appearing one
+ * block at a time. The wire content is left untouched here, but a delta larger
+ * than {@link SMOOTH_DELTA_CODE_POINTS} is handed on in paint-sized pieces so
+ * clients render progressively. Added latency per delta is capped by
+ * {@link SMOOTH_DELTA_MAX_DELAY_MS}, keeping this a fallback for coarse
+ * producers rather than a second stream protocol: a genuinely per-token stream
+ * never reaches the split path at all.
+ */
+const SMOOTH_DELTA_CODE_POINTS = 32
+const SMOOTH_DELTA_DELAY_MS = 10
+const SMOOTH_DELTA_MAX_DELAY_MS = 500
+
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException('The pi-ai stream was aborted', 'AbortError')
+}
+
+/**
+ * Pause between slices, rejecting as soon as the turn's signal aborts.
+ * @param signal - the turn's abort signal, when the caller has one.
+ * @param delayMs - pause length; a non-positive budget resolves immediately.
+ */
+async function pauseSlice(signal: AbortSignal | undefined, delayMs: number): Promise<void> {
+  if (signal?.aborted === true) throw abortReason(signal)
+  if (delayMs <= 0) return
+  let onAbort: (() => void) | undefined
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(resolve, delayMs)
+      if (signal === undefined) return
+      onAbort = (): void => {
+        clearTimeout(timer)
+        reject(abortReason(signal))
+      }
+      signal.addEventListener('abort', onAbort, { once: true })
+    })
+  } finally {
+    // Removed on the resolve path too: one long reply splits into hundreds of
+    // slices, and retained listeners would pile up on the turn's signal.
+    if (onAbort !== undefined) signal?.removeEventListener('abort', onAbort)
+  }
+}
+
+/** Split one oversized textual delta; every other chunk passes straight through. */
+async function* smoothDelta(
+  chunk: StreamChunk,
+  signal: AbortSignal | undefined,
+): AsyncGenerator<StreamChunk> {
+  if (chunk.type !== 'text-delta' && chunk.type !== 'reasoning-delta') {
+    yield chunk
+    return
+  }
+  // Code points, not UTF-16 units: cutting mid-surrogate would emit a lone
+  // half and corrupt emoji (and any astral text) on the way to the client.
+  const points = Array.from(chunk.text)
+  if (points.length <= SMOOTH_DELTA_CODE_POINTS) {
+    yield chunk
+    return
+  }
+  let spentMs = 0
+  for (let offset = 0; offset < points.length; offset += SMOOTH_DELTA_CODE_POINTS) {
+    yield { ...chunk, text: points.slice(offset, offset + SMOOTH_DELTA_CODE_POINTS).join('') }
+    if (offset + SMOOTH_DELTA_CODE_POINTS >= points.length) break
+    const delayMs = Math.min(SMOOTH_DELTA_DELAY_MS, SMOOTH_DELTA_MAX_DELAY_MS - spentMs)
+    if (delayMs > 0) spentMs += delayMs
+    await pauseSlice(signal, delayMs)
+  }
+}
+
+/**
  * Map pi-ai usage (reasoning folded into output by pi-ai).
  * @param usage - cumulative usage from the terminal pi-ai event.
  * @returns harness counts; cache fields appear only when non-zero (pi-ai reports zeros, not absence).
@@ -121,12 +195,14 @@ export function mapStopReason(message: AssistantMessage, contextWindow?: number)
  * `finish` chunks (the harness protocol's other error-delivery style).
  * @param events - one assistant turn's pi-ai event stream.
  * @param contextWindow - resolved catalog capacity for usage-based overflow detection.
+ * @param signal - the turn's abort signal; ends delta smoothing promptly when the turn is cancelled.
  * @returns the harness chunks, ending with `usage` then `finish`; throws
  *   `LlmError` (`STREAM_CLOSED`) if the source ends without a terminal event.
  */
 export async function* toStreamChunks(
   events: AsyncIterable<AssistantMessageEvent>,
   contextWindow?: number,
+  signal?: AbortSignal,
 ): AsyncGenerator<StreamChunk> {
   // pi-ai contentIndex ↔ our block index map 1:1 (both count blocks from 0
   // in stream order), but we track ids per index for tool calls.
@@ -140,7 +216,7 @@ export async function* toStreamChunks(
         yield { type: 'block-start', index: event.contentIndex, blockType: 'text' }
         break
       case 'text_delta':
-        yield { type: 'text-delta', index: event.contentIndex, text: event.delta }
+        yield* smoothDelta({ type: 'text-delta', index: event.contentIndex, text: event.delta }, signal)
         break
       case 'text_end':
         yield { type: 'block-end', index: event.contentIndex, block: { type: 'text', text: event.content } }
@@ -149,7 +225,7 @@ export async function* toStreamChunks(
         yield { type: 'block-start', index: event.contentIndex, blockType: 'reasoning' }
         break
       case 'thinking_delta':
-        yield { type: 'reasoning-delta', index: event.contentIndex, text: event.delta }
+        yield* smoothDelta({ type: 'reasoning-delta', index: event.contentIndex, text: event.delta }, signal)
         break
       case 'thinking_end':
         yield { type: 'block-end', index: event.contentIndex, block: { type: 'reasoning', text: event.content } }

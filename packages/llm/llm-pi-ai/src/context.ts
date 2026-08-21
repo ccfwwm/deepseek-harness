@@ -76,13 +76,50 @@ async function userContent(
   return content
 }
 
+function isSchemaRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * State `required` on every object node of one outgoing tool schema.
+ *
+ * Omitting the key on a schema with no required property is valid JSON Schema,
+ * and the harness compiler omits it. Several OpenAI-compatible gateways instead
+ * deserialize the missing key as `null` and then type-check it, answering
+ * `Invalid schema for function 'get_goal': null is not of type "array"` for a
+ * tool that legitimately takes no argument. An empty array says the same thing
+ * in a spelling every one of them accepts, so it is stated here — at the wire
+ * boundary, over a copy — rather than pushed back into the schema the harness
+ * validates and shows.
+ * @param parameters - compiled parameter schema of one tool.
+ * @returns an equivalent schema whose object nodes each state `required`.
+ */
+function withStatedRequired(parameters: Record<string, unknown>): Record<string, unknown> {
+  const root = structuredClone(parameters)
+  const pending: Record<string, unknown>[] = [root]
+  for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
+    const properties = node.properties
+    if (node.type === 'object' || isSchemaRecord(properties)) {
+      if (!Array.isArray(node.required)) node.required = []
+    }
+    if (isSchemaRecord(properties)) {
+      for (const property of Object.values(properties)) if (isSchemaRecord(property)) pending.push(property)
+    }
+    if (isSchemaRecord(node.items)) pending.push(node.items)
+    if (Array.isArray(node.oneOf)) {
+      for (const variant of node.oneOf) if (isSchemaRecord(variant)) pending.push(variant)
+    }
+  }
+  return root
+}
+
 function toolsOf(options: GenerateOptions): PiTool[] | undefined {
   return options.tools?.map(tool => ({
     name: tool.name,
     description: tool.description,
     // ToolSchema.parameters is a JSON Schema object; pi-ai's TSchema
     // (TypeBox) is structurally JSON Schema, so it assigns directly.
-    parameters: tool.parameters,
+    parameters: withStatedRequired(tool.parameters),
   }))
 }
 

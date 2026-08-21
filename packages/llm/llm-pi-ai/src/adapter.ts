@@ -352,7 +352,9 @@ export class PiAiAdapter extends LlmAdapter {
         // Harness-owned and therefore win collisions.
         headers: requestHeaders(profile.headers),
       })
-      const iterator = toStreamChunks(events, model.contextWindow)[Symbol.asyncIterator]()
+      // The watchdog signal also bounds delta smoothing: a cancelled turn must
+      // not keep paying out slices of an already-buffered gateway delta.
+      const iterator = toStreamChunks(events, model.contextWindow, watchdog.signal)[Symbol.asyncIterator]()
       let exhausted = false
       try {
         while (true) {

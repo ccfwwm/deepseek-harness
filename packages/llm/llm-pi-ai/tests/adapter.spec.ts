@@ -356,9 +356,13 @@ describe('PiAiAdapter provider routing', () => {
 })
 
 describe('provider profile lifecycle', () => {
-  it('keeps adapter helpers off the package root', () => {
+  it('keeps conversion internals off the package root', () => {
+    // `resolveProfiles` is deliberately public: the managed ai-cloud adapter
+    // builds its routes from the same profile resolution as configured
+    // providers, alongside the exported auth helpers. The conversion helpers
+    // below stay internal so the wire vocabulary has one owner.
+    expect(LlmPiAi).toHaveProperty('resolveProfiles')
     for (const helper of [
-      'resolveProfiles',
       'toPiContext',
       'toPiReplayState',
       'toPiAssistant',

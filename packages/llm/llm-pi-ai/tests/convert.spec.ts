@@ -57,8 +57,10 @@ describe('toPiContext', () => {
     })
     expect(context.systemPrompt).toBe('be helpful')
     expect(context.messages).toEqual([{ role: 'user', content: 'hi', timestamp: 0 }])
+    // `required: []` is stated at the wire boundary: gateways that read the
+    // omitted key as `null` reject an argument-less tool outright.
     expect(context.tools).toEqual([
-      { name: 'f', description: 'F', parameters: { type: 'object', properties: {} } },
+      { name: 'f', description: 'F', parameters: { type: 'object', properties: {}, required: [] } },
     ])
   })
 
@@ -861,6 +863,60 @@ describe('toStreamChunks edge branches', () => {
       { type: 'done', reason: 'stop', message: assistant() },
     )))
     expect(chunks[1]).toEqual({ type: 'tool-call-delta', index: 0, id: 'x', argumentsDelta: '{}' })
+  })
+})
+
+describe('toStreamChunks coarse-gateway delta smoothing', () => {
+  const paragraph = '一'.repeat(100)
+
+  it('splits an oversized text delta into paint-sized pieces without changing the content', async () => {
+    const chunks = await collect(toStreamChunks(feed(
+      { type: 'text_start', contentIndex: 0, partial: assistant() },
+      { type: 'text_delta', contentIndex: 0, delta: paragraph, partial: assistant() },
+      { type: 'text_end', contentIndex: 0, content: paragraph, partial: assistant() },
+      { type: 'done', reason: 'stop', message: assistant() },
+    )))
+    const deltas = chunks.filter(
+      (chunk): chunk is Extract<StreamChunk, { type: 'text-delta' }> => chunk.type === 'text-delta',
+    )
+    expect(deltas.length).toBe(4)
+    expect(deltas.every(delta => delta.index === 0)).toBe(true)
+    expect(deltas.map(delta => delta.text).join('')).toBe(paragraph)
+  })
+
+  it('smooths reasoning deltas and never splits a surrogate pair', async () => {
+    const emoji = '😀'.repeat(40)
+    const chunks = await collect(toStreamChunks(feed(
+      { type: 'thinking_delta', contentIndex: 0, delta: emoji, partial: assistant() },
+      { type: 'done', reason: 'stop', message: assistant() },
+    )))
+    const deltas = chunks.filter(
+      (chunk): chunk is Extract<StreamChunk, { type: 'reasoning-delta' }> => chunk.type === 'reasoning-delta',
+    )
+    expect(deltas.length).toBeGreaterThan(1)
+    expect(deltas.map(delta => delta.text).join('')).toBe(emoji)
+    // A mid-surrogate cut would leave a lone half in some slice.
+    for (const delta of deltas) expect(delta.text).toBe(Array.from(delta.text).join(''))
+  })
+
+  it('passes an already-fine-grained delta through untouched', async () => {
+    const chunks = await collect(toStreamChunks(feed(
+      { type: 'text_delta', contentIndex: 0, delta: 'hi', partial: assistant() },
+      { type: 'done', reason: 'stop', message: assistant() },
+    )))
+    expect(chunks[0]).toEqual({ type: 'text-delta', index: 0, text: 'hi' })
+  })
+
+  it('stops smoothing promptly when the turn is aborted mid-delta', async () => {
+    const controller = new AbortController()
+    const stream = toStreamChunks(feed(
+      { type: 'text_delta', contentIndex: 0, delta: paragraph, partial: assistant() },
+      { type: 'done', reason: 'stop', message: assistant() },
+    ), undefined, controller.signal)
+    const first = await stream.next()
+    expect(first.done).toBe(false)
+    controller.abort()
+    await expect(stream.next()).rejects.toThrow()
   })
 })
 
