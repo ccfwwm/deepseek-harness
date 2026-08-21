@@ -18,7 +18,7 @@ import type {
 } from './contract/slots.ts'
 import type { InputNotice } from './input/contract.ts'
 import { createChatStore } from './stores.ts'
-import { ConversationController, UnsupportedImageMediaTypeError } from './service.ts'
+import { ConversationController, FileServiceUnavailableError, UnsupportedImageMediaTypeError } from './service.ts'
 import type { IConversation } from './service.ts'
 import { ComposerBlockRegistry } from './input/blocks.ts'
 import type { ComposerBlock } from './input/blocks.ts'
@@ -341,6 +341,10 @@ export function apply(ctx: Context): void {
             }
             return null
           } catch (error: unknown) {
+            // The remote is optional per this plugin's inject list, so its
+            // absence is a composition fact rather than a drop failure: name
+            // it in the user's language instead of echoing the thrown text.
+            if (error instanceof FileServiceUnavailableError) return t('file.unavailable')
             return error instanceof Error ? error.message : String(error)
           }
         },

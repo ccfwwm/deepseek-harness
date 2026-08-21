@@ -83,6 +83,14 @@ interface ImageUrlEntry {
   readonly pending: Promise<string>
 }
 
+/** The file-parser remote is absent from this composition, localized by the UI boundary. */
+export class FileServiceUnavailableError extends Error {
+  constructor() {
+    super('the file parsing remote is not part of this composition')
+    this.name = 'FileServiceUnavailableError'
+  }
+}
+
 /** Unsupported browser-declared image type, localized by the UI boundary. */
 export class UnsupportedImageMediaTypeError extends Error {
   /** Browser-declared MIME value, possibly empty. */
@@ -210,7 +218,7 @@ export class ConversationController extends Service implements IConversation {
 
   async createDraftFiles(files: readonly File[]): Promise<readonly ComposerAttachment[]> {
     const remote = (this.ctx.get('remote') as unknown as { zerowallFiles?: FilesRemote } | undefined)?.zerowallFiles
-    if (remote === undefined) throw new Error('File service is unavailable in this application build.')
+    if (remote === undefined) throw new FileServiceUnavailableError()
     const prepared = await Promise.all(files.map(async (file): Promise<ComposerAttachment> => {
       const response = await remote.prepare({
         name: file.name || 'uploaded-file',
