@@ -69,9 +69,9 @@ import { discoverModels } from './discovery.ts'
 import { registerPiAiFlows } from './login.ts'
 
 export { PiAiAdapter } from './adapter.ts'
-export type { PiAiAdapterOptions } from './adapter.ts'
+export type { PiAiAdapterOptions, PiAiAuthInjection } from './adapter.ts'
 export { Config } from './config.ts'
-// Public rc8 export used by first-party adapters that construct managed routes.
+// Public export used by first-party adapters that construct managed routes.
 export { resolveProfiles } from './config.ts'
 export type {
   PiAiCompatProfile,
@@ -83,7 +83,7 @@ export type {
   PiAiThinkingFormat,
   ResolvedPiAiProviderProfile,
 } from './config.ts'
-export { recordKeyFor } from './auth.ts'
+export { authContextFrom, credentialStoreFrom, recordKeyFor } from './auth.ts'
 export { supportedProtocols } from './provider.ts'
 
 export const name = 'llm-pi-ai'
