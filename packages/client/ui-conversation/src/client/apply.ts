@@ -47,10 +47,17 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   }
 }
 
-/** Services required by the conversation plugin. */
+/**
+ * Services required by the conversation plugin.
+ *
+ * `remote.zerowallFiles` is deliberately absent: the file-parser remote is an
+ * optional capability resolved per drop in `createDraftFiles`, so a
+ * composition without it still mounts and the composer degrades to the
+ * `file.unavailable` notice instead of suspending the whole conversation.
+ */
 export const inject = [
   'slots', 'layout', 'sessions', 'workspaces', 'locale', 'connection', 'remote', 'settingsScope',
-  'remote.zerowallFiles', 'conversationEvents', 'conversationViews',
+  'conversationEvents', 'conversationViews',
 ]
 
 // Static no-session sources for the composer-bar hooks compartment: module

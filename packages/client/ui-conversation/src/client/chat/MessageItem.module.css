@@ -66,6 +66,10 @@
 .uploadedFilePreview summary { cursor: pointer; }
 
 .uploadedFilePreview pre {
+  /* Scrolls inside the user bubble, an elevated surface: rebind the thumb to
+     the l2 pair or the l1 thumb ships, which differs only in dark mode. */
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
   max-height: 220px;
   margin: 6px 0 0;
   overflow: auto;

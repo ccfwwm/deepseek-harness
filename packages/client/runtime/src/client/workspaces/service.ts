@@ -190,7 +190,12 @@ export class WorkspaceRuntime implements IWorkspaces {
       : workspace.items.find(item => item.sessionIds.includes(current))?.workspaceId
     const target = workspaceId ?? currentWorkspaceId ?? workspace.recentWorkspaceId
     if (target === undefined) {
-      // A workspace is optional. Keep first-run conversations usable.
+      // Drop the stale selection first, as upstream does, so the shell is
+      // inert rather than showing the old thread while the create is in
+      // flight. A workspace is optional, so unlike upstream we then
+      // materialize a workspace-less session: ConversationRoot auto-starts
+      // one on first run and leaving it unbuilt makes the composer inert.
+      this.sessions.clear()
       void this.sessions.create({}).then(
         sessionId => { this.sessions.open(sessionId) },
         reason => { console.warn('new session without workspace failed:', reason) },

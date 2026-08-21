@@ -149,12 +149,22 @@ export class ModelsSettingsStore {
       const [providersResponse, , catalogResponse] = await Promise.all([
         this.api.llm.providers({}),
         this.describeFace.ensure(),
-        this.api.llm.models({}).then(
-          response => response.result.ok
-            ? { groups: response.result.value.groups, failures: response.result.value.failures, error: null }
-            : { groups: [], failures: [], error: response.result.error.message },
-          error => ({ groups: [], failures: [], error: messageOf(error) }),
-        ),
+        // The catalog is enrichment, never a load precondition: a host whose
+        // llm face predates `models` must still produce provider rows, so an
+        // absent method degrades to "no catalog" like a rejected call does.
+        (async () => {
+          if (typeof this.api.llm.models !== 'function') {
+            return { groups: [], failures: [], error: null }
+          }
+          try {
+            const response = await this.api.llm.models({})
+            return response.result.ok
+              ? { groups: response.result.value.groups, failures: response.result.value.failures, error: null }
+              : { groups: [], failures: [], error: response.result.error.message }
+          } catch (error: unknown) {
+            return { groups: [], failures: [], error: messageOf(error) }
+          }
+        })(),
       ])
       if (!providersResponse.result.ok) throw new Error(providersResponse.result.error.message)
       const mirrored = this.describeFace.getSnapshot()
