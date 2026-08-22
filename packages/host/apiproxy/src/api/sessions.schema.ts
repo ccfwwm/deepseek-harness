@@ -297,7 +297,7 @@ export const promptContentPartSchema = z.discriminatedUnion('type', [
     bytes: z.number().int().nonnegative(),
     sha256: z.string().regex(/^[a-f0-9]{64}$/u),
     parser: z.string().min(1),
-    status: z.union([z.literal('parsed'), z.literal('needs_vision')]),
+    status: z.union([z.literal('parsed'), z.literal('needs_vision'), z.literal('stored')]),
     textChars: z.number().int().nonnegative(),
     preview: z.string(),
     pageCount: z.number().int().nonnegative().optional(),

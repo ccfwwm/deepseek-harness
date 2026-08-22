@@ -511,8 +511,9 @@ export function InputBar({
   // this composer.
   const intakeAttachments = useCallback((files: readonly File[]): void => {
     if (files.length === 0) return
-    const images = files.filter(file => file.type.startsWith('image/'))
-    const documents = files.filter(file => !file.type.startsWith('image/'))
+    const imageTypes = imageLimits?.mediaTypes ?? ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+    const images = files.filter(file => (imageTypes as readonly string[]).includes(file.type))
+    const documents = files.filter(file => !(imageTypes as readonly string[]).includes(file.type))
     if (documents.length > 0 && addFiles !== undefined) {
       setPreparingFiles(documents.map(file => file.name || t('file.pending')))
       void addFiles(documents).then((failure) => {
@@ -749,7 +750,9 @@ export function InputBar({
               <div key={attachment.id} className={css.fileChip} data-status={attachment.prepared.status}>
                 <IconPaperclipOutline16 size={14} />
                 <span>{attachment.file.name}</span>
-                <small>{attachment.prepared.status === 'needs_vision' ? t('file.needsVision') : t('file.parsed')}</small>
+                <small>{attachment.prepared.status === 'needs_vision'
+                  ? t('file.needsVision')
+                  : attachment.prepared.status === 'stored' ? t('file.stored') : t('file.parsed')}</small>
                 <button type="button" aria-label={attachment.file.name} onClick={() => { removeImage?.(attachment.id) }}>
                   <IconCloseOutline16 size={12} />
                 </button>
@@ -833,7 +836,6 @@ export function InputBar({
               className={css.hiddenFileInput}
               type="file"
               multiple
-              accept="image/png,image/jpeg,image/webp,image/gif,.pdf,.docx,.pptx,.xlsx,.txt,.md,.csv,.tsv,.json"
               onChange={(event) => {
                 intakeAttachments([...(event.currentTarget.files ?? [])])
                 event.currentTarget.value = ''

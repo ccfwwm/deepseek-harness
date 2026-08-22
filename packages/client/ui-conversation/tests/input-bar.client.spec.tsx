@@ -90,6 +90,7 @@ interface BenchOptions {
   rightItems?: React.ReactNode
   attachments?: readonly ComposerAttachment[]
   addImages?: (files: readonly File[]) => string | null
+  addFiles?: (files: readonly File[]) => Promise<string | null>
   commandMenuOpen?: boolean
   busyEnter?: 'queue' | 'steer'
   toggleCommandMenu?: (selection: { start: number; end: number }) => void
@@ -171,6 +172,7 @@ function bench(over?: BenchOptions) {
     inputActions: shell.actions,
     keyboard: shell,
     addImages: over?.addImages ?? (() => null),
+    ...(over?.addFiles === undefined ? {} : { addFiles: over.addFiles }),
     removeImage,
     draftImages: ids => ids.flatMap((id) => {
       const attachment = over?.attachments?.find(candidate => candidate.id === id)
@@ -234,6 +236,30 @@ function attachmentOwner(slotCalls: readonly { key: string; owner: unknown }[]):
 }
 
 describe('image draft rail', () => {
+  it('routes unsupported image MIME types and arbitrary extensions through the generic file service', async () => {
+    const addImages = vi.fn(() => null)
+    const addFiles = vi.fn(() => Promise.resolve(null))
+    const { textarea } = bench({ addImages, addFiles })
+    const svg = new File(['<svg/>'], 'diagram.svg', { type: 'image/svg+xml' })
+    const binary = new File([Uint8Array.of(0, 1)], 'sample.custom', { type: 'application/octet-stream' })
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        items: [
+          { kind: 'file', type: svg.type, getAsFile: () => svg },
+          { kind: 'file', type: binary.type, getAsFile: () => binary },
+        ],
+        getData: () => '',
+      },
+    })
+    await vi.waitFor(() => expect(addFiles).toHaveBeenCalledWith([svg, binary]))
+    expect(addImages).not.toHaveBeenCalled()
+  })
+
+  it('does not restrict the native file picker by extension', () => {
+    const { view } = bench({ addFiles: () => Promise.resolve(null) })
+    expect(view.container.querySelector<HTMLInputElement>('input[type="file"]')?.getAttribute('accept')).toBeNull()
+  })
+
   it('collects clipboard files while preserving text from a mixed paste', () => {
     const addImages = vi.fn(() => null)
     const { textarea, shell } = bench({ addImages })

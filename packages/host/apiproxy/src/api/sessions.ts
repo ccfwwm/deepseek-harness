@@ -99,7 +99,7 @@ export type PromptContentPart =
     bytes: number
     sha256: string
     parser: string
-    status: 'parsed' | 'needs_vision'
+    status: 'parsed' | 'needs_vision' | 'stored'
     textChars: number
     preview: string
     pageCount?: number

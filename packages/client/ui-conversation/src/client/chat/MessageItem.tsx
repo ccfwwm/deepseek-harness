@@ -296,7 +296,7 @@ function UserStyleBubble({
             byteLabel(file.bytes),
             file.pageCount === undefined ? undefined : `${file.pageCount} pages`,
             file.sheetCount === undefined ? undefined : `${file.sheetCount} sheets`,
-            file.status === 'needs_vision' ? 'needs vision' : 'parsed',
+            file.status === 'needs_vision' ? 'needs vision' : file.status === 'stored' ? 'stored for inspection' : 'parsed',
           ].filter((value): value is string => value !== undefined)
           return (
             <div className={css.uploadedFile} key={`${file.name}:${index}`} data-uploaded-file="">
