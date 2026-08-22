@@ -51,6 +51,8 @@
         maxInputBytes: 4096
         maxOutputTokens: 64
         timeoutMs: 60000
+        provider: deepseek-official
+        model: deepseek-v4-flash
 
     - id: user-questions
       name: '@deepseek-ai/dsh-user-questions'
