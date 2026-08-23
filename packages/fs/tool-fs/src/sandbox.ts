@@ -85,8 +85,11 @@ export class FsSandboxController {
    *   unsandboxed backend.
    */
   async resolvePolicy(toolName: string, args: FsEscalationArgs, exec: ToolExecution): Promise<SandboxExecutionPolicy | undefined> {
-    validateEscalationArgs(args.sandbox_permissions, args.justification)
     const standingPolicy = this.policy?.resolve({ ...exec.agent ? { session: exec.agent.session } : {} })
+    // Full access has no wider mode. Ignore stale escalation fields emitted by
+    // a model after the session has already switched to danger-full-access.
+    if (standingPolicy?.mode === 'danger-full-access') return standingPolicy
+    validateEscalationArgs(args.sandbox_permissions, args.justification)
     if (args.sandbox_permissions === undefined || args.justification === undefined) {
       return standingPolicy
     }

@@ -52,7 +52,7 @@ interface BashToolArgs {
   justification?: string
 }
 
-function validateBashArgs(args: BashToolArgs): void {
+function validateBashArgs(args: BashToolArgs, validateEscalation = true): void {
   if (args.command.trim().length === 0) {
     throw new Error('invalid command: expected a non-empty string')
   }
@@ -64,7 +64,7 @@ function validateBashArgs(args: BashToolArgs): void {
   }
   // The escalation pairing (sandbox_permissions ⇔ justification, non-empty) is
   // the shared rule both enforcing families validate identically.
-  validateEscalationArgs(args.sandbox_permissions, args.justification)
+  if (validateEscalation) validateEscalationArgs(args.sandbox_permissions, args.justification)
 }
 
 function bashDescription(backgroundEnabled: boolean, escalationModes: readonly SandboxMode[]): string {
@@ -328,10 +328,11 @@ export function apply(ctx: Context, config: Config = {}): void {
       }],
     },
     async execute(args: BashToolArgs, exec) {
-      validateBashArgs(args)
       // Description is display metadata; workdir defaults to the caller's session.
       const standingPolicy = resolveSandboxPolicy(exec)
-      const approvedMode = args.sandbox_permissions !== undefined && args.justification !== undefined
+      validateBashArgs(args, standingPolicy?.mode !== 'danger-full-access')
+      const approvedMode = standingPolicy?.mode !== 'danger-full-access'
+        && args.sandbox_permissions !== undefined && args.justification !== undefined
         ? await approveBashEscalation(args.sandbox_permissions, args.justification, exec, standingPolicy)
         : undefined
       const policy = approvedMode === undefined

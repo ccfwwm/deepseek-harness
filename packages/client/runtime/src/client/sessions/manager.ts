@@ -698,7 +698,9 @@ export class SessionManager {
    * @param envelope - the frame with its wire rpcId.
    */
   handleMuxEnvelope(envelope: RpcRequest<MuxFrame>): void {
-    const frame = envelope.payload
+    const frame = envelope.payload.type === 'question/requested'
+      ? normalizeQuestionFrame(envelope.payload)
+      : envelope.payload
     if (frame.type === 'stream/error') return // Controller already treats this as stream failure
     if (
       frame.type === 'session/event'
@@ -1091,6 +1093,40 @@ export class SessionManager {
       currentAddress: current === undefined ? undefined : this.addresses.get(current),
     }
   }
+}
+
+/**
+ * Normalize question frames at the transport boundary. Older desktop builds
+ * emitted `multi_select`, and a malformed optional field used to make the
+ * composer selector miss the request entirely, leaving only the generic tool
+ * history row. A valid carrier is always kept answerable so the UI can show
+ * its error/skip affordances instead of silently degrading to JSON.
+ */
+function normalizeQuestionFrame(frame: Extract<MuxFrame, { type: 'question/requested' }>): Extract<MuxFrame, { type: 'question/requested' }> {
+  const source = frame.questions as unknown as unknown[]
+  const questions = source.map((value, index) => {
+    const item = value !== null && typeof value === 'object' ? value as Record<string, unknown> : {}
+    const id = typeof item.id === 'string' && item.id.trim() !== '' ? item.id : `question-${String(index + 1)}`
+    const question = typeof item.question === 'string' && item.question.trim() !== '' ? item.question : 'The agent asked a question that needs your response.'
+    const options = Array.isArray(item.options)
+      ? item.options.flatMap(option => {
+        if (option === null || typeof option !== 'object') return []
+        const candidate = option as Record<string, unknown>
+        if (typeof candidate.label !== 'string' || candidate.label.trim() === '') return []
+        return [{ label: candidate.label, ...(typeof candidate.description === 'string' ? { description: candidate.description } : {}) }]
+      })
+      : undefined
+    return {
+      id,
+      question,
+      ...(typeof item.header === 'string' && item.header.trim() !== '' ? { header: item.header } : {}),
+      ...(typeof item.detail === 'string' ? { detail: item.detail } : {}),
+      ...(item.intent !== null && typeof item.intent === 'object' ? { intent: item.intent } : {}),
+      ...(item.multiSelect === true || item.multi_select === true ? { multiSelect: true } : {}),
+      ...(options === undefined ? {} : { options }),
+    }
+  })
+  return { ...frame, questions: questions as Extract<MuxFrame, { type: 'question/requested' }>['questions'] }
 }
 
 /**

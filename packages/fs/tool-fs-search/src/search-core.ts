@@ -20,7 +20,7 @@
  */
 
 import { existsSync } from 'node:fs'
-import { isAbsolute, relative, sep } from 'node:path'
+import { isAbsolute, join, relative, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import { ItemRetainer, TextRetainer } from '@deepseek-ai/dsh-output-retention'
@@ -172,6 +172,19 @@ export function resolveRgPath(): Promise<string> {
   rgPathPromise ??= Promise.resolve().then(async () => {
     const executableSidecar = `${process.execPath}-rg`
     if ('pkg' in process && existsSync(executableSidecar)) return executableSidecar
+    const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath
+    if (resourcesPath !== undefined) {
+      const unpacked = join(
+        resourcesPath,
+        'app.asar.unpacked',
+        'node_modules',
+        '@vscode',
+        `ripgrep-${process.platform}-${process.arch}`,
+        'bin',
+        process.platform === 'win32' ? 'rg.exe' : 'rg',
+      )
+      if (existsSync(unpacked)) return unpacked
+    }
     return (await import('@vscode/ripgrep')).rgPath
   })
   return rgPathPromise

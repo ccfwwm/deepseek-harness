@@ -57,6 +57,8 @@ export interface Config {
   agentsHome?: string
   /** Additional skill roots scanned after project roots and before user roots. */
   customSkillDirs?: string[]
+  /** Optional precedence for additional roots. Higher values win same-name skills. */
+  customSkillRank?: number
   /** Whether host-local skill roots are watched for catalog changes. */
   watch?: boolean
   /** Whether Chokidar uses polling instead of native filesystem events. */
@@ -79,6 +81,7 @@ export const Config: Schema<Config> = z.object({
   dshHome: z.string(),
   agentsHome: z.string(),
   customSkillDirs: z.array(z.string()).default([]),
+  customSkillRank: z.number().default(CUSTOM_RANK),
   watch: z.boolean().default(true),
   watchUsePolling: z.boolean().default(false),
   watchStabilityThresholdMs: z.number().default(DEFAULT_WATCH_STABILITY_THRESHOLD_MS),
@@ -149,6 +152,7 @@ export class FileSystemSkillProvider implements SkillProvider {
   private readonly dshHome: string
   private readonly agentsHome: string
   private readonly customSkillDirs: string[]
+  private readonly customSkillRank: number
   private readonly watchManager: SkillWatchManager
   private readonly bundledSkillDir: string | undefined
   private disposal: Promise<void> | undefined
@@ -163,6 +167,7 @@ export class FileSystemSkillProvider implements SkillProvider {
     this.dshHome = resolveDshHome(config.dshHome)
     this.agentsHome = resolve(config.agentsHome ?? process.env.DSH_AGENTS_HOME ?? join(homedir(), '.agents'))
     this.customSkillDirs = (config.customSkillDirs ?? []).map(root => resolve(root))
+    this.customSkillRank = config.customSkillRank ?? CUSTOM_RANK
     this.watchManager = new SkillWatchManager(ctx, control.invalidate, resolveWatchConfig(config))
     control.signal.addEventListener('abort', () => { void this.dispose() }, { once: true })
     // The environment bundled root is a default root: an isolated provider
@@ -247,7 +252,7 @@ export class FileSystemSkillProvider implements SkillProvider {
         { path: join(projectRoot, '.agents/skills'), source: 'project-agents', rank: PROJECT_AGENTS_RANK, projectRoot },
       )
     }
-    roots.push(...this.customSkillDirs.map(path => ({ path, source: 'custom' as const, rank: CUSTOM_RANK })))
+    roots.push(...this.customSkillDirs.map(path => ({ path, source: 'custom' as const, rank: this.customSkillRank })))
     if (this.includeDefaultRoots) {
       roots.push(
         { path: join(this.dshHome, 'skills'), source: 'user-dsh', rank: USER_DSH_RANK, skipSystem: true },

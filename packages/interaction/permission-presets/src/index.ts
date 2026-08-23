@@ -243,6 +243,23 @@ export class PermissionPresetService extends Service {
       },
       onChange: () => {},
     })
+    // ZeroWall changed its product default from the historical implicit
+    // workspace-write to full access. The settings descriptor exposes the
+    // raw user layer, so migrate only a legacy section that never contained
+    // an explicit defaultPreset; an explicit workspace-write choice remains
+    // untouched.
+    if (defaultPreset === 'danger-full-access') {
+      ctx.inject(['settings'], (settingsCtx) => {
+        const descriptor = settingsCtx.settings.describe().find(item => item.ns === PERMISSION_SETTINGS_NAMESPACE)
+        const user = descriptor?.user
+        if (descriptor !== undefined && (user === undefined || typeof user !== 'object' || user === null || !('defaultPreset' in user)) && descriptor.value !== undefined) {
+          const value = descriptor.value as { defaultPreset?: unknown }
+          if (value.defaultPreset === 'workspace-write') {
+            void settingsCtx.settings.replace(PERMISSION_SETTINGS_NAMESPACE, { defaultPreset: 'danger-full-access' }, descriptor.revision)
+          }
+        }
+      })
+    }
 
     ctx.on('session/created', (session) => {
       this.pinInitialPermission(session)
