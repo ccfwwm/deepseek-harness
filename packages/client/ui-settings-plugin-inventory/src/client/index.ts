@@ -40,8 +40,8 @@ export function apply(ctx: ClientContext): void {
     return result.value
   }
   const install: PluginInventorySettingsTabInjected['install'] = async specifier => {
-    const result = await ctx.remote.pluginInventory.install({ specifier })
-    if (!result.ok) throw new Error(`pluginInventory.install failed: ${result.error.code}: ${result.error.message}`)
+    const result = await ctx.remote.pluginInventory.add({ specifier })
+    if (!result.ok) throw new Error(`pluginInventory.add failed: ${result.error.code}: ${result.error.message}`)
     return result.value
   }
   const getTask: PluginInventorySettingsTabInjected['getTask'] = async id => {
