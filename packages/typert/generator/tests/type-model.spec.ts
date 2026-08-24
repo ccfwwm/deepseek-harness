@@ -869,6 +869,26 @@ describe('WorkspaceAnalyzer', { timeout: 60_000 }, () => {
       .toEqual(['@fixture/host'])
   })
 
+  it('discovers extension packages from a workspace plugins root', () => {
+    const root = copyFixture('typert-plugin-registration-')
+    const pluginRoot = join(root, 'plugins/host-extension')
+    cpSync(join(root, 'packages/host'), pluginRoot, { recursive: true })
+    const manifestPath = join(pluginRoot, 'package.json')
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>
+    manifest.name = '@fixture/host-extension'
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
+    const aggregatePath = join(root, 'tsconfig.host.json')
+    const aggregate = JSON.parse(readFileSync(aggregatePath, 'utf8')) as { references: { path: string }[] }
+    aggregate.references.push({ path: './plugins/host-extension' })
+    writeFileSync(aggregatePath, `${JSON.stringify(aggregate, null, 2)}\n`)
+
+    expect(new WorkspaceAnalyzer({ root }).discoverPackages()).toContainEqual({
+      package: '@fixture/host-extension',
+      root: 'plugins/host-extension',
+      faces: ['host'],
+    })
+  })
+
   it('keeps both runtime faces for an ordinary dsh.client project', () => {
     const root = copyFixture('typert-dual-runtime-')
     configureDualRuntimeClient(root, false)
