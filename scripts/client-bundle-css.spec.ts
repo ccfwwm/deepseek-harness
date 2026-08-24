@@ -41,7 +41,7 @@ describe('client bundle CSS Modules', () => {
       }
       const watched: string[] = []
 
-      const output = await plugin.load.call({ addWatchFile: id => watched.push(id) }, virtualId)
+      const output = await plugin.load.call({ addWatchFile: id => watched.push(id) }, `${virtualId}?in`)
 
       expect(watched).toEqual([stylesheet])
       expect(output).toContain('data-plugin-css')
@@ -89,6 +89,32 @@ describe('client bundle global CSS', () => {
       const watched: string[] = []
 
       const output = await plugin.load.call({ addWatchFile: id => watched.push(id) }, virtualId)
+
+      expect(watched).toEqual([stylesheet])
+      expect(output).toContain('export default "body{color:red}"')
+      expect(output).not.toContain('data-plugin-css')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('preserves inline semantics when Rolldown appends the query to a global virtual id', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-client-global-inline-css-watch-'))
+    try {
+      const stylesheet = join(root, 'base.css')
+      const importer = join(root, 'index.ts')
+      await writeFile(stylesheet, 'body { color: red; }\n')
+      const plugin = cssPlugin('dsh-css-global-inline')
+      const virtualId = plugin.resolveId?.('./base.css', importer)
+      if (typeof virtualId !== 'string' || plugin.load === undefined) {
+        throw new Error('global CSS plugin hooks are incomplete')
+      }
+      const watched: string[] = []
+
+      const output = await plugin.load.call(
+        { addWatchFile: id => watched.push(id) },
+        `${virtualId}?inline`,
+      )
 
       expect(watched).toEqual([stylesheet])
       expect(output).toContain('export default "body{color:red}"')
