@@ -41,7 +41,7 @@ describe('PluginInventoryGateway', () => {
       { method: 'list', invocation: { kind: 'direct' } },
       { method: 'setEnabled', invocation: { kind: 'direct' } },
       { method: 'listTasks', invocation: { kind: 'direct' } },
-      { method: 'install', invocation: { kind: 'direct' } },
+      { method: 'add', invocation: { kind: 'direct' } },
       { method: 'getTask', invocation: { kind: 'direct' } },
     ])
   })
