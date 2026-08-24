@@ -137,6 +137,8 @@ export interface ModelCatalogModel {
   status?: ModelAvailability
   /** Safe, short diagnostic for an unavailable route. */
   statusMessage?: string
+  /** Protocol that completed the most recent successful probe. */
+  probeProtocol?: string
   /** Epoch milliseconds of the last completed probe. */
   lastCheckedAt?: number
 }

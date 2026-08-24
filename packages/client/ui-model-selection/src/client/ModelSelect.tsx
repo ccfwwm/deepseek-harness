@@ -113,6 +113,13 @@ export function ModelSelect(
     }
   }
 
+  const protocolLabel = (protocol: string | undefined): string => {
+    if (protocol === 'openai-completions') return 'OpenAI Chat'
+    if (protocol === 'openai-responses') return 'OpenAI Responses'
+    if (protocol === 'anthropic-messages') return 'Claude Messages'
+    return protocol ?? ''
+  }
+
   const reload = (): void => {
     lastActionRef.current = 'load'
     load()
@@ -319,7 +326,7 @@ export function ModelSelect(
                             aria-label={model.name}
                             className={clsx(css.option, selected && css.selected, model.status === 'unavailable' && css.unavailable)}
                             key={model.id}
-                            title={model.name}
+                            title={model.statusMessage === undefined ? model.name : `${model.name}\n${model.statusMessage}`}
                             disabled={busy || model.status === 'unavailable' || model.status === 'requires-login'}
                             onClick={() => { choose({ provider: group.id, model: model.id }) }}
                           >
@@ -329,7 +336,7 @@ export function ModelSelect(
                                 <span className={css.description}>{model.description}</span>
                               )}
                               <span className={css.modelStatus} data-status={model.status ?? 'unknown'}>
-                                {statusLabel(model.status)}
+                                {statusLabel(model.status)}{model.probeProtocol === undefined ? '' : ` · ${protocolLabel(model.probeProtocol)}`}
                               </span>
                             </span>
                             <span className={css.check}>

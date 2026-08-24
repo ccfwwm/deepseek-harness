@@ -177,6 +177,7 @@ export const modelCatalogModelSchema = z.object({
   reasoning: modelReasoningSchema.optional(),
   status: modelAvailabilitySchema.optional(),
   statusMessage: z.string().optional(),
+  probeProtocol: z.string().min(1).optional(),
   lastCheckedAt: z.number().int().nonnegative().optional(),
 }) satisfies z.ZodType<Wire<ModelCatalogModel>>
 

@@ -15,6 +15,7 @@ import type {} from '@deepseek-ai/dsh-agent-presets/types'
 import { AttachmentError, admitEncodedImages } from '@deepseek-ai/dsh-attachment'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { createUserMessage, freezeMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import type { LlmProbeAttempt } from '@deepseek-ai/dsh-llm'
 import { errorChain } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, MessageSource } from '@deepseek-ai/dsh-llm'
 import { isAppendSurfaceEvent, isJsonValue } from '@deepseek-ai/dsh-session'
@@ -337,7 +338,7 @@ async function buildModelCatalog(ctx: Context, options: { check?: boolean; signa
 /** Probe model routes without exposing credentials or consuming a conversation turn. */
 async function probeModelCatalog(ctx: Context, groups: ModelProviderGroup[], requestSignal?: AbortSignal): Promise<ModelProviderGroup[]> {
   const entries = groups.flatMap(group => group.models.map(model => ({ group, model })))
-  const results = new Map<string, { status: ModelAvailability; statusMessage?: string; lastCheckedAt: number }>()
+  const results = new Map<string, { status: ModelAvailability; statusMessage?: string; probeProtocol?: string; lastCheckedAt: number }>()
   let cursor = 0
   const worker = async (): Promise<void> => {
     while (true) {
@@ -347,34 +348,22 @@ async function probeModelCatalog(ctx: Context, groups: ModelProviderGroup[], req
       if (entry === undefined) return
       const checkedAt = Date.now()
       const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), 4_000)
+      const timeout = setTimeout(() => controller.abort(), 16_000)
       const abort = (): void => controller.abort()
       requestSignal?.addEventListener('abort', abort, { once: true })
       try {
-        const prepared = await ctx.llm.prepareCall({
-          provider: entry.group.id,
-          model: entry.model.id,
-          maxTokens: 1,
-        }, controller.signal)
-        let finished = false
-        for await (const chunk of prepared.stream({
-          ...prepared.config,
-          messages: [createUserMessage({
-            content: [{ type: 'text', text: 'Reply with OK.' }],
-            source: { kind: 'user' },
-          })],
-          signal: controller.signal,
-        })) {
-          if (chunk.type === 'finish') {
-            finished = true
-            if (chunk.reason.kind === 'error' || chunk.reason.kind === 'aborted') {
-              throw new Error(chunk.reason.kind)
-            }
-            break
-          }
+        const attempts = await ctx.llm.probeModel(entry.group.id, entry.model.id, controller.signal)
+        const successful = attempts.find(attempt => attempt.ok)
+        if (successful !== undefined) {
+          results.set(`${entry.group.id}\0${entry.model.id}`, {
+            status: 'available',
+            probeProtocol: successful.protocol,
+            statusMessage: `通过协议：${protocolLabel(successful.protocol)}`,
+            lastCheckedAt: checkedAt,
+          })
+        } else {
+          throw new Error(formatProbeAttempts(attempts))
         }
-        if (!finished) throw new Error('model did not finish')
-        results.set(`${entry.group.id}\0${entry.model.id}`, { status: 'available', lastCheckedAt: checkedAt })
       } catch (error: unknown) {
         const message = safeModelProbeMessage(error)
         const lower = message.toLowerCase()
@@ -392,10 +381,9 @@ async function probeModelCatalog(ctx: Context, groups: ModelProviderGroup[], req
       }
     }
   }
-  // Keep the whole catalog below the 30-second unary transport deadline while
-  // limiting pressure on any one provider. A slow model becomes unavailable;
-  // it no longer holds the rest of the catalog hostage.
-  await Promise.all(Array.from({ length: Math.min(8, entries.length) }, () => worker()))
+  // Probe several models concurrently, while each model owns its protocol
+  // attempts and timeout. One slow route never cancels the other routes.
+  await Promise.all(Array.from({ length: Math.min(6, entries.length) }, () => worker()))
   return groups.map(group => ({
     ...group,
     models: group.models.map(model => {
@@ -403,6 +391,20 @@ async function probeModelCatalog(ctx: Context, groups: ModelProviderGroup[], req
       return result === undefined ? { ...model, status: 'unknown' as const } : { ...model, ...result }
     }),
   }))
+}
+
+function protocolLabel(protocol: string): string {
+  if (protocol === 'openai-completions') return 'OpenAI Chat Completions'
+  if (protocol === 'openai-responses') return 'OpenAI Responses'
+  if (protocol === 'anthropic-messages') return 'Claude Messages'
+  return protocol
+}
+
+function formatProbeAttempts(attempts: readonly LlmProbeAttempt[]): string {
+  if (attempts.length === 0) return '没有完成任何协议探测'
+  return attempts
+    .map(attempt => `${protocolLabel(attempt.protocol)}：${safeModelProbeMessage(attempt.message ?? '未通过')}`)
+    .join('；')
 }
 
 /** Keep probe diagnostics useful while preventing headers, tokens, and bodies from crossing the wire. */

@@ -168,6 +168,13 @@ function availabilityLabel(status: ModelAvailability | undefined, t: ModelsSecti
   }
 }
 
+function protocolLabel(protocol: string | undefined): string {
+  if (protocol === 'openai-completions') return 'OpenAI Chat'
+  if (protocol === 'openai-responses') return 'OpenAI Responses'
+  if (protocol === 'anthropic-messages') return 'Claude Messages'
+  return protocol ?? ''
+}
+
 /** Stable visible and accessible identity for one provider target. */
 export function providerTargetLabel(target: ProviderIdentity): string {
   return target.provider === target.displayName
@@ -320,9 +327,9 @@ function Loaded({ injected }: { injected: ModelsSectionFace }): ReactNode {
               <div className={styles['runtimeGroupTitle']}>{group.name}</div>
               <ul className={styles['runtimeModels']}>
                 {group.models.map(model => (
-                  <li className={styles['runtimeModel']} data-status={model.status ?? 'unknown'} key={`${group.id}:${model.id}`}>
+                  <li className={styles['runtimeModel']} data-status={model.status ?? 'unknown'} key={`${group.id}:${model.id}`} title={model.statusMessage}>
                     <span className={styles['runtimeModelName']} title={model.id}>{model.name}</span>
-                    <span className={styles['runtimeModelStatus']}>{availabilityLabel(model.status, t)}</span>
+                    <span className={styles['runtimeModelStatus']}>{availabilityLabel(model.status, t)}{model.probeProtocol === undefined ? '' : ` · ${protocolLabel(model.probeProtocol)}`}</span>
                   </li>
                 ))}
               </ul>
