@@ -299,6 +299,32 @@ describe('Web session model selection', () => {
     expect(readImage).toHaveBeenCalledOnce()
     await ctx.fiber.dispose()
   })
+
+  it('authorizes generated-image attachments referenced by tool result metadata', async () => {
+    const { ctx, agent, sessionId } = await harness()
+    const ref = {
+      attachmentId: 'att-generated', mediaType: 'image/png' as const, bytes: 2, width: 1, height: 1,
+    }
+    const readImage = vi.fn(() => Promise.resolve({ ref, data: Uint8Array.of(1, 2) }))
+    ctx.provide('attachments', { readImage } as never)
+    const api = createApiProxy(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+      cwd: '/tmp',
+    })
+    agent.session.append('tool/result', {
+      message: {
+        content: [{ type: 'text', text: 'Generated /tmp/cat.png with gpt-image-2.' }],
+      },
+      meta: { path: '/tmp/cat.png', model: 'gpt-image-2', image: ref },
+    } as never, { surfaceOp: 'append' })
+
+    const allowed = await api.sessions.attachment(request({
+      sessionId, attachmentId: 'att-generated' as never,
+    }))
+    expect(allowed.result).toMatchObject({ ok: true, value: { attachment: ref, data: 'AQI=' } })
+    expect(readImage).toHaveBeenCalledOnce()
+    await ctx.fiber.dispose()
+  })
   it('groups successful providers and leaves an unlisted current selection out of the catalog', async () => {
     const { ctx, sessionId } = await harness({
       provider: 'deepseek-official',
