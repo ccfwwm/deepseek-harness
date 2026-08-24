@@ -156,16 +156,30 @@ function imageBlockIn(content: unknown, match: (ref: ImageAttachmentRef) => bool
   return undefined
 }
 
+/** Tool presentation metadata may carry a generated image without embedding it
+ * in the model-visible result content. Keep that durable reference authorized
+ * for the session attachment route as well. */
+function imageMetaIn(meta: unknown, match: (ref: ImageAttachmentRef) => boolean): ImageAttachmentRef | undefined {
+  if (typeof meta !== 'object' || meta === null || Array.isArray(meta)) return undefined
+  const image = (meta as { image?: unknown }).image
+  if (typeof image !== 'object' || image === null || Array.isArray(image)) return undefined
+  const ref = image as ImageAttachmentRef
+  return typeof ref.attachmentId === 'string' && match(ref) ? ref : undefined
+}
+
 /** Search every durable event carrier that can own model-visible content. */
 function imageInEvent(event: SessionEvent, match: (ref: ImageAttachmentRef) => boolean): ImageAttachmentRef | undefined {
   const data = event.data as {
     content?: unknown
     message?: { content?: unknown }
+    meta?: unknown
     inserted?: Array<{ content?: unknown }>
     chunk?: { type?: unknown; block?: unknown }
   }
   const direct = imageBlockIn(data.content, match)
   if (direct !== undefined) return direct
+  const meta = imageMetaIn(data.meta, match)
+  if (meta !== undefined) return meta
   if (data.message !== undefined) {
     const wrapped = imageBlockIn(data.message.content, match)
     if (wrapped !== undefined) return wrapped
