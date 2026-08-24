@@ -39,6 +39,10 @@ describe('PluginInventoryGateway', () => {
     })
     expect(remoteMethods(inventory)).toEqual([
       { method: 'list', invocation: { kind: 'direct' } },
+      { method: 'setEnabled', invocation: { kind: 'direct' } },
+      { method: 'listTasks', invocation: { kind: 'direct' } },
+      { method: 'install', invocation: { kind: 'direct' } },
+      { method: 'getTask', invocation: { kind: 'direct' } },
     ])
   })
 
@@ -59,18 +63,21 @@ describe('PluginInventoryGateway', () => {
         entryId: activeId,
         moduleName: 'cordis:active',
         enabled: true,
+        canDisable: true,
         fiberPhase: 'active',
       },
       {
         entryId: pendingId,
         moduleName: 'cordis:pending',
         enabled: true,
+        canDisable: true,
         fiberPhase: 'pending',
       },
       {
         entryId: disabledId,
         moduleName: 'cordis:not-installed',
         enabled: false,
+        canDisable: true,
         fiberPhase: null,
       },
     ]))
@@ -80,6 +87,7 @@ describe('PluginInventoryGateway', () => {
       entryId: activeId,
       moduleName: 'cordis:active',
       enabled: false,
+      canDisable: true,
       fiberPhase: null,
     })
 
