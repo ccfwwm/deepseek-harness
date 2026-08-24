@@ -104,8 +104,8 @@ export class PluginInventoryGateway extends TypertRemoteService {
   @Remote('listTasks')
   listTasks(): readonly PluginInstallTask[] { return [...this.tasks.values()] }
 
-  @Remote('install')
-  install(request: PluginInstallRequest): PluginInstallTask {
+  @Remote('add')
+  add(request: PluginInstallRequest): PluginInstallTask {
     const specifier = request.specifier.trim()
     if (specifier.length === 0 || /[\r\n\0]/u.test(specifier)) throw new Error('Plugin specifier is invalid.')
     const id = `plugin-install-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
