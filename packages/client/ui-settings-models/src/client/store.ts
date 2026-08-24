@@ -7,7 +7,7 @@
  */
 
 import type {
-  ConfigurableProviderView, CredentialView, IApiClient, SettingsNamespaceView,
+  ConfigurableProviderView, CredentialView, IApiClient, ModelCatalogFailure, ModelProviderGroup, SettingsNamespaceView,
 } from '@deepseek-ai/dsh-api-remotes/client'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
@@ -47,6 +47,12 @@ export interface ModelsSettingsState {
   rows: readonly ProviderRow[]
   /** Namespace views by ns, for the editor's schema/layers/secrets. */
   namespaces: ReadonlyMap<string, SettingsNamespaceView>
+  /** Runtime model catalog shared with the conversation selector. */
+  catalogGroups: readonly ModelProviderGroup[]
+  catalogFailures: readonly ModelCatalogFailure[]
+  catalogStatus: 'idle' | 'loading' | 'checking' | 'ready' | 'error'
+  catalogError: string | null
+  catalogUpdatedAt: number | null
 }
 
 /**
@@ -109,6 +115,7 @@ export class ModelsSettingsStore {
   /** The snapshot the section renders from (uSES-safe store). */
   readonly store: SnapshotStore<ModelsSettingsState> = createSnapshotStore<ModelsSettingsState>({
     status: 'idle', error: null, credentialError: null, writable: false, rows: [], namespaces: new Map(),
+    catalogGroups: [], catalogFailures: [], catalogStatus: 'idle', catalogError: null, catalogUpdatedAt: null,
   })
 
   /** Latest load wins; an older response never overwrites a newer one. */
@@ -123,6 +130,33 @@ export class ModelsSettingsStore {
     private readonly schema: SettingsSchemaOperations,
     private readonly describeFace: SettingsDescribeFace,
   ) {}
+
+  /** Refresh or probe the host-owned model catalog without disturbing provider editors. */
+  async syncModels(check = false): Promise<void> {
+    const models = this.api.llm.models
+    if (typeof models !== 'function') return
+    this.store.update((s) => {
+      s.catalogStatus = check ? 'checking' : 'loading'
+      s.catalogError = null
+    })
+    try {
+      const response = await models({ ...check ? { check: true } : {} })
+      if (!response.result.ok) throw new Error(response.result.error.message)
+      const catalog = response.result.value
+      this.store.update((s) => {
+        s.catalogGroups = catalog.groups
+        s.catalogFailures = catalog.failures
+        s.catalogStatus = 'ready'
+        s.catalogError = null
+        s.catalogUpdatedAt = Date.now()
+      })
+    } catch (error) {
+      this.store.update((s) => {
+        s.catalogStatus = 'error'
+        s.catalogError = messageOf(error)
+      })
+    }
+  }
 
   /**
    * Refresh the whole page snapshot: the provider directory and the mirror's
@@ -205,6 +239,7 @@ export class ModelsSettingsStore {
       }))
       s.namespaces = namespaces
     })
+    void this.syncModels(false)
   }
 }
 

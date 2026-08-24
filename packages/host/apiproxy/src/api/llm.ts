@@ -46,7 +46,7 @@ export interface LlmApi {
    * settings surface's models view, needing no session. Per-provider listing
    * failures ride `failures` without failing the sound groups.
    */
-  models(request: RpcRequest<{}>): Promise<RpcResponse<{ groups: ModelProviderGroup[]; failures: ModelCatalogFailure[] }>>
+  models(request: RpcRequest<{ check?: boolean }>): Promise<RpcResponse<{ groups: ModelProviderGroup[]; failures: ModelCatalogFailure[] }>>
 
   /**
    * Interrogate a provider endpoint the configuration surface is still

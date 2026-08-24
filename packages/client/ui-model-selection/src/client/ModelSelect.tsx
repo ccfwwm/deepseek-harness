@@ -16,7 +16,7 @@ import {
   type KeyboardEvent, type FocusEvent,
 } from 'react'
 import clsx from 'clsx'
-import type { ModelReasoningEffort, ModelSelection } from '@deepseek-ai/dsh-api-remotes/client'
+import type { ModelAvailability, ModelReasoningEffort, ModelSelection } from '@deepseek-ai/dsh-api-remotes/client'
 import {
   IconCheckOutline16, IconChevronDownOutline14, IconChevronRightOutline14,
   IconWarningOutline16, Toast,
@@ -101,6 +101,17 @@ export function ModelSelect(
       })),
     ], [reasoning, t])
   const busy = state.status === 'selecting'
+  const refreshing = state.status === 'loading' || state.status === 'checking'
+
+  const statusLabel = (status: ModelAvailability | undefined): string => {
+    switch (status) {
+      case 'available': return t('status.available')
+      case 'unavailable': return t('status.unavailable')
+      case 'requires-login': return t('status.requiresLogin')
+      case 'checking': return t('status.checking')
+      default: return t('status.unknown')
+    }
+  }
 
   const reload = (): void => {
     lastActionRef.current = 'load'
@@ -247,7 +258,7 @@ export function ModelSelect(
           className={css.menu}
           role="menu"
           aria-label={t('menu.aria')}
-          aria-busy={state.status === 'loading' || busy}
+          aria-busy={refreshing || busy}
         >
           {pane === 'root' && (
             <>
@@ -268,9 +279,17 @@ export function ModelSelect(
 
           {pane === 'model' && (
             <>
-              {state.status === 'loading' && (
-                <div className={css.status}>{t('status.loading')}</div>
+              {refreshing && (
+                <div className={css.status}>{state.status === 'checking' ? t('status.checking') : t('status.loading')}</div>
               )}
+              <div className={css.actions}>
+                <button type="button" className={css.actionButton} disabled={refreshing || busy} onClick={() => { load(false) }}>
+                  {t('action.sync')}
+                </button>
+                <button type="button" className={css.actionButton} disabled={refreshing || busy} onClick={() => { load(true) }}>
+                  {t('action.checkAll')}
+                </button>
+              </div>
               {state.error !== null && lastActionRef.current === 'load' && (
                 <div className={css.error}>
                   <span>{t('error.action', { message: state.error })}</span>
@@ -297,10 +316,11 @@ export function ModelSelect(
                             type="button"
                             role="menuitemradio"
                             aria-checked={selected}
-                            className={clsx(css.option, selected && css.selected)}
+                            aria-label={model.name}
+                            className={clsx(css.option, selected && css.selected, model.status === 'unavailable' && css.unavailable)}
                             key={model.id}
                             title={model.name}
-                            disabled={busy}
+                            disabled={busy || model.status === 'unavailable' || model.status === 'requires-login'}
                             onClick={() => { choose({ provider: group.id, model: model.id }) }}
                           >
                             <span className={css.optionCopy}>
@@ -308,6 +328,9 @@ export function ModelSelect(
                               {model.description !== undefined && (
                                 <span className={css.description}>{model.description}</span>
                               )}
+                              <span className={css.modelStatus} data-status={model.status ?? 'unknown'}>
+                                {statusLabel(model.status)}
+                              </span>
                             </span>
                             <span className={css.check}>
                               {selected ? <IconCheckOutline16 /> : null}

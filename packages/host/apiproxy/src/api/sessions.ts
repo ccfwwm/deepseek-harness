@@ -120,6 +120,9 @@ export interface ModelReasoning {
   defaultEffort?: string
 }
 
+/** Runtime availability reported by the host's optional model probe. */
+export type ModelAvailability = 'unknown' | 'checking' | 'available' | 'unavailable' | 'requires-login'
+
 /** One model displayed inside its provider group. */
 export interface ModelCatalogModel {
   /** Provider-owned model id. */
@@ -130,6 +133,12 @@ export interface ModelCatalogModel {
   description?: string
   /** Exact-route reasoning metadata when the adapter exposes it. */
   reasoning?: ModelReasoning
+  /** Last probe state; omitted by older hosts and treated as unknown. */
+  status?: ModelAvailability
+  /** Safe, short diagnostic for an unavailable route. */
+  statusMessage?: string
+  /** Epoch milliseconds of the last completed probe. */
+  lastCheckedAt?: number
 }
 
 /** One provider and the models it advertised successfully. */
@@ -290,7 +299,7 @@ export interface SessionsApi {
    * Reads a fresh advisory model directory for an ordinary session. Provider
    * lookups run independently; subagents reject with `agent-busy`.
    */
-  models(request: RpcRequest<{ sessionId: SessionId }>): Promise<RpcResponse<SessionModels>>
+  models(request: RpcRequest<{ sessionId: SessionId; check?: boolean }>): Promise<RpcResponse<SessionModels>>
 
   /**
    * Selects the complete model selection for this session. Exact model metadata

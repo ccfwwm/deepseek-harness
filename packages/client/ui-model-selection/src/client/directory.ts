@@ -28,7 +28,7 @@ export interface ModelDirectoryState {
   /** Provider-local failures from the last load; usable groups stay usable. */
   failures: readonly ModelCatalogFailure[]
   /** Lifecycle of the in-flight operation. */
-  status: 'idle' | 'loading' | 'ready' | 'selecting' | 'error'
+  status: 'idle' | 'loading' | 'checking' | 'ready' | 'selecting' | 'error'
   /** Whole-request or selection failure text; null when none. */
   error: string | null
 }
@@ -60,11 +60,11 @@ export class ModelDirectory {
    * Failure preserves the last good groups and current selection.
    * @returns the fresh directory value.
    */
-  async load(): Promise<SessionModels> {
+  async load(check = false): Promise<SessionModels> {
     this.assertAvailable()
     const generation = ++this.generation
-    this.store.update((s) => { s.status = 'loading'; s.error = null })
-    const { result } = await this.sessions.models({ sessionId: this.sessionId })
+    this.store.update((s) => { s.status = check ? 'checking' : 'loading'; s.error = null })
+    const { result } = await this.sessions.models({ sessionId: this.sessionId, ...check ? { check: true } : {} })
     if (this.disposed || generation !== this.generation) {
       if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
       return result.value

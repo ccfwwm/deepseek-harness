@@ -38,7 +38,7 @@ import type { PresetBearingSession } from '@deepseek-ai/dsh-agent-presets'
 import type {} from '@deepseek-ai/dsh-tools'
 import type {
   ApiProxy, ConfigurableProviderView, CredentialView, GoalRef, HistoryEntry, HostFrame,
-  ModelCatalogFailure, ModelProviderGroup,
+  ModelAvailability, ModelCatalogFailure, ModelProviderGroup,
   ModelReasoning, MuxFrame, PromptContentPart, QuestionResponsePayload, SessionListMetadata, SessionProjectionsBlock, SessionSearchItem,
   QueuedInboxItem, SessionSummary, SettingsNamespaceView, SubagentAddress, JobView, ToolEventView,
   WorkspaceId, WorkspaceView,
@@ -266,7 +266,7 @@ function ok<T>(request: RpcRequest<unknown>, value: T): RpcResponse<T> {
  * owning catalog stops advertising it. Per-provider failures ride `failures`
  * without failing the sound groups; groups that advertise nothing are dropped.
  */
-async function buildModelCatalog(ctx: Context): Promise<{
+async function buildModelCatalog(ctx: Context, options: { check?: boolean } = {}): Promise<{
   groups: ModelProviderGroup[]
   failures: ModelCatalogFailure[]
 }> {
@@ -311,12 +311,84 @@ async function buildModelCatalog(ctx: Context): Promise<{
       return { kind: 'failure' as const, failure }
     }
   }))
-  const groups = catalog.flatMap(item => item.kind === 'group' ? [item.group] : []).filter(group => group.models.length > 0)
+  let groups = catalog.flatMap(item => item.kind === 'group' ? [item.group] : []).filter(group => group.models.length > 0)
   groups.sort((left, right) => modelProviderRank(left.id) - modelProviderRank(right.id) || left.name.localeCompare(right.name))
+  if (options.check === true) groups = await probeModelCatalog(ctx, groups)
   return {
     groups,
     failures: catalog.flatMap(item => item.kind === 'failure' ? [item.failure] : []),
   }
+}
+
+/** Probe model routes without exposing credentials or consuming a conversation turn. */
+async function probeModelCatalog(ctx: Context, groups: ModelProviderGroup[]): Promise<ModelProviderGroup[]> {
+  const entries = groups.flatMap(group => group.models.map(model => ({ group, model })))
+  const results = new Map<string, { status: ModelAvailability; statusMessage?: string; lastCheckedAt: number }>()
+  let cursor = 0
+  const worker = async (): Promise<void> => {
+    while (true) {
+      const index = cursor++
+      const entry = entries[index]
+      if (entry === undefined) return
+      const checkedAt = Date.now()
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 8_000)
+      try {
+        const prepared = await ctx.llm.prepareCall({
+          provider: entry.group.id,
+          model: entry.model.id,
+          maxTokens: 1,
+        }, controller.signal)
+        let finished = false
+        for await (const chunk of prepared.stream({
+          ...prepared.config,
+          messages: [createUserMessage({
+            content: [{ type: 'text', text: 'Reply with OK.' }],
+            source: { kind: 'user' },
+          })],
+          signal: controller.signal,
+        })) {
+          if (chunk.type === 'finish') {
+            finished = true
+            if (chunk.reason.kind === 'error' || chunk.reason.kind === 'aborted') {
+              throw new Error(chunk.reason.kind)
+            }
+            break
+          }
+        }
+        if (!finished) throw new Error('model did not finish')
+        results.set(`${entry.group.id}\0${entry.model.id}`, { status: 'available', lastCheckedAt: checkedAt })
+      } catch (error: unknown) {
+        const message = safeModelProbeMessage(error)
+        const lower = message.toLowerCase()
+        const status: ModelAvailability = /login|credential|api key|unauthori[sz]ed|401|403/.test(lower)
+          ? 'requires-login'
+          : 'unavailable'
+        results.set(`${entry.group.id}\0${entry.model.id}`, {
+          status,
+          statusMessage: message,
+          lastCheckedAt: checkedAt,
+        })
+      } finally {
+        clearTimeout(timeout)
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(3, entries.length) }, () => worker()))
+  return groups.map(group => ({
+    ...group,
+    models: group.models.map(model => {
+      const result = results.get(`${group.id}\0${model.id}`)
+      return result === undefined ? { ...model, status: 'unknown' as const } : { ...model, ...result }
+    }),
+  }))
+}
+
+/** Keep probe diagnostics useful while preventing headers, tokens, and bodies from crossing the wire. */
+function safeModelProbeMessage(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error)
+  const normalized = raw.replace(/Bearer\s+[^\s]+/gi, 'Bearer [redacted]').replace(/(api[-_ ]?key|token|password)=?[^\s,;]+/gi, '$1=[redacted]')
+  return normalized.length > 160 ? `${normalized.slice(0, 157)}...` : normalized
 }
 
 /** Stable ZeroWall order: free OpenCode first, managed AI Cloud next, official DeepSeek third. */
@@ -2196,7 +2268,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         const found = await agentFor(sessionId)
         if ('error' in found) return err(request, found.error)
         const current = selectionFor(found.agent).current
-        const { groups, failures } = await buildModelCatalog(ctx)
+        const { groups, failures } = await buildModelCatalog(ctx, {
+          ...request.payload.check === undefined ? {} : { check: request.payload.check },
+        })
         const routable = routeServed(current.provider)
         return ok(request, { current: { ...current }, routable, groups, failures })
       },
@@ -3306,7 +3380,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       },
 
       async models(request) {
-        return ok(request, await buildModelCatalog(ctx))
+        return ok(request, await buildModelCatalog(ctx, {
+          ...request.payload.check === undefined ? {} : { check: request.payload.check },
+        }))
       },
 
       async discoverModels(request, signal) {

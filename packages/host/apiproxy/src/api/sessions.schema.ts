@@ -11,7 +11,7 @@ import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
 import type { RequestPayload, ResponseValue } from './rpc-map.ts'
 import type { Wire } from './rpc.schema.ts'
 import type {
-  HistoryEntry, ModelCatalogFailure, ModelCatalogModel, ModelProviderGroup, ModelReasoning,
+  HistoryEntry, ModelAvailability, ModelCatalogFailure, ModelCatalogModel, ModelProviderGroup, ModelReasoning,
   ModelReasoningEffort, ModelSelection, SessionListMetadata, SessionProjectionsBlock, SessionSearchItem, SessionSummary,
 } from './sessions.ts'
 import type { ToolEventView } from './events.ts'
@@ -165,12 +165,19 @@ export const modelReasoningSchema = z.object({
   defaultEffort: z.string().min(1).optional(),
 }) satisfies z.ZodType<Wire<ModelReasoning>>
 
+export const modelAvailabilitySchema = z.enum([
+  'unknown', 'checking', 'available', 'unavailable', 'requires-login',
+]) satisfies z.ZodType<Wire<ModelAvailability>>
+
 /** One advisory model entry inside a provider group. */
 export const modelCatalogModelSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   description: z.string().optional(),
   reasoning: modelReasoningSchema.optional(),
+  status: modelAvailabilitySchema.optional(),
+  statusMessage: z.string().optional(),
+  lastCheckedAt: z.number().int().nonnegative().optional(),
 }) satisfies z.ZodType<Wire<ModelCatalogModel>>
 
 /** One successfully loaded provider group. */
@@ -245,6 +252,7 @@ export const sessionHistoryValueSchema: z.ZodType<Wire<ResponseValue<'session.hi
 /** session.models request payload. */
 export const sessionModelsRequestSchema = z.object({
   sessionId: sessionIdSchema,
+  check: z.boolean().optional(),
 }) satisfies z.ZodType<Wire<RequestPayload<'session.models'>>>
 
 /** session.models response value. */

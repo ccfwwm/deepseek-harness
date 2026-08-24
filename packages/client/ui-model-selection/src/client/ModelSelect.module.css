@@ -104,6 +104,34 @@
   line-height: 20px;
 }
 
+.actions {
+  display: flex;
+  gap: 6px;
+  padding: 4px 6px 6px;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+}
+
+.actionButton {
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.actionButton:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.actionButton:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .error,
 .warning {
   display: flex;
@@ -214,6 +242,26 @@
   line-height: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.modelStatus {
+  align-self: flex-start;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.modelStatus[data-status='available'] {
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.modelStatus[data-status='unavailable'],
+.modelStatus[data-status='requires-login'] {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.unavailable {
+  opacity: 0.55;
 }
 
 .check {

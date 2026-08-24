@@ -15,6 +15,7 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 import type { IApiClient } from '@deepseek-ai/dsh-api-remotes/client'
+import type { ModelAvailability } from '@deepseek-ai/dsh-api-remotes/client'
 import { Button, IconPlusOutline16, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
 import { CustomProviderCard } from './CustomProviderCard.tsx'
@@ -158,6 +159,15 @@ function targetOf(row: ProviderRow): EditorTarget {
   }
 }
 
+function availabilityLabel(status: ModelAvailability | undefined, t: ModelsSectionFace['t']): string {
+  switch (status) {
+    case 'available': return t('modelAvailable')
+    case 'unavailable': return t('modelUnavailable')
+    case 'requires-login': return t('modelRequiresLogin')
+    default: return t('modelNotChecked')
+  }
+}
+
 /** Stable visible and accessible identity for one provider target. */
 export function providerTargetLabel(target: ProviderIdentity): string {
   return target.provider === target.displayName
@@ -280,11 +290,45 @@ function Loaded({ injected }: { injected: ModelsSectionFace }): ReactNode {
   // one whose schema names the protocols one may speak; without it mounted
   // there is nothing to declare and the entry point stays disabled.
   const protocols = protocolChoices(state.namespaces.get('llm-pi-ai'), schema)
+  const catalogBusy = state.catalogStatus === 'loading' || state.catalogStatus === 'checking'
+  const catalogTime = state.catalogUpdatedAt === null ? null : new Date(state.catalogUpdatedAt).toLocaleString()
 
   return (
     <div className={styles['section']}>
       <h2 className={styles['title']}>{t('title')}</h2>
       <p className={styles['intro']}>{t('intro')}</p>
+      <section className={styles['runtimeCatalog']} aria-busy={catalogBusy}>
+        <div className={styles['runtimeCatalogHead']}>
+          <div>
+            <h3 className={styles['runtimeCatalogTitle']}>{t('models')}</h3>
+            {catalogTime !== null && <p className={styles['modelCatalogMeta']}>{`${t('catalogUpdated')} ${catalogTime}`}</p>}
+          </div>
+          <div className={styles['runtimeCatalogActions']}>
+            <button type="button" className={styles['secondaryButton']} disabled={catalogBusy} onClick={() => { void controller.syncModels(false) }}>
+              {catalogBusy && state.catalogStatus === 'loading' ? t('syncingModels') : t('syncModels')}
+            </button>
+            <button type="button" className={styles['primaryButton']} disabled={catalogBusy} onClick={() => { void controller.syncModels(true) }}>
+              {catalogBusy && state.catalogStatus === 'checking' ? t('checkingModels') : t('checkAllModels')}
+            </button>
+          </div>
+        </div>
+        {state.catalogError !== null && <p className={styles['error']}>{state.catalogError}</p>}
+        {state.catalogGroups.length === 0
+          ? <p className={styles['modelEmpty']}>{t('catalogEmpty')}</p>
+          : state.catalogGroups.map(group => (
+            <div className={styles['runtimeGroup']} key={group.id}>
+              <div className={styles['runtimeGroupTitle']}>{group.name}</div>
+              <ul className={styles['runtimeModels']}>
+                {group.models.map(model => (
+                  <li className={styles['runtimeModel']} data-status={model.status ?? 'unknown'} key={`${group.id}:${model.id}`}>
+                    <span className={styles['runtimeModelName']} title={model.id}>{model.name}</span>
+                    <span className={styles['runtimeModelStatus']}>{availabilityLabel(model.status, t)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+      </section>
       {!state.writable && state.status === 'ready' ? <p className={styles['notice']}>{t('readOnly')}</p> : null}
       {savedIdentity === undefined
         ? null
