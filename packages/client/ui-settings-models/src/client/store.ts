@@ -120,6 +120,7 @@ export class ModelsSettingsStore {
 
   /** Latest load wins; an older response never overwrites a newer one. */
   private generation = 0
+  private startupProbeStarted = false
 
   /**
    * @param api - the wire face (credentials/llm domains, and settings writes).
@@ -239,7 +240,11 @@ export class ModelsSettingsStore {
       }))
       s.namespaces = namespaces
     })
-    void this.syncModels(false)
+    void this.syncModels(false).finally(() => {
+      if (this.startupProbeStarted) return
+      this.startupProbeStarted = true
+      void this.syncModels(true)
+    })
   }
 }
 

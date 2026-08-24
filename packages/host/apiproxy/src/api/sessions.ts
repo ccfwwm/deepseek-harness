@@ -299,7 +299,10 @@ export interface SessionsApi {
    * Reads a fresh advisory model directory for an ordinary session. Provider
    * lookups run independently; subagents reject with `agent-busy`.
    */
-  models(request: RpcRequest<{ sessionId: SessionId; check?: boolean }>): Promise<RpcResponse<SessionModels>>
+  models(
+    request: RpcRequest<{ sessionId: SessionId; check?: boolean }>,
+    signal?: AbortSignal,
+  ): Promise<RpcResponse<SessionModels>>
 
   /**
    * Selects the complete model selection for this session. Exact model metadata

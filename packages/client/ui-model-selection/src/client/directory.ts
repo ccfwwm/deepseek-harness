@@ -43,6 +43,7 @@ export class ModelDirectory {
   /** Latest operation wins; an older response never overwrites a newer one. */
   private generation = 0
   private disposed = false
+  private startupProbeStarted = false
 
   /**
    * @param sessions - the session wire face (captured from the plugin's root connection).
@@ -82,7 +83,31 @@ export class ModelDirectory {
       s.status = 'ready'
       s.error = null
     })
+    if (!check && !this.startupProbeStarted) {
+      this.startupProbeStarted = true
+      void this.probeAtStartup()
+    }
     return result.value
+  }
+
+  /** Probe asynchronously after the first catalog load so opening a session never waits on it. */
+  private async probeAtStartup(): Promise<void> {
+    try {
+      const { result } = await this.sessions.models({ sessionId: this.sessionId, check: true })
+      if (this.disposed || !result.ok) return
+      this.store.update((s) => {
+        s.current = result.value.current
+        s.routable = result.value.routable
+        s.groups = result.value.groups
+        s.failures = result.value.failures
+        s.status = 'ready'
+        s.error = null
+      })
+    } catch {
+      // Startup probing is best effort. The catalog loaded above remains usable
+      // and the explicit “检测全部模型” action remains available to retry.
+      if (!this.disposed) this.store.update((s) => { s.status = 'ready'; s.error = null })
+    }
   }
 
   /**
@@ -129,6 +154,7 @@ export class ModelDirectory {
   resetConnected(): void {
     if (this.disposed) return
     ++this.generation
+    this.startupProbeStarted = false
     this.store.update((s) => {
       s.current = null
       s.routable = null

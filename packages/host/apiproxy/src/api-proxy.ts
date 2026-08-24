@@ -280,7 +280,7 @@ function ok<T>(request: RpcRequest<unknown>, value: T): RpcResponse<T> {
  * owning catalog stops advertising it. Per-provider failures ride `failures`
  * without failing the sound groups; groups that advertise nothing are dropped.
  */
-async function buildModelCatalog(ctx: Context, options: { check?: boolean } = {}): Promise<{
+async function buildModelCatalog(ctx: Context, options: { check?: boolean; signal?: AbortSignal } = {}): Promise<{
   groups: ModelProviderGroup[]
   failures: ModelCatalogFailure[]
 }> {
@@ -327,7 +327,7 @@ async function buildModelCatalog(ctx: Context, options: { check?: boolean } = {}
   }))
   let groups = catalog.flatMap(item => item.kind === 'group' ? [item.group] : []).filter(group => group.models.length > 0)
   groups.sort((left, right) => modelProviderRank(left.id) - modelProviderRank(right.id) || left.name.localeCompare(right.name))
-  if (options.check === true) groups = await probeModelCatalog(ctx, groups)
+  if (options.check === true) groups = await probeModelCatalog(ctx, groups, options.signal)
   return {
     groups,
     failures: catalog.flatMap(item => item.kind === 'failure' ? [item.failure] : []),
@@ -335,18 +335,21 @@ async function buildModelCatalog(ctx: Context, options: { check?: boolean } = {}
 }
 
 /** Probe model routes without exposing credentials or consuming a conversation turn. */
-async function probeModelCatalog(ctx: Context, groups: ModelProviderGroup[]): Promise<ModelProviderGroup[]> {
+async function probeModelCatalog(ctx: Context, groups: ModelProviderGroup[], requestSignal?: AbortSignal): Promise<ModelProviderGroup[]> {
   const entries = groups.flatMap(group => group.models.map(model => ({ group, model })))
   const results = new Map<string, { status: ModelAvailability; statusMessage?: string; lastCheckedAt: number }>()
   let cursor = 0
   const worker = async (): Promise<void> => {
     while (true) {
+      if (requestSignal?.aborted) return
       const index = cursor++
       const entry = entries[index]
       if (entry === undefined) return
       const checkedAt = Date.now()
       const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), 8_000)
+      const timeout = setTimeout(() => controller.abort(), 4_000)
+      const abort = (): void => controller.abort()
+      requestSignal?.addEventListener('abort', abort, { once: true })
       try {
         const prepared = await ctx.llm.prepareCall({
           provider: entry.group.id,
@@ -385,10 +388,14 @@ async function probeModelCatalog(ctx: Context, groups: ModelProviderGroup[]): Pr
         })
       } finally {
         clearTimeout(timeout)
+        requestSignal?.removeEventListener('abort', abort)
       }
     }
   }
-  await Promise.all(Array.from({ length: Math.min(3, entries.length) }, () => worker()))
+  // Keep the whole catalog below the 30-second unary transport deadline while
+  // limiting pressure on any one provider. A slow model becomes unavailable;
+  // it no longer holds the rest of the catalog hostage.
+  await Promise.all(Array.from({ length: Math.min(8, entries.length) }, () => worker()))
   return groups.map(group => ({
     ...group,
     models: group.models.map(model => {
@@ -401,6 +408,7 @@ async function probeModelCatalog(ctx: Context, groups: ModelProviderGroup[]): Pr
 /** Keep probe diagnostics useful while preventing headers, tokens, and bodies from crossing the wire. */
 function safeModelProbeMessage(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error)
+  if (/signal timed out|timed out|timeout|aborted/iu.test(raw)) return '检测超时，服务响应过慢'
   const normalized = raw.replace(/Bearer\s+[^\s]+/gi, 'Bearer [redacted]').replace(/(api[-_ ]?key|token|password)=?[^\s,;]+/gi, '$1=[redacted]')
   return normalized.length > 160 ? `${normalized.slice(0, 157)}...` : normalized
 }
@@ -2277,13 +2285,14 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         }
       },
 
-      async models(request) {
+      async models(request, signal) {
         const { sessionId } = request.payload
         const found = await agentFor(sessionId)
         if ('error' in found) return err(request, found.error)
         const current = selectionFor(found.agent).current
         const { groups, failures } = await buildModelCatalog(ctx, {
           ...request.payload.check === undefined ? {} : { check: request.payload.check },
+          ...signal === undefined ? {} : { signal },
         })
         const routable = routeServed(current.provider)
         return ok(request, { current: { ...current }, routable, groups, failures })
@@ -3393,9 +3402,10 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         return Promise.resolve(ok(request, { providers: views }))
       },
 
-      async models(request) {
+      async models(request, signal) {
         return ok(request, await buildModelCatalog(ctx, {
           ...request.payload.check === undefined ? {} : { check: request.payload.check },
+          ...signal === undefined ? {} : { signal },
         }))
       },
 
