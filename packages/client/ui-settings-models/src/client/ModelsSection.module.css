@@ -26,6 +26,97 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
+.runtimeCatalog {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+  padding: 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.runtimeCatalogHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.runtimeCatalogTitle,
+.runtimeGroupTitle {
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary);
+}
+
+.runtimeCatalogActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.runtimeGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.runtimeModels {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.runtimeModel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 28px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-module-platform);
+}
+
+.runtimeModelName {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtimeModelStatus {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.runtimeModel[data-status='available'] .runtimeModelStatus {
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.runtimeModel[data-status='unavailable'],
+.runtimeModel[data-status='requires-login'] {
+  opacity: 0.55;
+}
+
+.runtimeModel[data-status='unavailable'] .runtimeModelStatus,
+.runtimeModel[data-status='requires-login'] .runtimeModelStatus {
+  color: var(--dsw-alias-state-error-primary);
+}
+
 .notice {
   margin: 0;
   font-size: 12px;

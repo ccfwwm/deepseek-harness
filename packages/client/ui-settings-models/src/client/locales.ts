@@ -99,6 +99,16 @@ export const en = {
   onboardingSave: 'Save and continue',
   onboardingSaving: 'Saving…',
   keyRequired: 'Enter an API key to continue.',
+  syncModels: 'Sync models',
+  checkAllModels: 'Check all models',
+  syncingModels: 'Syncing models…',
+  checkingModels: 'Checking all models…',
+  catalogUpdated: 'Last synced {time}',
+  catalogEmpty: 'No runtime models found.',
+  modelAvailable: 'Available',
+  modelUnavailable: 'Unavailable',
+  modelRequiresLogin: 'Login required',
+  modelNotChecked: 'Not checked',
 }
 
 /** The settings.models namespace key union. */
@@ -203,4 +213,14 @@ export const zh: { [Key in keyof typeof en]: string } = {
   onboardingSave: '保存并继续',
   onboardingSaving: '保存中…',
   keyRequired: '请输入 API 密钥后继续。',
+  syncModels: '同步模型',
+  checkAllModels: '检测全部模型',
+  syncingModels: '正在同步模型…',
+  checkingModels: '正在检测全部模型…',
+  catalogUpdated: '上次同步：{time}',
+  catalogEmpty: '未发现运行时模型。',
+  modelAvailable: '可用',
+  modelUnavailable: '不可用',
+  modelRequiresLogin: '需登录',
+  modelNotChecked: '未检测',
 }
