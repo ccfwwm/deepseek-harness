@@ -23,7 +23,7 @@ import type {
   ModelModality,
   StreamChunk,
 } from './types.ts'
-import { freezeMessage, type Message } from './message.ts'
+import { createUserMessage, freezeMessage, type Message } from './message.ts'
 import { resolveRetryPolicy } from './retry-policy.ts'
 import type { ResolvedRetryPolicy } from './retry-policy.ts'
 import type { ProviderRequestId } from './brand.ts'
@@ -45,6 +45,16 @@ export * from './retry-policy.ts'
 export { BlockAssembler } from './assembler.ts'
 export { callConfigEquals, isAgentLoopRequest, markAgentLoopRequest } from './call-config.ts'
 export type { LlmCallConfig, LlmCallConfigAdapterDefaults } from './call-config.ts'
+
+/** One wire-protocol attempt made by the asynchronous model availability probe. */
+export interface LlmProbeAttempt {
+  /** Protocol identifier used for the request, or `native` for adapters with one wire format. */
+  protocol: string
+  /** Whether the provider accepted a minimal request and completed a response. */
+  ok: boolean
+  /** Safe diagnostic when the attempt failed. */
+  message?: string
+}
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -264,6 +274,34 @@ export abstract class LlmAdapter {
       model: await this.resolveModel(provider, model, signal),
       stream: options => this.stream(options),
     }
+  }
+
+  /**
+   * Probe one model without creating a conversation turn. Adapters with a
+   * protocol-flexible gateway may override this and try more than one wire
+   * format; the host considers the model usable when any attempt succeeds.
+   */
+  async probeModel(provider: string, model: string, signal?: AbortSignal): Promise<readonly LlmProbeAttempt[]> {
+    const prepared = await this.prepareCall(provider, model, signal)
+    let finished = false
+    for await (const chunk of prepared.stream({
+      provider,
+      model,
+      maxTokens: 4,
+      messages: [createUserMessage({
+        content: [{ type: 'text', text: 'Reply with OK.' }],
+        source: { kind: 'user' },
+      })],
+      ...(signal === undefined ? {} : { signal }),
+    })) {
+      if (chunk.type !== 'finish') continue
+      finished = true
+      if (chunk.reason.kind === 'error' || chunk.reason.kind === 'aborted') {
+        return [{ protocol: 'native', ok: false, message: chunk.reason.kind }]
+      }
+      break
+    }
+    return [{ protocol: 'native', ok: finished, ...(finished ? {} : { message: 'model did not finish' }) }]
   }
 
   /**
@@ -932,6 +970,11 @@ export class LlmRuntime extends TypertRemoteService {
         })
       },
     })
+  }
+
+  /** Run the adapter-owned protocol probe for one registered route. */
+  async probeModel(provider: string, model: string, signal?: AbortSignal): Promise<readonly LlmProbeAttempt[]> {
+    return this.registration(provider).adapter.probeModel(provider, model, signal)
   }
 
   private registration(provider: string): AdapterRegistration {
