@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useState, type ReactNode } from 'react'
-import type { PluginInventorySnapshot } from '@deepseek-ai/dsh-api-remotes/client'
+import type { PluginInstallTask, PluginInventorySnapshot } from '@deepseek-ai/dsh-api-remotes/client'
 import {
   IconChevronDownOutline14,
   IconSearchOutline16,
@@ -22,6 +22,9 @@ export interface PluginInventorySettingsTabInjected {
    * agent-preset dictionaries, user-authored ones keep their own metadata.
    */
   presetName: (preset: AgentPresetGroup) => string
+  setEnabled: (entryId: PluginInventoryEntry['entryId'], enabled: boolean) => Promise<PluginInventorySnapshot>
+  install: (specifier: string) => Promise<PluginInstallTask>
+  getTask: (id: string) => Promise<PluginInstallTask | undefined>
 }
 type PluginFiberPhase = PluginInventoryEntry['fiberPhase']
 
@@ -169,6 +172,9 @@ function StateTag({ kind, label }: { readonly kind: string; readonly label: stri
 /** Render the read-only plugin inventory: agent presets first, then the global plane. */
 export function PluginInventorySettingsTab({ list, presetName, t }: PluginInventorySettingsTabProps): ReactNode {
   const sectionId = useId()
+/** Render the current Loader inventory with guarded enablement controls. */
+export function PluginInventorySettingsTab({ list, presetName, setEnabled, install, getTask, t }: PluginInventorySettingsTabProps): ReactNode {
+  const catalogId = useId()
   const [request, setRequest] = useState(0)
   const [query, setQuery] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -177,6 +183,8 @@ export function PluginInventorySettingsTab({ list, presetName, t }: PluginInvent
   const [presetOpen, setPresetOpen] = useState<boolean | null>(null)
   const [globalOpen, setGlobalOpen] = useState<boolean | null>(null)
   const [state, setState] = useState<ViewState>({ status: 'loading' })
+  const [specifier, setSpecifier] = useState('')
+  const [task, setTask] = useState<PluginInstallTask>()
 
   useEffect(() => {
     let current = true
@@ -343,6 +351,24 @@ export function PluginInventorySettingsTab({ list, presetName, t }: PluginInvent
     )
   }
 
+  const toggle = async (entry: PluginInventoryEntry): Promise<void> => {
+    setState({ status: 'loading' })
+    try { setState({ status: 'ready', snapshot: await setEnabled(entry.entryId, !entry.enabled) }) }
+    catch { setState({ status: 'error' }) }
+  }
+
+  const submitInstall = async (): Promise<void> => {
+    if (specifier.trim() === '') return
+    setTask(await install(specifier.trim()))
+    setSpecifier('')
+  }
+
+  useEffect(() => {
+    if (task === undefined || task.status === 'succeeded' || task.status === 'failed' || task.status === 'cancelled') return
+    const timer = window.setInterval(() => { void getTask(task.id).then(next => { if (next !== undefined) setTask(next) }) }, 700)
+    return () => window.clearInterval(timer)
+  }, [getTask, task])
+
   return (
     <div className={css.section} aria-busy={state.status === 'loading'}>
       {state.status === 'loading' ? <p className={css.status}>{t('loading')}</p> : null}
@@ -354,6 +380,11 @@ export function PluginInventorySettingsTab({ list, presetName, t }: PluginInvent
       ) : null}
       {snapshot !== undefined ? (
         <div className={css.catalog}>
+          <div className={css.installRow}>
+            <input value={specifier} placeholder={t('installPlaceholder')} aria-label={t('installPlaceholder')} onChange={event => setSpecifier(event.currentTarget.value)} />
+            <button type="button" onClick={() => void submitInstall()} disabled={specifier.trim() === ''}>{t('install')}</button>
+          </div>
+          {task !== undefined ? <div className={css.task} aria-live="polite"><strong>{task.status}</strong><pre>{task.logs.join('\n')}</pre></div> : null}
           <label className={css.search}>
             <IconSearchOutline16 aria-hidden="true" />
             <span className={css.visuallyHidden}>{t('search')}</span>

@@ -13,6 +13,8 @@ import type {
   PluginFiberPhase,
   PluginInventoryEntry,
   PluginInventorySnapshot,
+  PluginInstallRequest,
+  PluginInstallTask,
 } from './types.ts'
 
 export type * from './types.ts'
@@ -45,6 +47,7 @@ const FIBER_PHASE = {
 /** Remote-only service exposing the Loader's current non-group entry state. */
 export class PluginInventoryGateway extends TypertRemoteService {
   static inject = ['loader']
+  private readonly tasks = new Map<string, PluginInstallTask>()
 
   constructor(ctx: Context) {
     super(ctx, 'pluginInventory')
@@ -71,6 +74,7 @@ export class PluginInventoryGateway extends TypertRemoteService {
         entryId: pluginEntryId(entry.id),
         moduleName: entry.options.name,
         enabled: !entry.disabled,
+        canDisable: isUserControllable(entry.options.name),
         fiberPhase: entry.fiber === undefined ? null : FIBER_PHASE[entry.fiber.state],
       })
     }
@@ -87,6 +91,65 @@ export class PluginInventoryGateway extends TypertRemoteService {
     )
     return { entries, agentPresets }
   }
+
+  @Remote('setEnabled')
+  async setEnabled(entryId: PluginEntryId, enabled: boolean): Promise<PluginInventorySnapshot> {
+    const entry = [...this.ctx.loader.entries()].find(item => item.id === entryId)
+    if (entry === undefined) throw new Error(`Plugin entry "${entryId}" was not found.`)
+    if (!isUserControllable(entry.options.name)) throw new Error(`Plugin "${entry.options.name}" is required by ZeroWall and cannot be disabled.`)
+    await this.ctx.loader.update(entryId, { disabled: !enabled })
+    return this.list()
+  }
+
+  @Remote('listTasks')
+  listTasks(): readonly PluginInstallTask[] { return [...this.tasks.values()] }
+
+  @Remote('install')
+  install(request: PluginInstallRequest): PluginInstallTask {
+    const specifier = request.specifier.trim()
+    if (specifier.length === 0 || /[\r\n\0]/u.test(specifier)) throw new Error('Plugin specifier is invalid.')
+    const id = `plugin-install-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const command = ['dsh', 'plugin', '--profile', this.profileName(), 'add', specifier]
+    const task: PluginInstallTask = { id, specifier, command, status: 'queued', logs: [`$ ${command.join(' ')}`], startedAt: Date.now() }
+    this.tasks.set(id, task)
+    void this.runInstall(task)
+    return task
+  }
+
+  @Remote('getTask')
+  getTask(id: string): PluginInstallTask | undefined { return this.tasks.get(id) }
+
+  private profileName(): string {
+    const compat = this.ctx.get('zerowallDesktopCompat') as { currentProfile?: { name: string } } | undefined
+    return compat?.currentProfile?.name ?? 'stable'
+  }
+
+  private async runInstall(task: PluginInstallTask): Promise<void> {
+    const compat = this.ctx.get('zerowallDesktopCompat') as { install: (specifier: string, invokingDir: string) => { stdout: AsyncIterable<Buffer | string>; stderr: AsyncIterable<Buffer | string>; done: Promise<{ exitCode: number | null }>; } } | undefined
+    if (compat === undefined) {
+      this.tasks.set(task.id, { ...task, status: 'failed', finishedAt: Date.now(), error: 'Plugin installation is only available in the ZeroWall desktop runtime.', logs: [...task.logs, 'Desktop plugin service is unavailable.'] })
+      return
+    }
+    try {
+      const handle = compat.install(task.specifier, process.cwd())
+      this.tasks.set(task.id, { ...task, status: 'running' })
+      const logs = [...task.logs]
+      const pump = async (stream: AsyncIterable<Buffer | string>, label: string) => { for await (const chunk of stream) logs.push(`[${label}] ${String(chunk).trimEnd()}`) }
+      await Promise.all([pump(handle.stdout, 'stdout'), pump(handle.stderr, 'stderr')])
+      const result = await handle.done
+      const succeeded = result.exitCode === 0
+      this.tasks.set(task.id, { ...task, status: succeeded ? 'succeeded' : 'failed', logs: succeeded ? [...logs, 'Plugin installed. Restarting the ZeroWall runtime to activate it.'] : logs, finishedAt: Date.now(), exitCode: result.exitCode })
+      if (succeeded && typeof process.send === 'function') process.send({ type: 'zerowall:desktop:restart-runtime' })
+    } catch (error) {
+      this.tasks.set(task.id, { ...task, status: 'failed', finishedAt: Date.now(), error: error instanceof Error ? error.message : String(error), logs: [...task.logs] })
+    }
+  }
+}
+
+function isUserControllable(moduleName: string): boolean {
+  return !moduleName.startsWith('@deepseek-ai/dsh-')
+    && !moduleName.includes('cordis-plugin-')
+    && !moduleName.includes('plugin-loader')
 }
 
 export default PluginInventoryGateway

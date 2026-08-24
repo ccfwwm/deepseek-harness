@@ -38,6 +38,11 @@ export const zh = {
   active: '运行中',
   failed: '启动失败',
   unloading: '卸载中',
+  enable: '启用插件',
+  disable: '停用插件',
+  protected: '系统插件不可停用',
+  install: '安装插件',
+  installPlaceholder: '输入 npm 或 GitHub 插件地址',
 } satisfies Record<string, string>
 
 /** Plugin inventory locale key union. */
@@ -81,4 +86,9 @@ export const en = {
   active: 'Running',
   failed: 'Failed to start',
   unloading: 'Unloading',
+  enable: 'Enable plugin',
+  disable: 'Disable plugin',
+  protected: 'Required system plugin',
+  install: 'Install plugin',
+  installPlaceholder: 'npm or GitHub plugin specifier',
 } satisfies Record<PluginInventoryLocaleKey, string>

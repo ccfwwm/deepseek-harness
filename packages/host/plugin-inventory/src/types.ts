@@ -19,6 +19,8 @@ export interface PluginInventoryEntry {
   readonly moduleName: string
   /** Effective Loader enablement, including disabled ancestor groups. */
   readonly enabled: boolean
+  /** System/runtime entries are always active and cannot be changed from Settings. */
+  readonly canDisable: boolean
   readonly fiberPhase: PluginFiberPhase
 }
 
@@ -67,4 +69,22 @@ export interface PluginInventorySnapshot {
    * composed in this deployment.
    */
   readonly agentPresets?: readonly AgentPresetPluginGroup[]
+}
+
+export type PluginInstallStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+
+export interface PluginInstallTask {
+  readonly id: string
+  readonly specifier: string
+  readonly command: readonly string[]
+  readonly status: PluginInstallStatus
+  readonly logs: readonly string[]
+  readonly startedAt: number
+  readonly finishedAt?: number
+  readonly exitCode?: number | null
+  readonly error?: string
+}
+
+export interface PluginInstallRequest {
+  readonly specifier: string
 }
