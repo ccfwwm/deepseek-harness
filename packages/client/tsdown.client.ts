@@ -504,7 +504,7 @@ function clientConfig(id: string, entry: string): UserConfig {
       },
       async load(virtualId: string) {
         if (!virtualId.startsWith(CSS_VIRTUAL_PREFIX)) return null
-        const fileId = virtualId.slice(CSS_VIRTUAL_PREFIX.length, -CSS_VIRTUAL_SUFFIX.length)
+        const fileId = virtualAssetPath(virtualId, CSS_VIRTUAL_PREFIX)
         // The virtual id otherwise hides the physical stylesheet from Rolldown's watch graph.
         this.addWatchFile(fileId)
         const source = await readFile(fileId)
@@ -530,7 +530,7 @@ function clientConfig(id: string, entry: string): UserConfig {
       },
       async load(virtualId: string) {
         if (!virtualId.startsWith(INLINE_CSS_VIRTUAL_PREFIX)) return null
-        const fileId = virtualId.slice(INLINE_CSS_VIRTUAL_PREFIX.length, -CSS_VIRTUAL_SUFFIX.length)
+        const fileId = virtualAssetPath(virtualId, INLINE_CSS_VIRTUAL_PREFIX)
         this.addWatchFile(fileId)
         const source = await readFile(fileId)
         const { code } = transform({ filename: fileId, code: source, minify: true })
@@ -545,10 +545,15 @@ function clientConfig(id: string, entry: string): UserConfig {
       },
       async load(virtualId: string) {
         if (!virtualId.startsWith(GLOBAL_CSS_VIRTUAL_PREFIX)) return null
-        const fileId = virtualId.slice(GLOBAL_CSS_VIRTUAL_PREFIX.length, -CSS_VIRTUAL_SUFFIX.length)
+        const fileId = virtualAssetPath(virtualId, GLOBAL_CSS_VIRTUAL_PREFIX)
         this.addWatchFile(fileId)
         const source = await readFile(fileId)
         const { code } = transform({ filename: fileId, code: source, minify: true })
+        // Rolldown can preserve the original query only after resolving the CSS
+        // file to this virtual id, so handle that form here as well.
+        if (virtualId.includes(`${CSS_VIRTUAL_SUFFIX}${INLINE_CSS_QUERY}`)) {
+          return `export default ${JSON.stringify(code.toString())};`
+        }
         return styleInjectionModule(id, fileId, code.toString())
       },
     }],
@@ -580,9 +585,18 @@ const SOURCEMAP_COMMENT = /\n\/\/# sourceMappingURL=.*\s*$/
 
 /** Resolve an emitted JS asset import against its source-tree counterpart. */
 function sourceAssetPath(source: string, importer: string): string {
-  const emitted = resolvePath(dirname(importer), source)
+  const cleanSource = source.split(/[?#]/u, 1)[0] ?? source
+  const emitted = resolvePath(dirname(importer), cleanSource)
   if (existsSync(emitted)) return emitted
   const boundary = emitted.indexOf(TYPES_MARKER)
   if (boundary < 0) return emitted
   return resolvePath(emitted.slice(0, boundary), 'src', emitted.slice(boundary + TYPES_MARKER.length))
+}
+
+/** Remove bundler-added query text before resolving a virtual stylesheet path. */
+function virtualAssetPath(virtualId: string, prefix: string): string {
+  const payload = virtualId.slice(prefix.length)
+  const suffixIndex = payload.indexOf(CSS_VIRTUAL_SUFFIX)
+  const path = suffixIndex < 0 ? payload : payload.slice(0, suffixIndex)
+  return path.split(/[?#]/u, 1)[0] ?? path
 }
