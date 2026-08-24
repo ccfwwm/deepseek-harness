@@ -311,10 +311,20 @@ async function buildModelCatalog(ctx: Context): Promise<{
       return { kind: 'failure' as const, failure }
     }
   }))
+  const groups = catalog.flatMap(item => item.kind === 'group' ? [item.group] : []).filter(group => group.models.length > 0)
+  groups.sort((left, right) => modelProviderRank(left.id) - modelProviderRank(right.id) || left.name.localeCompare(right.name))
   return {
-    groups: catalog.flatMap(item => item.kind === 'group' ? [item.group] : []).filter(group => group.models.length > 0),
+    groups,
     failures: catalog.flatMap(item => item.kind === 'failure' ? [item.failure] : []),
   }
+}
+
+/** Stable ZeroWall order: free OpenCode first, managed AI Cloud next, official DeepSeek third. */
+function modelProviderRank(providerId: string): number {
+  if (providerId === 'opencode-zen' || providerId.startsWith('opencode-zen-')) return 0
+  if (providerId.startsWith('zerowall-ai-cloud-')) return 1
+  if (providerId === 'deepseek-official' || providerId.startsWith('deepseek-')) return 2
+  return 3
 }
 
 /** Wrap an error result echoing the request's rpcId. */
