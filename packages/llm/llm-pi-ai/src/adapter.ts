@@ -41,6 +41,7 @@ import type {
 import {
   attributionHeaders,
   contentHasImage,
+  createUserMessage,
   LlmAdapter,
   LlmError,
   ReasoningEffortId,
@@ -59,6 +60,7 @@ import type {
 import type { AttachmentStore, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { idleWatchdog, timeoutOf } from '@deepseek-ai/dsh-timeout'
 import type { ResolvedPiAiProviderProfile } from './config.ts'
+import { buildProvider, supportedProtocols } from './provider.ts'
 import { toPiContext } from './context.ts'
 import { toStreamChunks } from './stream.ts'
 
@@ -318,6 +320,98 @@ export class PiAiAdapter extends LlmAdapter {
     })
   }
 
+  /**
+   * Probe protocol-flexible gateways with every supported wire format. A
+   * managed AI Cloud route can expose OpenAI Chat Completions, OpenAI
+   * Responses, or Anthropic Messages behind the same endpoint; its catalog
+   * model name is not sufficient evidence of the actual gateway protocol.
+   * One successful minimal request is enough to mark the model usable.
+   */
+  override async probeModel(provider: string, model: string, signal?: AbortSignal): Promise<readonly import('@deepseek-ai/dsh-llm').LlmProbeAttempt[]> {
+    const snapshot = this.current()
+    const profile = this.profileOf(snapshot, provider)
+    // Installed catalog providers already carry the exact protocol and
+    // endpoint selected by pi-ai. Keep their native probe to avoid sending
+    // speculative requests to unrelated public APIs.
+    if (profile.baseURL === undefined && !provider.startsWith('zerowall-ai-cloud-')) {
+      return super.probeModel(provider, model, signal)
+    }
+
+    const modelInfo = this.modelOf(snapshot, provider, model)
+    const configured = typeof profile.api === 'string' ? [profile.api] : []
+    const modelApi = typeof (modelInfo as unknown as { api?: unknown }).api === 'string'
+      ? [(modelInfo as unknown as { api: string }).api]
+      : []
+    const protocols = [...new Set([...configured, ...modelApi, ...supportedProtocols()])]
+      .filter(protocol => supportedProtocols().includes(protocol))
+    const attempts: import('@deepseek-ai/dsh-llm').LlmProbeAttempt[] = []
+    for (const protocol of protocols) {
+      if (signal?.aborted) break
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 4_500)
+      const abort = (): void => controller.abort()
+      signal?.addEventListener('abort', abort, { once: true })
+      try {
+        const candidate = this.probeSnapshot(snapshot, provider, protocol)
+        let finished = false
+        for await (const chunk of this.streamWithSnapshot({
+          provider,
+          model,
+          maxTokens: 4,
+          messages: [createUserMessage({
+            content: [{ type: 'text', text: 'Reply with OK.' }],
+            source: { kind: 'user' },
+          })],
+          signal: AbortSignal.any([controller.signal, ...(signal === undefined ? [] : [signal])]),
+        }, candidate)) {
+          if (chunk.type !== 'finish') continue
+          finished = chunk.reason.kind !== 'error' && chunk.reason.kind !== 'aborted'
+          if (!finished) attempts.push({ protocol, ok: false, message: chunk.reason.kind })
+          break
+        }
+        if (finished) {
+          attempts.push({ protocol, ok: true })
+          return attempts
+        }
+        if (!attempts.some(attempt => attempt.protocol === protocol)) attempts.push({ protocol, ok: false, message: 'model did not finish' })
+      } catch (error: unknown) {
+        attempts.push({ protocol, ok: false, message: error instanceof Error ? error.message : String(error) })
+      } finally {
+        clearTimeout(timeout)
+        signal?.removeEventListener('abort', abort)
+      }
+    }
+    return attempts
+  }
+
+  /** Build an immutable one-route snapshot with a candidate wire protocol. */
+  private probeSnapshot(snapshot: PiAiSnapshot, provider: string, protocol: string): PiAiSnapshot {
+    const profile = this.profileOf(snapshot, provider)
+    const models = snapshot.models.getModels(provider).map((model) => {
+      const currentBase = (model as unknown as { baseUrl?: string }).baseUrl
+      const baseURL = probeBaseURL(profile.baseURL ?? currentBase, protocol)
+      return { ...model, api: protocol as Api, ...(baseURL === undefined ? {} : { baseUrl: baseURL }) } as Model<Api>
+    })
+    const firstBase = (models[0] as unknown as { baseUrl?: string }).baseUrl
+    const candidateBaseURL = probeBaseURL(profile.baseURL ?? firstBase, protocol)
+    const piProvider = buildProvider({
+      provider,
+      displayName: profile.displayName,
+      api: protocol,
+      ...candidateBaseURL === undefined
+        ? {}
+        : { baseURL: candidateBaseURL },
+      models,
+      namesCredential: profile.apiKeyEnv !== undefined,
+    })
+    const candidateProfile: ResolvedPiAiProviderProfile = { ...profile, api: protocol, piProvider }
+    const profiles = new Map(snapshot.profiles)
+    profiles.set(provider, candidateProfile)
+    const candidateModels: MutableModels = createModels(this.config.auth)
+    for (const entry of profiles.values()) candidateModels.setProvider(entry.piProvider)
+    return { profiles, models: candidateModels }
+  }
+
   stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     return this.streamWithSnapshot(options, this.current())
   }
@@ -416,5 +510,22 @@ export class PiAiAdapter extends LlmAdapter {
     } finally {
       consumer.abort('pi-ai stream consumer stopped')
     }
+  }
+}
+
+/** Normalize a gateway root for the selected protocol's path convention. */
+function probeBaseURL(raw: string | undefined, protocol: string): string | undefined {
+  if (raw === undefined) return undefined
+  try {
+    const url = new URL(raw)
+    const path = url.pathname.replace(/\/+$/u, '')
+    if (protocol === 'anthropic-messages') {
+      if (path.endsWith('/v1')) url.pathname = path.slice(0, -3) || '/'
+    } else if (!path.endsWith('/v1')) {
+      url.pathname = `${path}/v1`.replace(/^\/\/+/u, '/')
+    }
+    return url.toString().replace(/\/+$/u, '')
+  } catch {
+    return raw
   }
 }
