@@ -227,6 +227,11 @@ function readModuleProxyRecord(link: string): ModuleProxyRecord | undefined {
 
 /** Ensure `link` is a symlink to `target`, replacing a wrong link or a dsh-managed packaged proxy. */
 function ensureSymlink(link: string, target: string): void {
+  // Electron ASAR paths are virtual archive entries. They can be imported by
+  // Node's resolver, but cannot be copied or used as Windows junction targets.
+  // The packaged desktop already supplies NODE_PATH pointing at this archive,
+  // so the profile fallback is unnecessary in that environment.
+  if (target.includes('.asar/') || target.includes('.asar\\')) return
   let stat
   try {
     stat = lstatSync(link)

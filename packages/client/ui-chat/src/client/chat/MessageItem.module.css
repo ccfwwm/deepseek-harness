@@ -20,6 +20,86 @@
      conversation column, where the axis variable is absent. */
   max-width: min(calc(var(--dsh-chat-content-width, 748px) * 0.702), 82%);
 }
+
+.fileCards {
+  display: grid;
+  width: min(420px, 100%);
+  gap: 6px;
+}
+
+.fileCard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px;
+  align-items: center;
+  min-height: 68px;
+  overflow: hidden;
+  border: 1px solid var(--dsw-alias-border-l2-darkmode-thin);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.fileOpen,
+.fileCopy {
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.fileOpen {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  min-width: 0;
+  padding: 10px 8px 10px 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fileOpen:hover,
+.fileCopy:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.fileIcon {
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.fileBody {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.fileName,
+.fileMeta,
+.filePreview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileName {
+  color: var(--dsw-alias-label-primary);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.fileMeta,
+.filePreview {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.fileCopy {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
 .bubble {
   /* Figma's 525px cap held as a share of the width axis (525/748 ≈ 0.702) so
      the bubble widens with a user-dragged or adaptive column; percentage

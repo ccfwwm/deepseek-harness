@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
+import { IconCheckOutline16, IconCopyOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { ImageLightbox } from './ImageLightbox.tsx'
 import type { ImageLightboxLabels } from './ImageLightbox.tsx'
 import css from './MessageImage.module.css'
@@ -33,6 +34,10 @@ export interface MessageImageLabels {
   loading: string
   /** Retry-control label shown when the load fails. */
   loadFailed: string
+  /** Copy-original control labels. */
+  copy: string
+  copied: string
+  copyFailed: string
   /** Lightbox strings forwarded to the opened preview. */
   lightbox: ImageLightboxLabels
 }
@@ -88,6 +93,7 @@ export function MessageImage({ image, load, variant, labels }: {
     attachment === undefined ? null : (load.peek?.(attachment) ?? null))
   const [error, setError] = useState(false)
   const [open, setOpen] = useState(false)
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   // Retry re-arms the one load effect below, so every attempt — first load or
   // retry — runs under the same liveness guard and the same reset.
   const [attempt, setAttempt] = useState(0)
@@ -118,21 +124,53 @@ export function MessageImage({ image, load, variant, labels }: {
   const src = preview?.url ?? loaded
   const label = (preview?.name ?? attachment?.name) ?? labels.image
   if (error) return <button type="button" className={css.error} data-variant={variant} onClick={request}>{labels.loadFailed}</button>
+  const copy = async (): Promise<void> => {
+    if (src === null) return
+    try {
+      const image = document.createElement('img')
+      image.src = src
+      await image.decode()
+      const canvas = document.createElement('canvas')
+      canvas.width = image.naturalWidth
+      canvas.height = image.naturalHeight
+      canvas.getContext('2d')?.drawImage(image, 0, 0)
+      const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(value => value === null ? reject(new Error('image encode failed')) : resolve(value), 'image/png'))
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+      setCopyState('copied')
+    } catch {
+      setCopyState('failed')
+    }
+    window.setTimeout(() => { setCopyState('idle') }, 1_500)
+  }
   return (
     <>
-      <button
-        type="button"
-        className={css.frame}
-        data-variant={variant}
-        style={fit === undefined ? undefined : { width: fit.width, height: fit.height }}
-        title={labels.open}
-        aria-label={labels.openNamed(label)}
-        onClick={() => { if (src !== null) setOpen(true) }}
-      >
-        {src === null
-          ? <span className={css.loading}>{labels.loading}</span>
-          : <img src={src} alt={label} style={fit === undefined ? undefined : { objectPosition: fit.objectPosition }} />}
-      </button>
+      <div className={css.item}>
+        <button
+          type="button"
+          className={css.frame}
+          data-variant={variant}
+          style={fit === undefined ? undefined : { width: fit.width, height: fit.height }}
+          title={labels.open}
+          aria-label={labels.openNamed(label)}
+          onClick={() => { if (src !== null) setOpen(true) }}
+        >
+          {src === null
+            ? <span className={css.loading}>{labels.loading}</span>
+            : <img src={src} alt={label} style={fit === undefined ? undefined : { objectPosition: fit.objectPosition }} />}
+        </button>
+        {src !== null && (
+          <button
+            type="button"
+            className={css.copy}
+            title={copyState === 'copied' ? labels.copied : copyState === 'failed' ? labels.copyFailed : labels.copy}
+            aria-label={copyState === 'copied' ? labels.copied : copyState === 'failed' ? labels.copyFailed : labels.copy}
+            data-state={copyState}
+            onClick={(event) => { event.stopPropagation(); void copy() }}
+          >
+            {copyState === 'copied' ? <IconCheckOutline16 /> : <IconCopyOutline16 />}
+          </button>
+        )}
+      </div>
       {open && src !== null && <ImageLightbox src={src} alt={label} labels={labels.lightbox} onClose={close} />}
     </>
   )
