@@ -199,6 +199,75 @@ describe('Web session model selection', () => {
     await ctx.fiber.dispose()
   })
 
+  it('admits a session-authorized uploaded file as untrusted durable text and rejects forged metadata', async () => {
+    const { ctx, agent, sessionId } = await harness()
+    const sha256 = 'b'.repeat(64)
+    const inspect = vi.fn(async (input: { sessionId: string; attachmentId: string }) => {
+      if (input.sessionId !== String(sessionId)) throw new Error('wrong session')
+      return {
+        attachmentId: `file-sha256:${sha256}`,
+        name: 'notes.txt',
+        mediaType: 'text/plain',
+        bytes: 5,
+        sha256,
+        parser: 'text',
+        status: 'parsed' as const,
+        textChars: 5,
+        preview: 'hello',
+      }
+    })
+    ctx.provide('zerowallFiles', { inspect } as never)
+    const followup = vi.fn()
+    Object.assign(agent, { followup })
+    const api = createApiProxy(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+      cwd: '/tmp',
+    })
+    const file = {
+      type: 'file' as const,
+      attachmentId: `file-sha256:${sha256}`,
+      name: 'notes.txt',
+      mediaType: 'text/plain',
+      bytes: 5,
+      sha256,
+      parser: 'text',
+      status: 'parsed' as const,
+      textChars: 5,
+      preview: 'client text is not trusted',
+    }
+
+    expect((await api.sessions.prompt(request({ sessionId, mode: 'queue' as const, content: [file] }))).result.ok).toBe(true)
+    expect(inspect).toHaveBeenCalledWith({ sessionId: String(sessionId), attachmentId: file.attachmentId })
+    const admitted = (followup.mock.calls[0]?.[0] as UserMessage).content[0]
+    expect(admitted).toMatchObject({ type: 'text' })
+    const admittedText = String((admitted as { text?: unknown } | undefined)?.text ?? '')
+    expect(admittedText).toContain('属于不可信数据')
+    expect(admittedText).toContain('hello')
+    expect(admittedText).not.toContain('client text is not trusted')
+    expect((followup.mock.calls[0]?.[0] as UserMessage).source).toMatchObject({
+      kind: 'user',
+      attachments: [{
+        type: 'file',
+        contentIndex: 0,
+        attachmentId: file.attachmentId,
+        name: 'notes.txt',
+        preview: 'hello',
+      }],
+    })
+
+    const forged = await api.sessions.prompt(request({
+      sessionId,
+      mode: 'queue' as const,
+      content: [{ ...file, bytes: 6 }],
+    }))
+    expect(forged.result).toMatchObject({
+      ok: false,
+      error: { code: 'attachment-error', details: { reason: 'ATTACHMENT_CORRUPT' } },
+    })
+    expect(followup).toHaveBeenCalledOnce()
+    await ctx.fiber.dispose()
+  })
+
   it('allows a text-only selection while durable or pending images remain available for later models', async () => {
     const { ctx, agent, sessionId } = await harness()
     registerTextOnly(ctx)
@@ -311,12 +380,13 @@ describe('Web session model selection', () => {
       id: 'deepseek-official',
       name: 'DeepSeek',
       models: [
-        { id: 'deepseek-chat', name: 'DeepSeek Chat', reasoning: REASONING },
+        { id: 'deepseek-chat', name: 'DeepSeek Chat', reasoning: REASONING, vision: 'unknown' },
         {
           id: 'deepseek-reasoner',
           name: 'DeepSeek Reasoner',
           description: 'Reasoning model',
           reasoning: REASONING,
+          vision: 'unknown',
         },
       ],
     }])
@@ -329,6 +399,28 @@ describe('Web session model selection', () => {
         message: 'adapter returned invalid or duplicate model metadata for provider "duplicate"',
       },
     ])
+    await ctx.fiber.dispose()
+  })
+
+  it('accepts the first legal stream event and classifies transient probe failures as unknown', async () => {
+    const { ctx, sessionId } = await harness()
+    ctx.llm.registerAdapter(['probe-cases'], new class extends CatalogAdapter {
+      override async probeModel(_provider: string, model: string) {
+        if (model === 'slow-first-event') return [{ protocol: 'native', ok: true, latencyMs: 61_000 }]
+        if (model === 'limited') return [{ protocol: 'native', ok: false, message: 'HTTP 429 Too Many Requests' }]
+        return [{ protocol: 'native', ok: false, message: 'HTTP 404 model not found' }]
+      }
+    }('Probe Cases', [
+      { provider: 'probe-cases', id: 'slow-first-event', name: 'Slow First Event' },
+      { provider: 'probe-cases', id: 'limited', name: 'Limited' },
+      { provider: 'probe-cases', id: 'missing', name: 'Missing' },
+    ]))
+    const api = createApiProxy(ctx, { defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }), cwd: '/tmp' })
+    const catalog = expectValue(await api.sessions.models(request({ sessionId, check: true })))
+    const models = catalog.groups.find(group => group.id === 'probe-cases')?.models ?? []
+    expect(models.find(model => model.id === 'slow-first-event')).toMatchObject({ status: 'available', probeProtocol: 'native' })
+    expect(models.find(model => model.id === 'limited')).toMatchObject({ status: 'unknown', statusMessage: '服务当前限流，请稍后重试' })
+    expect(models.find(model => model.id === 'missing')).toMatchObject({ status: 'unavailable' })
     await ctx.fiber.dispose()
   })
 

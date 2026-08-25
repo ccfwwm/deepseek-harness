@@ -16,6 +16,9 @@ const labels: MessageImageLabels = {
   openNamed: label => `${label}，点击查看原图`,
   loading: '图片加载中…',
   loadFailed: '图片加载失败，点击重试',
+  copy: '复制图片',
+  copied: '图片已复制',
+  copyFailed: '复制图片失败',
   lightbox: { dialog: '原图预览', close: '关闭原图预览' },
 }
 

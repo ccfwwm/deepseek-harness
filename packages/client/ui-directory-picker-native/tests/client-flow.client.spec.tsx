@@ -9,7 +9,10 @@ import { apply, inject } from '../src/client/index.ts'
 import { NativeDirectoryFlow } from '../src/client/flow.ts'
 import { apply as nodeApply } from '../src/index.ts'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  delete window.zerowallDesktop
+})
 
 const HOLES = ['conversation.hero.workspace.directoryFlow', 'sidebar.workspaces.directoryFlow'] as const
 
@@ -147,6 +150,19 @@ describe('directory-picker-native client half', () => {
     const injected = (entry.inject as () => { pick: () => Promise<string | null> })()
     await expect(injected.pick()).resolves.toBe('/tmp/picked')
     expect(b.pickDirectory).toHaveBeenCalledOnce()
+  })
+
+  it('uses the Electron main-process picker in the packaged desktop', async () => {
+    const b = await bench()
+    const chooseDirectory = vi.fn(async () => 'C:\\Users\\test\\project')
+    window.zerowallDesktop = { chooseDirectory }
+    b.declare()
+    await b.ctx.plugin({ inject: [...inject], apply }).await()
+    const entry = b.slots.entries(HOLES[0])[0]!
+    const injected = (entry.inject as () => { pick: () => Promise<string | null> })()
+    await expect(injected.pick()).resolves.toBe('C:\\Users\\test\\project')
+    expect(chooseDirectory).toHaveBeenCalledOnce()
+    expect(b.pickDirectory).not.toHaveBeenCalled()
   })
 
   it('runs one pick per open edge and reports the path to the latest onPicked', async () => {

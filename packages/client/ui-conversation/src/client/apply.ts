@@ -18,7 +18,7 @@ import type {
 } from './contract/slots.ts'
 import type { InputNotice } from './input/contract.ts'
 import { createChatStore } from './stores.ts'
-import { ConversationController, UnsupportedImageMediaTypeError } from './service.ts'
+import { ConversationController, FileServiceUnavailableError, UnsupportedImageMediaTypeError } from './service.ts'
 import type { IConversation } from './service.ts'
 import { ComposerBlockRegistry } from './input/blocks.ts'
 import type { ComposerBlock } from './input/blocks.ts'
@@ -211,7 +211,8 @@ export function apply(ctx: Context): void {
       'conversation.hero.agentPreset': { kind: 'single', scope: 'root' },
     },
     inject: (sessionId: SessionId | undefined): ConversationInjected => ({
-      hooks: { composerBlock: sessionId === undefined ? ABSENT_BLOCK : composerBlocks.storeFor(sessionId) },
+    hooks: { composerBlock: sessionId === undefined ? ABSENT_BLOCK : composerBlocks.storeFor(sessionId) },
+      startSession: () => { workspaces.startSession() },
       selectWorkspace: async (workspaceId) => {
         const nextId = await workspaces.connectWorkspace(workspaceId)
         if (sessionId !== undefined && nextId !== sessionId) {
@@ -321,6 +322,19 @@ export function apply(ctx: Context): void {
               // and naming it beats echoing the rejected MIME type back.
               return t('image.unsupportedType')
             }
+            return error instanceof Error ? error.message : String(error)
+          }
+        },
+        addFiles: async (files) => {
+          try {
+            const documents = await conversation.createDraftFiles(sessionId, files)
+            if (!shell.addImages(documents.map(file => file.id))) {
+              conversation.releaseDraftImages(documents)
+              return t('file.busy')
+            }
+            return null
+          } catch (error: unknown) {
+            if (error instanceof FileServiceUnavailableError) return t('file.unavailable')
             return error instanceof Error ? error.message : String(error)
           }
         },

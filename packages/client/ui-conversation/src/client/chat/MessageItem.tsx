@@ -8,7 +8,7 @@ import type { ReactNode } from 'react'
 import type {
   ModelRetryNode, TurnErrorNode, UserMessageNode,
 } from '@deepseek-ai/dsh-client-runtime/client'
-import { JsonBlock, MessageText, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconCopyOutline16, JsonBlock, MessageText, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChatNodeOwnerProps, ChatNodeViewProps, ChatViewSlotProps } from '../contract/slots.ts'
 import { ReferenceIcon } from '../reference/ReferenceIcon.tsx'
 import { CompactionItem } from './CompactionItem.tsx'
@@ -18,7 +18,40 @@ import css from './MessageItem.module.css'
 
 type UserImage = Extract<UserMessageNode['content'][number], { type: 'image' }>
 
-function contentParts(content: readonly unknown[]): {
+interface UserFileAttachmentView {
+  type: 'file'
+  contentIndex: number
+  attachmentId: string
+  name: string
+  mediaType: string
+  bytes: number
+  sha256: string
+  parser: string
+  status: 'parsed' | 'needs_vision' | 'stored'
+  textChars: number
+  preview?: string
+  pageCount?: number
+  sheetCount?: number
+  warning?: string
+}
+
+function sourceFiles(source: unknown): UserFileAttachmentView[] {
+  if (typeof source !== 'object' || source === null) return []
+  const attachments = (source as { attachments?: unknown }).attachments
+  if (!Array.isArray(attachments)) return []
+  return attachments.filter((value): value is UserFileAttachmentView => {
+    if (typeof value !== 'object' || value === null) return false
+    const file = value as Partial<UserFileAttachmentView>
+    return file.type === 'file'
+      && Number.isSafeInteger(file.contentIndex)
+      && typeof file.attachmentId === 'string'
+      && typeof file.name === 'string'
+      && typeof file.mediaType === 'string'
+      && typeof file.bytes === 'number'
+  })
+}
+
+function contentParts(content: readonly unknown[], hiddenTextIndexes: ReadonlySet<number> = new Set()): {
   text: string
   images: { attachment: UserImage['attachment'] }[]
   rest: unknown[]
@@ -26,15 +59,66 @@ function contentParts(content: readonly unknown[]): {
   const texts: string[] = []
   const images: { attachment: UserImage['attachment'] }[] = []
   const rest: unknown[] = []
-  for (const block of content) {
+  for (const [index, block] of content.entries()) {
     const b = block as { type?: string; text?: string; attachment?: unknown }
-    if (b.type === 'text' && typeof b.text === 'string') texts.push(b.text)
+    if (b.type === 'text' && typeof b.text === 'string' && !hiddenTextIndexes.has(index)) texts.push(b.text)
     else if (b.type === 'image' && b.attachment !== undefined) {
       images.push({ attachment: (b as UserImage).attachment })
     }
     else rest.push(block)
   }
   return { text: texts.join(''), images, rest }
+}
+
+function fileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function attachmentAction(action: 'open' | 'copy', file: UserFileAttachmentView, sessionId: string, cwd?: string): void {
+  window.dispatchEvent(new CustomEvent(`zerowall:attachment-${action}`, {
+    detail: { file, sessionId, ...(cwd === undefined ? {} : { cwd }) },
+  }))
+}
+
+function UserFileCards({ files, sessionId, cwd, t }: {
+  files: readonly UserFileAttachmentView[]
+  sessionId: string
+  cwd?: string
+  t: ChatViewSlotProps['t']
+}): ReactNode {
+  if (files.length === 0) return null
+  return (
+    <div className={css.fileCards}>
+      {files.map(file => (
+        <div key={file.attachmentId} className={css.fileCard}>
+          <button
+            type="button"
+            className={css.fileOpen}
+            title={t('file.open')}
+            onClick={() => { attachmentAction('open', file, sessionId, cwd) }}
+          >
+            <ReferenceIcon kind="file" size={22} className={css.fileIcon} />
+            <span className={css.fileBody}>
+              <strong className={css.fileName}>{file.name}</strong>
+              <span className={css.fileMeta}>{fileSize(file.bytes)} · {t(`file.status.${file.status}`)}</span>
+              {file.preview !== undefined && <span className={css.filePreview}>{file.preview.replace(/\s+/gu, ' ').trim()}</span>}
+            </span>
+          </button>
+          <button
+            type="button"
+            className={css.fileCopy}
+            title={t('file.copy')}
+            aria-label={t('file.copyNamed', { name: file.name })}
+            onClick={() => { attachmentAction('copy', file, sessionId, cwd) }}
+          >
+            <IconCopyOutline16 />
+          </button>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 function retrySeconds(milliseconds: number): number {
@@ -214,9 +298,12 @@ function projectUserText(text: string, sessionLabels: readonly string[]): ReactN
 
 /** Right-aligned bubble shared by user and steering rows. */
 function UserStyleBubble({
-  content, renderMessageImages, actions, pending = false, referenceLabels = [], t,
+  content, source, sessionId, cwd, renderMessageImages, actions, pending = false, referenceLabels = [], t,
 }: {
   content: readonly unknown[]
+  source?: unknown
+  sessionId?: string
+  cwd?: string
   renderMessageImages: ChatNodeOwnerProps['renderMessageImages']
   /** Optional IconActions (or similar) below the bubble; receives the joined text. */
   actions?: (text: string) => ReactNode
@@ -226,13 +313,15 @@ function UserStyleBubble({
   referenceLabels?: readonly string[]
   t: ChatViewSlotProps['t']
 }): ReactNode {
-  const { text, images, rest } = contentParts(content)
+  const files = sourceFiles(source)
+  const { text, images, rest } = contentParts(content, new Set(files.map(file => file.contentIndex)))
   const truncated = (total: number): string => t('json.truncated', { total })
   const showBubble = text !== '' || rest.length > 0
   return (
     <div className={css.userRow} data-pending-steering={pending || undefined} data-time-hover-root>
       <div className={css.userStack}>
         {renderMessageImages({ images, align: 'end' })}
+        {sessionId !== undefined && <UserFileCards files={files} sessionId={sessionId} {...cwd === undefined ? {} : { cwd }} t={t} />}
         {showBubble && <div className={css.bubble}>
           {projectUserText(text, referenceLabels)}
           {rest.map((block, i) => <JsonBlock key={i} label={t('message.extraBlock')} payload={block} truncatedLabel={truncated} />)}
@@ -279,12 +368,15 @@ export function PendingSteeringBubble({ content, renderMessageImages, t }: {
 
 /** User and admitted-steering keyed Chat renderer. */
 export const UserMessageNodeView = memo(function UserMessageNodeView({
-  node, renderMessageImages, t,
+  node, sessionId, cwd, renderMessageImages, t,
 }: ChatNodeViewProps<'user' | 'steering'>) {
   const data = node.data
   return (
     <UserStyleBubble
       content={data.content}
+      source={data.source}
+      sessionId={String(sessionId)}
+      {...cwd === undefined ? {} : { cwd }}
       renderMessageImages={renderMessageImages}
       {...data.referenceLabels === undefined ? {} : { referenceLabels: data.referenceLabels }}
       t={t}

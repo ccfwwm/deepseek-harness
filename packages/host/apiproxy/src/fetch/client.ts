@@ -414,7 +414,12 @@ export abstract class AbstractApiClient implements IApiClient {
     search: (payload, signal) => this.callUnary('session.search', payload, signal),
     create: (payload, signal) => this.callUnary('session.create', payload, signal),
     history: (payload, signal) => this.callUnary('session.history', payload, signal),
-    models: (payload, signal) => this.callUnary('session.models', payload, signal),
+    // A checked catalog can spend up to 120 seconds on each model and probes a
+    // provider serially. Keep the normal catalog read bounded, but let an
+    // explicit user-started probe run until its caller cancels it.
+    models: (payload, signal) => this.callUnary(
+      'session.models', payload, signal, payload.check === true ? 'caller-signal-only' : 'default',
+    ),
     selectModel: (payload, signal) => this.callUnary('session.selectModel', payload, signal),
     rename: (payload, signal) => this.callUnary('session.rename', payload, signal),
     fork: (payload, signal) => this.callUnary('session.fork', payload, signal),
@@ -496,7 +501,9 @@ export abstract class AbstractApiClient implements IApiClient {
 
   readonly llm: IApiClient['llm'] = {
     providers: (payload, signal) => this.callUnary('llm.providers', payload, signal),
-    models: (payload, signal) => this.callUnary('llm.models', payload, signal),
+    models: (payload, signal) => this.callUnary(
+      'llm.models', payload, signal, payload.check === true ? 'caller-signal-only' : 'default',
+    ),
     discoverModels: (payload, signal) => this.callUnary('llm.discoverModels', payload, signal),
   }
 

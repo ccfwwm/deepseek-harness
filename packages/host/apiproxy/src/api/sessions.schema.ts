@@ -11,7 +11,7 @@ import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
 import type { RequestPayload, ResponseValue } from './rpc-map.ts'
 import type { Wire } from './rpc.schema.ts'
 import type {
-  HistoryEntry, ModelAvailability, ModelCatalogFailure, ModelCatalogModel, ModelProviderGroup, ModelReasoning,
+  HistoryEntry, ModelAvailability, ModelCatalogFailure, ModelCatalogModel, ModelProviderGroup, ModelReasoning, ModelVision,
   ModelReasoningEffort, ModelSelection, SessionListMetadata, SessionProjectionsBlock, SessionSearchItem, SessionSummary,
 } from './sessions.ts'
 import type { ToolEventView } from './events.ts'
@@ -168,12 +168,15 @@ export const modelReasoningSchema = z.object({
 export const modelAvailabilitySchema = z.enum([
   'unknown', 'checking', 'available', 'unavailable', 'requires-login',
 ]) satisfies z.ZodType<Wire<ModelAvailability>>
+export const modelVisionSchema = z.enum(['unknown', 'supported', 'unsupported']) satisfies z.ZodType<Wire<ModelVision>>
 
 /** One advisory model entry inside a provider group. */
 export const modelCatalogModelSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   description: z.string().optional(),
+  inputModalities: z.array(z.enum(['text', 'image'])).optional(),
+  vision: modelVisionSchema.optional(),
   reasoning: modelReasoningSchema.optional(),
   status: modelAvailabilitySchema.optional(),
   statusMessage: z.string().optional(),
@@ -292,6 +295,21 @@ export const imageMediaTypeSchema = z.union([
 export const promptContentPartSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('text'), text: z.string() }),
   z.object({ type: z.literal('image'), mediaType: imageMediaTypeSchema, data: z.string(), name: z.string().optional() }),
+  z.object({
+    type: z.literal('file'),
+    attachmentId: z.string().min(1),
+    name: z.string().min(1).max(255),
+    mediaType: z.string().min(1).max(255),
+    bytes: z.number().int().positive(),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+    parser: z.string().min(1).max(64),
+    status: z.enum(['parsed', 'needs_vision', 'stored']),
+    textChars: z.number().int().nonnegative(),
+    preview: z.string().max(120_000),
+    pageCount: z.number().int().positive().optional(),
+    sheetCount: z.number().int().positive().optional(),
+    warning: z.string().max(2_000).optional(),
+  }),
 ])
 
 /** session.prompt request payload, including optional browser-local request provenance. */

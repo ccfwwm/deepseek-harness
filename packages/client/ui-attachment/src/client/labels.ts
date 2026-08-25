@@ -25,6 +25,9 @@ export function messageImageLabels(t: TranslateNS<'conversation'>): MessageImage
     openNamed: label => t('image.openOriginalLabel', { label }),
     loading: t('image.loading'),
     loadFailed: t('image.loadFailed'),
+    copy: t('image.copy'),
+    copied: t('image.copied'),
+    copyFailed: t('image.copyFailed'),
     lightbox: lightboxLabels(t),
   }
 }

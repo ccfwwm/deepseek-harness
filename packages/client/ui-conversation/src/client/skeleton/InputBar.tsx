@@ -10,7 +10,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { ChangeEvent, KeyboardEvent, MouseEvent, ReactNode } from 'react'
 import clsx from 'clsx'
 import {
-  IconPlusOutline16, IconWarningOutline16, Toast, Tooltip,
+  IconCloseOutline16, IconPaperclipOutline16, IconPlusOutline16, IconWarningOutline16, Toast, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 // Type-only: the `plan` projection key merge (the TodoDock posture — the
 // composer reads a host-computed value; the domain owns the key).
@@ -77,7 +77,7 @@ function editRangeOf(pending: PendingEdit | null, prevLength: number, nextLength
 export type InputBarProps = ComposerBarProps
 
 export function InputBar({
-  useSession, useInput, inputActions, keyboard, addImages, removeImage, draftImages,
+  useSession, useInput, inputActions, keyboard, addImages, addFiles, removeImage, draftImages,
   resolveSubmitMode, toggleCommandMenu, stop, command, t,
   renderSlot, useNotices, useLexicon, useMenuLauncher,
   useProjection, sessionId, variant, disabled: inert = false, blocked,
@@ -136,6 +136,7 @@ export function InputBar({
     if (notice?.level === 'error') showToast(notice.text)
   }, [notice, showToast])
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const cardRef = useRef<HTMLDivElement | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const mirrorRef = useRef<HTMLDivElement | null>(null)
@@ -483,7 +484,7 @@ export function InputBar({
       .filter(item => item.kind === 'file')
       .map(item => item.getAsFile())
       .filter((file): file is File => file !== null)
-    if (files.length > 0) intakeImages(files)
+    if (files.length > 0) intakeAttachments(files)
     const text = e.clipboardData.getData('text/plain')
     if (text === '') {
       if (files.length > 0) e.preventDefault()
@@ -534,7 +535,24 @@ export function InputBar({
     if (rejected !== null) showToast(rejected)
   }, [addImages, attachments, imageLimits, showToast, t])
 
-  const canAcceptDrop = !locked && !machineBusy && addImages !== undefined
+  const intakeAttachments = useCallback((files: readonly File[]): void => {
+    if (files.length === 0) return
+    const imageTypes = imageLimits?.mediaTypes ?? ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+    const images = files.filter(file => (imageTypes as readonly string[]).includes(file.type))
+    const documents = files.filter(file => !(imageTypes as readonly string[]).includes(file.type))
+    if (documents.length > 0) {
+      // A host without the document parser still needs the image-only
+      // contract's format rejection for mixed drops/pastes. The full host
+      // provides addFiles and takes the document path below.
+      if (addFiles === undefined) intakeImages(files)
+      else void addFiles(documents).then((failure) => { if (failure !== null) showToast(failure) }, (error: unknown) => {
+        showToast(error instanceof Error ? error.message : String(error))
+      })
+    }
+    if (images.length > 0) intakeImages(images)
+  }, [addFiles, imageLimits, intakeImages, showToast, t])
+
+  const canAcceptDrop = !locked && !machineBusy && (addImages !== undefined || addFiles !== undefined)
 
   const onSelect = (e: React.SyntheticEvent<HTMLTextAreaElement>): void => {
     // Any caret/selection gesture ends a live paste attempt (the machine
@@ -710,13 +728,27 @@ export function InputBar({
         {renderSlot('conversation.input.attachments', {
           attachments,
           canAcceptDrop,
-          onAddImages: intakeImages,
+          onAddImages: intakeAttachments,
           onRemoveImage: (id) => { removeImage?.(id) },
           dropLimits: imageLimits === undefined ? undefined : {
             count: imageLimits.maxImagesPerMessage,
             size: imageSizeText(imageLimits.maxImageBytes),
           },
         })}
+        {(attachments.some(attachment => attachment.kind === 'file')) && (
+          <div className={css.fileAttachments}>
+            {attachments.filter((attachment): attachment is Extract<typeof attachment, { kind: 'file' }> => attachment.kind === 'file').map(attachment => (
+              <div key={attachment.id} className={css.fileChip} data-status={attachment.prepared.status}>
+                <IconPaperclipOutline16 size={14} />
+                <span>{attachment.file.name}</span>
+                <small>{attachment.prepared.status === 'needs_vision' ? t('file.needsVision') : attachment.prepared.status === 'stored' ? t('file.stored') : t('file.parsed')}</small>
+                <button type="button" aria-label={attachment.file.name} onClick={() => { removeImage?.(attachment.id) }}>
+                  <IconCloseOutline16 size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         {/* One scrollport, two text layers. The hidden mirror renders draft+'\n' and stretches the
             stack to the draft's FULL height (counting rows by '\n' cannot see soft wraps); the
             absolutely-positioned backdrop and textarea ride that height, and .scroll — capped at 14
@@ -783,9 +815,17 @@ export function InputBar({
                 <IconPlusOutline16 size={14} />
               </button>
             </Tooltip>
+            <input ref={fileInputRef} className={css.hiddenFileInput} type="file" multiple onChange={(event) => {
+              intakeAttachments([...(event.currentTarget.files ?? [])])
+              event.currentTarget.value = ''
+            }} />
+            <Tooltip label={t('file.attach')} side="top" delayMs={500}>
+              <button type="button" className={css.add} aria-label={t('file.attach')} disabled={locked || machineBusy} onMouseDown={keepFocus} onClick={() => { fileInputRef.current?.click() }}>
+                <IconPaperclipOutline16 size={14} />
+              </button>
+            </Tooltip>
             <div className={css.modes}>
               {accessSelect}
-              {renderSlot('conversation.input.plan', { locked })}
             </div>
             {leftItems}
           </div>

@@ -461,6 +461,46 @@ describe('unary round trip (handler ⇄ client, no network)', () => {
     }
   })
 
+  it('lets an explicit model probe finish after the 30-second default unary deadline', async () => {
+    vi.useFakeTimers()
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout').mockImplementation((milliseconds) => {
+      const controller = new AbortController()
+      setTimeout(() => {
+        controller.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError'))
+      }, milliseconds)
+      return controller.signal
+    })
+    try {
+      const api = fakeApi()
+      api.sessions.models = async (request) => {
+        await new Promise(resolve => setTimeout(resolve, 30_001))
+        return {
+          rpcId: request.rpcId,
+          result: {
+            ok: true,
+            value: {
+              groups: [], failures: [], routable: true,
+              current: { provider: 'deepseek-official', model: 'deepseek-chat' },
+            },
+          },
+        }
+      }
+      const execution = client(api).sessions.models({ sessionId: 's' as never, check: true })
+      const assertion = expect(execution).resolves.toMatchObject({
+        result: { ok: true, value: { groups: [], failures: [] } },
+      })
+
+      await Promise.all([
+        vi.advanceTimersByTimeAsync(30_001),
+        assertion,
+      ])
+      expect(timeoutSpy).not.toHaveBeenCalled()
+    } finally {
+      timeoutSpy.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
   it('round-trips the subagent domain through the wire form', async () => {
     const c = client()
     expect((await c.subagents.list({ parentSessionId: 'parent' as never })).result)

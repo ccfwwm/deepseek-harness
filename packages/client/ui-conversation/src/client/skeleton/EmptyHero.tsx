@@ -115,6 +115,7 @@ export interface HeroShellProps {
  * @returns the centered hero element tree.
  */
 export function HeroShell({ t, renderSlot, children }: HeroShellProps) {
+  const preview = t('hero.preview').trim()
   return (
     <div className={css.root}>
       <div className={css.stack}>
@@ -126,7 +127,7 @@ export function HeroShell({ t, renderSlot, children }: HeroShellProps) {
             })}
           </span>
           <span className={css.headlineText}>{t('hero.headline')}</span>
-          <span className={css.previewBadge}>{t('hero.preview')}</span>
+          {preview === '' ? null : <span className={css.previewBadge}>{preview}</span>}
         </div>
         <div className={css.body}>
           {/* The resident composer (ConversationRoot's root-owned scrollport;

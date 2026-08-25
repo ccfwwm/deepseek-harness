@@ -339,18 +339,21 @@ export class PiAiAdapter extends LlmAdapter {
     const modelApi = typeof (modelInfo as unknown as { api?: unknown }).api === 'string'
       ? [(modelInfo as unknown as { api: string }).api]
       : []
-    const protocols = [...new Set([...configured, ...modelApi, ...supportedProtocols()])]
+    const declared = [...new Set([...configured, ...modelApi])]
       .filter(protocol => supportedProtocols().includes(protocol))
+    const protocols = declared.length > 0 ? declared : supportedProtocols()
     const attempts: import('@deepseek-ai/dsh-llm').LlmProbeAttempt[] = []
-    for (const protocol of protocols) {
+    let candidates = [...protocols]
+    for (let index = 0; index < candidates.length; index += 1) {
+      const protocol = candidates[index]!
       if (signal?.aborted) break
       const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), 4_500)
       const abort = (): void => controller.abort()
       signal?.addEventListener('abort', abort, { once: true })
+      const startedAt = Date.now()
       try {
         const candidate = this.probeSnapshot(snapshot, provider, protocol)
-        let finished = false
+        let accepted = false
         for await (const chunk of this.streamWithSnapshot({
           provider,
           model,
@@ -361,24 +364,95 @@ export class PiAiAdapter extends LlmAdapter {
           })],
           signal: AbortSignal.any([controller.signal, ...(signal === undefined ? [] : [signal])]),
         }, candidate)) {
-          if (chunk.type !== 'finish') continue
-          finished = chunk.reason.kind !== 'error' && chunk.reason.kind !== 'aborted'
-          if (!finished) attempts.push({ protocol, ok: false, message: chunk.reason.kind })
+          if (chunk.type !== 'finish') {
+            accepted = true
+            break
+          }
+          accepted = chunk.reason.kind !== 'error' && chunk.reason.kind !== 'aborted'
+          if (!accepted) {
+            const message = chunk.reason.kind === 'error' || chunk.reason.kind === 'aborted'
+              ? chunk.reason.failure.message
+              : chunk.reason.kind
+            attempts.push({ protocol, ok: false, message, latencyMs: Date.now() - startedAt })
+          }
           break
         }
-        if (finished) {
-          attempts.push({ protocol, ok: true })
+        if (accepted) {
+          controller.abort()
+          attempts.push({ protocol, ok: true, latencyMs: Date.now() - startedAt })
           return attempts
         }
-        if (!attempts.some(attempt => attempt.protocol === protocol)) attempts.push({ protocol, ok: false, message: 'model did not finish' })
+        if (!attempts.some(attempt => attempt.protocol === protocol)) {
+          attempts.push({ protocol, ok: false, message: 'model produced no stream event', latencyMs: Date.now() - startedAt })
+        }
       } catch (error: unknown) {
-        attempts.push({ protocol, ok: false, message: error instanceof Error ? error.message : String(error) })
+        attempts.push({ protocol, ok: false, message: error instanceof Error ? error.message : String(error), latencyMs: Date.now() - startedAt })
       } finally {
-        clearTimeout(timeout)
         signal?.removeEventListener('abort', abort)
+      }
+      const failure = attempts.at(-1)?.message ?? ''
+      if (declared.length > 0 && candidates.length === declared.length && explicitlyRejectsProtocol(failure)) {
+        candidates = [...new Set([...candidates, ...supportedProtocols()])]
+      } else if (declared.length > 0) {
+        break
       }
     }
     return attempts
+  }
+
+  override async probeVision(provider: string, model: string, signal?: AbortSignal): Promise<{ status: 'supported' | 'unsupported' | 'unknown'; protocol?: string; message?: string }> {
+    const attachments = this.config.resolveAttachments?.()
+    if (attachments === undefined) return { status: 'unknown' }
+    const snapshot = this.current()
+    const profile = this.profileOf(snapshot, provider)
+    const candidate = this.probeSnapshot(snapshot, provider, typeof profile.api === 'string' ? profile.api : supportedProtocols()[0]!)
+    const image = await attachments.saveImage({
+      mediaType: 'image/png',
+      name: 'zerowall-vision-probe.png',
+      data: Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')),
+    })
+    try {
+      const probeModel: Model<Api>[] = candidate.models.getModels(provider).map(entry => entry.id === model
+        ? { ...entry, input: ['text', 'image'] as ('text' | 'image')[] }
+        : entry)
+      const probeModels: MutableModels = createModels(this.config.auth)
+      const probeProfile = candidate.profiles.get(provider)
+      if (probeProfile === undefined) return { status: 'unknown' }
+      const rebuilt = buildProvider({
+        provider,
+        displayName: probeProfile.displayName,
+        api: probeProfile.api as Api,
+        ...(probeProfile.baseURL === undefined ? {} : { baseURL: probeProfile.baseURL }),
+        models: probeModel,
+        namesCredential: probeProfile.apiKeyEnv !== undefined,
+      })
+      for (const entry of candidate.profiles.values()) probeModels.setProvider(entry.provider === provider ? rebuilt : entry.piProvider)
+      const probeSnapshot: PiAiSnapshot = { profiles: candidate.profiles, models: probeModels }
+      let finished = false
+      const options = {
+        provider,
+        model,
+        maxTokens: 4,
+        messages: [createUserMessage({ content: [
+          { type: 'text', text: 'Describe the attached image in one word.' },
+          { type: 'image', attachment: image },
+        ], source: { kind: 'user' } })],
+        ...(signal === undefined ? {} : { signal }),
+      }
+      for await (const chunk of this.streamWithSnapshot(options, probeSnapshot)) {
+        if (chunk.type !== 'finish') continue
+        finished = chunk.reason.kind !== 'error' && chunk.reason.kind !== 'aborted'
+        if (!finished) {
+          const message = chunk.reason.kind === 'error' ? chunk.reason.failure.message : 'request aborted'
+          return { status: explicitlyRejectsVision(message) ? 'unsupported' : 'unknown', protocol: String(profile.api ?? 'native'), message }
+        }
+        break
+      }
+      return finished ? { status: 'supported', protocol: String(profile.api ?? 'native') } : { status: 'unknown' }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      return { status: explicitlyRejectsVision(message) ? 'unsupported' : 'unknown', protocol: String(profile.api ?? 'native'), message }
+    }
   }
 
   /** Build an immutable one-route snapshot with a candidate wire protocol. */
@@ -503,6 +577,16 @@ export class PiAiAdapter extends LlmAdapter {
       consumer.abort('pi-ai stream consumer stopped')
     }
   }
+}
+
+/** Only an explicit provider statement is durable evidence that image input is unsupported. */
+function explicitlyRejectsVision(message: string): boolean {
+  return /(?:image|vision|multimodal).{0,80}(?:not supported|unsupported|not allowed|text.?only)|(?:not supported|unsupported).{0,80}(?:image|vision|multimodal)/iu.test(message)
+}
+
+/** Try compatibility protocols only when the endpoint rejects the declared wire format immediately. */
+function explicitlyRejectsProtocol(message: string): boolean {
+  return /(?:unsupported|unknown|invalid).{0,40}(?:protocol|endpoint|content.?type)|(?:404|405|415|not found|method not allowed)/iu.test(message)
 }
 
 /** Normalize a gateway root for the selected protocol's path convention. */

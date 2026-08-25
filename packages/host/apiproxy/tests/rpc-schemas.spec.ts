@@ -265,6 +265,18 @@ describe('sessions domain schemas', () => {
     expect(sessionPromptRequestSchema.parse({
       sessionId: 's1', mode: 'queue', content: [],
     }).clientTimeZone).toBeUndefined()
+    const sha256 = 'a'.repeat(64)
+    expect(sessionPromptRequestSchema.parse({
+      sessionId: 's1',
+      mode: 'queue',
+      content: [{
+        type: 'file', attachmentId: `file-sha256:${sha256}`, name: 'notes.txt', mediaType: 'text/plain',
+        bytes: 5, sha256, parser: 'text', status: 'parsed', textChars: 5, preview: 'hello',
+      }],
+    }).content[0]).toMatchObject({ type: 'file', name: 'notes.txt', bytes: 5 })
+    expect(() => sessionPromptRequestSchema.parse({
+      sessionId: 's1', mode: 'queue', content: [{ type: 'file', name: 'bad.txt', bytes: 0, sha256: 'bad' }],
+    })).toThrow()
     expect(() => sessionPromptRequestSchema.parse({ sessionId: 's1', mode: 'inject', content: [] })).toThrow()
     expect(sessionPromptValueSchema.parse({ accepted: true }).accepted).toBe(true)
     // The command slot appears only when the prompt dispatched a slash command.

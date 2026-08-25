@@ -399,7 +399,7 @@ describe('WorkspaceRuntime', () => {
     await expect(workspaces.insertBefore(wid('ghost'))).rejects.toThrow(/workspace-not-found: gone/)
   })
 
-  it('targets New Session at explicit, current-session, then recent Workspaces and clears with none', async () => {
+  it('targets New Session at explicit, current-session, then recent Workspaces and creates a workspace-free session with none', async () => {
     const ctx = new Context()
     const api = new FakeApiClient()
     const sessions = new SessionRuntime(ctx, api, fakeRemote())
@@ -437,9 +437,9 @@ describe('WorkspaceRuntime', () => {
     const emptyApi = new FakeApiClient()
     const emptySessions = new SessionRuntime(emptyCtx, emptyApi, fakeRemote())
     const emptyWorkspaces = new WorkspaceRuntime(emptyCtx, emptyApi, emptySessions)
-    const clear = vi.spyOn(emptySessions, 'clear')
+    const create = vi.spyOn(emptySessions, 'create')
     emptyWorkspaces.startSession()
-    expect(clear).toHaveBeenCalledOnce()
+    expect(create).toHaveBeenCalledWith()
   })
 
   it('archives a session, projects the set from the response, list, and frame, and clears only the current one', async () => {

@@ -56,8 +56,32 @@ declare module '@deepseek-ai/dsh-llm' {
      * carries no transport vocabulary; rpcId and the optional Host-validated browser zone are
      * durable JSON fields passed back to the client with the event.
      */
-    'user-rpc': { kind: 'user'; rpcId: RpcId; clientTimeZone?: string }
+    'user-rpc': {
+      kind: 'user'
+      rpcId: RpcId
+      clientTimeZone?: string
+      /** Display-only file metadata; model-visible text remains in content. */
+      attachments?: readonly UserFileAttachmentView[]
+    }
   }
+}
+
+/** Durable presentation metadata for one uploaded file in a user message. */
+export interface UserFileAttachmentView {
+  type: 'file'
+  contentIndex: number
+  attachmentId: string
+  name: string
+  mediaType: string
+  bytes: number
+  sha256: string
+  parser: string
+  status: 'parsed' | 'needs_vision' | 'stored'
+  textChars: number
+  preview?: string
+  pageCount?: number
+  sheetCount?: number
+  warning?: string
 }
 
 /**
@@ -88,9 +112,26 @@ export interface SessionProjectionsBlock {
 }
 
 /** Browser-submitted prompt content; the host promotes image bytes to durable references. */
+export interface PromptFilePart {
+  type: 'file'
+  attachmentId: string
+  name: string
+  mediaType: string
+  bytes: number
+  sha256: string
+  parser: string
+  status: 'parsed' | 'needs_vision' | 'stored'
+  textChars: number
+  preview: string
+  pageCount?: number
+  sheetCount?: number
+  warning?: string
+}
+
 export type PromptContentPart =
   | { type: 'text'; text: string }
   | { type: 'image'; mediaType: ImageMediaType; data: string; name?: string }
+  | PromptFilePart
 
 /** Complete model selection for one session. */
 export interface ModelSelection {
@@ -122,6 +163,7 @@ export interface ModelReasoning {
 
 /** Runtime availability reported by the host's optional model probe. */
 export type ModelAvailability = 'unknown' | 'checking' | 'available' | 'unavailable' | 'requires-login'
+export type ModelVision = 'unknown' | 'supported' | 'unsupported'
 
 /** One model displayed inside its provider group. */
 export interface ModelCatalogModel {
@@ -131,6 +173,8 @@ export interface ModelCatalogModel {
   name: string
   /** Optional provider-supplied description. */
   description?: string
+  inputModalities?: ('text' | 'image')[]
+  vision?: ModelVision
   /** Exact-route reasoning metadata when the adapter exposes it. */
   reasoning?: ModelReasoning
   /** Last probe state; omitted by older hosts and treated as unknown. */

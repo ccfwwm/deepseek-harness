@@ -17,6 +17,22 @@ import { NativeDirectoryFlow } from './flow.ts'
 /** Required services (cordis fiber inject): the slot registry and the wire-facing workspace service. */
 export const inject = ['slots', 'workspaces']
 
+interface DesktopDirectoryPickerBridge {
+  chooseDirectory?: () => Promise<string | null>
+}
+
+declare global {
+  interface Window {
+    zerowallDesktop?: DesktopDirectoryPickerBridge
+  }
+}
+
+/** Prefer the Electron main-process dialog when this web client is embedded in ZeroWall Desktop. */
+function pickDirectory(ctx: ClientContext): Promise<string | null> {
+  const desktopPick = typeof window === 'undefined' ? undefined : window.zerowallDesktop?.chooseDirectory
+  return desktopPick === undefined ? ctx.workspaces.pickDirectory() : desktopPick()
+}
+
 /**
  * Client plugin body: register the renderless native flow into both
  * directory-flow holes through `slots.inject()` because the ui-workspace
@@ -24,7 +40,7 @@ export const inject = ['slots', 'workspaces']
  * @param ctx - client root context.
  */
 export function apply(ctx: ClientContext): void {
-  const injected = (): NativeFlowInjected => ({ pick: () => ctx.workspaces.pickDirectory() })
+  const injected = (): NativeFlowInjected => ({ pick: () => pickDirectory(ctx) })
   // Both declaration lifetimes must be live before the pair installs; the
   // generator makes the two registrations one transactional effect. The
   // outer/inner nesting order is arbitrary; neither hole has precedence.
