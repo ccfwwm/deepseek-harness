@@ -54,6 +54,14 @@ export interface LlmProbeAttempt {
   ok: boolean
   /** Safe diagnostic when the attempt failed. */
   message?: string
+  /** Wall-clock time spent waiting for this protocol attempt. */
+  latencyMs?: number
+}
+
+export interface LlmVisionProbeResult {
+  status: 'supported' | 'unsupported' | 'unknown'
+  protocol?: string
+  message?: string
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -282,8 +290,8 @@ export abstract class LlmAdapter {
    * format; the host considers the model usable when any attempt succeeds.
    */
   async probeModel(provider: string, model: string, signal?: AbortSignal): Promise<readonly LlmProbeAttempt[]> {
+    const startedAt = Date.now()
     const prepared = await this.prepareCall(provider, model, signal)
-    let finished = false
     for await (const chunk of prepared.stream({
       provider,
       model,
@@ -294,14 +302,20 @@ export abstract class LlmAdapter {
       })],
       ...(signal === undefined ? {} : { signal }),
     })) {
-      if (chunk.type !== 'finish') continue
-      finished = true
-      if (chunk.reason.kind === 'error' || chunk.reason.kind === 'aborted') {
-        return [{ protocol: 'native', ok: false, message: chunk.reason.kind }]
+      if (chunk.type !== 'finish') {
+        return [{ protocol: 'native', ok: true, latencyMs: Date.now() - startedAt }]
       }
-      break
+      if (chunk.reason.kind === 'error' || chunk.reason.kind === 'aborted') {
+        return [{ protocol: 'native', ok: false, message: chunk.reason.failure.message, latencyMs: Date.now() - startedAt }]
+      }
+      return [{ protocol: 'native', ok: true, latencyMs: Date.now() - startedAt }]
     }
-    return [{ protocol: 'native', ok: finished, ...(finished ? {} : { message: 'model did not finish' }) }]
+    return [{ protocol: 'native', ok: false, message: 'model produced no stream event', latencyMs: Date.now() - startedAt }]
+  }
+
+  /** Probe image input when the adapter can safely construct a provider request outside a conversation. */
+  async probeVision(_provider: string, _model: string, _signal?: AbortSignal): Promise<LlmVisionProbeResult> {
+    return Promise.resolve({ status: 'unknown' })
   }
 
   /**
@@ -974,6 +988,11 @@ export class LlmRuntime extends TypertRemoteService {
   /** Run the adapter-owned protocol probe for one registered route. */
   async probeModel(provider: string, model: string, signal?: AbortSignal): Promise<readonly LlmProbeAttempt[]> {
     return this.registration(provider).adapter.probeModel(provider, model, signal)
+  }
+
+  /** Run an adapter-owned image-input probe without creating a conversation turn. */
+  async probeVision(provider: string, model: string, signal?: AbortSignal): Promise<LlmVisionProbeResult> {
+    return this.registration(provider).adapter.probeVision(provider, model, signal)
   }
 
   private registration(provider: string): AdapterRegistration {
