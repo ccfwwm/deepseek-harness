@@ -345,24 +345,32 @@ export function apply(ctx: Context, config: Config = {}): void {
     },
     /* jscpd:ignore-start -- the execute path mirrors dsh-tool-bash's by design (see the pwsh-tool-and-executor Agent Note). */
     async execute(args: PwshToolArgs, exec) {
-      validatePwshArgs(args)
       // Description is display metadata; workdir defaults to the caller's session.
       const standingPolicy = resolveSandboxPolicy(exec)
-      const approvedMode = args.sandbox_permissions !== undefined && args.justification !== undefined
-        ? await approvePwshEscalation(args.sandbox_permissions, args.justification, exec, standingPolicy)
+      // Models sometimes echo the already-active preset (not an escalation),
+      // occasionally with an empty justification. Treat that as a no-op so a
+      // full-access session can continue executing commands; real widening
+      // requests still require the normal non-empty reason and approval flow.
+      const sameMode = args.sandbox_permissions !== undefined && standingPolicy?.mode === args.sandbox_permissions
+      const normalizedArgs: PwshToolArgs = sameMode
+        ? (({ sandbox_permissions: _sandboxPermissions, justification: _justification, ...rest }) => rest)(args)
+        : args
+      validatePwshArgs(normalizedArgs)
+      const approvedMode = normalizedArgs.sandbox_permissions !== undefined && normalizedArgs.justification !== undefined
+        ? await approvePwshEscalation(normalizedArgs.sandbox_permissions, normalizedArgs.justification, exec, standingPolicy)
         : undefined
       const policy = approvedMode === undefined
         ? standingPolicy
         : { ...(standingPolicy as SandboxExecutionPolicy), mode: approvedMode }
-      const workdir = resolveWorkdir(args.workdir, exec)
+      const workdir = resolveWorkdir(normalizedArgs.workdir, exec)
       const request = {
-        command: args.command,
+        command: normalizedArgs.command,
         ...workdir !== undefined ? { workdir } : {},
-        ...args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {},
+        ...normalizedArgs.timeoutMs !== undefined ? { timeoutMs: normalizedArgs.timeoutMs } : {},
         dshEnv: ctx.shellEnv.collect(exec),
         ...policy !== undefined ? { sandboxPolicy: policy } : {},
       }
-      if (args.run_in_background === true) {
+      if (normalizedArgs.run_in_background === true) {
         // Undeclared keys are allowed, so schema omission also needs enforcement.
         if (!backgroundEnabled) {
           throw new Error('run_in_background is disabled for this deployment (enableRunInBackground: false)')
@@ -380,7 +388,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         // Task preflight finishes before the starter can spawn a process.
         const id = jobs.start({
           kind: 'pwsh',
-          label: args.command,
+          label: normalizedArgs.command,
           ...exec.agent ? { owner: exec.agent } : {},
           run: () => {
             const proc = ctx.shell.start(ctx.shell.resolve(request))
