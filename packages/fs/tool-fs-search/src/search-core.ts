@@ -20,7 +20,7 @@
  */
 
 import { existsSync } from 'node:fs'
-import { isAbsolute, relative, sep } from 'node:path'
+import { isAbsolute, relative, sep, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import { ItemRetainer, TextRetainer } from '@deepseek-ai/dsh-output-retention'
@@ -172,7 +172,13 @@ export function resolveRgPath(): Promise<string> {
   rgPathPromise ??= Promise.resolve().then(async () => {
     const executableSidecar = `${process.execPath}-rg`
     if ('pkg' in process && existsSync(executableSidecar)) return executableSidecar
-    return (await import('@vscode/ripgrep')).rgPath
+    const candidate = (await import('@vscode/ripgrep')).rgPath
+    const normalized = candidate.includes('app.asar') ? candidate.replace(/app\.asar([\\/])/u, 'app.asar.unpacked$1') : candidate
+    const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath
+    const packaged = resourcesPath ? join(resourcesPath, 'app.asar.unpacked', 'node_modules', '@vscode', process.platform === 'win32' ? 'ripgrep-win32-x64' : 'ripgrep', 'bin', process.platform === 'win32' ? 'rg.exe' : 'rg') : ''
+    const resolved = [normalized, packaged].find(path => path && existsSync(path))
+    if (!resolved) throw new SearchError('搜索工具未安装或打包路径错误（ripgrep rg.exe 不存在）。', 'SEARCH_FAILED')
+    return resolved
   })
   return rgPathPromise
 }

@@ -471,7 +471,7 @@ async function probeModelCatalog(
       requestSignal?.addEventListener('abort', abort, { once: true })
       let record: ModelProbeRecord | undefined
       try {
-        for (let run = 1; run <= 2; run += 1) {
+        for (let run = 1; run <= 5; run += 1) {
           const attempts = await ctx.llm.probeModel(group.id, model.id, controller.signal)
           const successful = attempts.find(attempt => attempt.ok)
           if (successful !== undefined) {
@@ -492,8 +492,8 @@ async function probeModelCatalog(
             break
           }
           const failure = classifyModelProbeFailure(formatProbeAttempts(attempts))
-          if (run === 1 && failure.retryable && !controller.signal.aborted) {
-            await abortableDelay(750, controller.signal)
+          if (run < 5 && failure.retryable && !controller.signal.aborted) {
+            await abortableDelay(Math.min(4000, 500 * 2 ** (run - 1)), controller.signal)
             continue
           }
           record = {
@@ -569,7 +569,7 @@ interface ModelProbeRecord {
   failureCategory?: 'timeout' | 'rate-limit' | 'temporary' | 'auth' | 'unavailable'
 }
 
-const MODEL_PROBE_TIMEOUT_MS = 120_000
+const MODEL_PROBE_TIMEOUT_MS = 30_000
 
 function classifyModelProbeFailure(error: unknown): {
   status: ModelAvailability
