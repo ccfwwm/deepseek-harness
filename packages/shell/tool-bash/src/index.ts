@@ -327,25 +327,32 @@ export function apply(ctx: Context, config: Config = {}): void {
       }],
     },
     async execute(args: BashToolArgs, exec) {
-      validateBashArgs(args)
       // Description is display metadata; workdir defaults to the caller's session.
       const standingPolicy = resolveSandboxPolicy(exec)
-      const approvedMode = args.sandbox_permissions !== undefined && args.justification !== undefined
-        ? await approveBashEscalation(args.sandbox_permissions, args.justification, exec, standingPolicy)
+      // Echoing the already-active permission preset is not an escalation.
+      // Ignore it (including an empty reason) so full-access sessions do not
+      // fail before the command runs; genuine widening keeps strict approval.
+      const sameMode = args.sandbox_permissions !== undefined && standingPolicy?.mode === args.sandbox_permissions
+      const normalizedArgs: BashToolArgs = sameMode
+        ? (({ sandbox_permissions: _sandboxPermissions, justification: _justification, ...rest }) => rest)(args)
+        : args
+      validateBashArgs(normalizedArgs)
+      const approvedMode = normalizedArgs.sandbox_permissions !== undefined && normalizedArgs.justification !== undefined
+        ? await approveBashEscalation(normalizedArgs.sandbox_permissions, normalizedArgs.justification, exec, standingPolicy)
         : undefined
       const policy = approvedMode === undefined
         ? standingPolicy
         : { ...(standingPolicy as SandboxExecutionPolicy), mode: approvedMode }
-      const workdir = resolveWorkdir(args.workdir, exec, standingPolicy?.workspaceRoot)
+      const workdir = resolveWorkdir(normalizedArgs.workdir, exec, standingPolicy?.workspaceRoot)
       const dshEnv = ctx.shellEnv.collect(exec)
       const request = {
-        command: args.command,
+        command: normalizedArgs.command,
         ...workdir !== undefined ? { workdir } : {},
-        ...args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {},
+        ...normalizedArgs.timeoutMs !== undefined ? { timeoutMs: normalizedArgs.timeoutMs } : {},
         dshEnv,
         ...policy !== undefined ? { sandboxPolicy: policy } : {},
       }
-      if (args.run_in_background === true) {
+      if (normalizedArgs.run_in_background === true) {
         // Undeclared keys are allowed, so schema omission also needs enforcement.
         if (!backgroundEnabled) {
           throw new Error('run_in_background is disabled for this deployment (enableRunInBackground: false)')
@@ -363,7 +370,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         // Task preflight finishes before the starter can spawn a process.
         const id = jobs.start({
           kind: 'bash',
-          label: args.command,
+          label: normalizedArgs.command,
           ...exec.agent ? { owner: exec.agent } : {},
           run: () => {
             const proc = ctx.shell.start(ctx.shell.resolve(request))
