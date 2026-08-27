@@ -415,6 +415,63 @@ describe('toPiContext', () => {
     })
   })
 
+  it('round-trips the complete OpenAI Responses reasoning item through durable replay', () => {
+    const reasoningItem = {
+      id: 'rs_123',
+      type: 'reasoning',
+      encrypted_content: 'encrypted-payload',
+      summary: [{ type: 'summary_text', text: 'compact summary' }],
+      content: [{ type: 'reasoning_text', text: 'private reasoning' }],
+    }
+    const signature = JSON.stringify(reasoningItem)
+    const state = toPiReplayState(assistant({
+      api: 'openai-responses',
+      provider: 'openai',
+      model: 'gpt-5.6-sol',
+      content: [{ type: 'thinking', thinking: 'private reasoning', thinkingSignature: signature }],
+    }))
+    const context = toPiContext({
+      provider: 'openai',
+      model: 'gpt-5.6-sol',
+      messages: [createMessage({
+        role: 'assistant',
+        content: [{ type: 'reasoning', text: 'private reasoning' }],
+        source: { kind: 'model', provider: 'openai', model: 'gpt-5.6-sol', replayState: state },
+      })],
+    })
+
+    const replayed = context.messages[0] as AssistantMessage
+    expect(replayed.api).toBe('openai-responses')
+    expect(replayed.content[0]).toMatchObject({
+      type: 'thinking',
+      thinking: 'private reasoning',
+      thinkingSignature: signature,
+    })
+    expect(JSON.parse((replayed.content[0] as { thinkingSignature: string }).thinkingSignature)).toEqual(reasoningItem)
+  })
+
+  it('maps unsigned Chat Completions reasoning to the reasoning_text field', () => {
+    const state = toPiReplayState(assistant({
+      api: 'openai-completions',
+      content: [{ type: 'thinking', thinking: 'private reasoning' }],
+    }))
+    const context = toPiContext({
+      provider: 'deepseek',
+      model: 'deepseek-v4-flash',
+      messages: [createMessage({
+        role: 'assistant',
+        content: [{ type: 'reasoning', text: 'private reasoning' }],
+        source: { kind: 'model', provider: 'deepseek', model: 'deepseek-v4-flash', replayState: state },
+      })],
+    })
+
+    expect((context.messages[0] as AssistantMessage).content[0]).toEqual({
+      type: 'thinking',
+      thinking: 'private reasoning',
+      thinkingSignature: 'reasoning_text',
+    })
+  })
+
   it('replays all native block kinds when optional metadata is absent', () => {
     const state = toPiReplayState(assistant({
       content: [
