@@ -41,6 +41,7 @@ export interface IConversation {
    */
   send(text: string): Promise<void>
   resolveImage(sessionId: SessionId, attachment: ImageAttachmentRef): Promise<string>
+  addAttachmentImageToDraft(sessionId: SessionId, attachment: ImageAttachmentRef): Promise<void>
   /**
    * Apply one edit, remove, or strict steer operation to a pending queue occurrence.
    * @param itemId - agent-owned inbox occurrence identity.
@@ -297,6 +298,21 @@ export class ConversationController extends Service implements IConversation {
       })
     this.imageUrls.set(key, { sessionId, generation, pending })
     return pending
+  }
+
+  /** Load one durable image and append it to the target session's composer draft. */
+  async addAttachmentImageToDraft(sessionId: SessionId, attachment: ImageAttachmentRef): Promise<void> {
+    const binding = this.requireSessions().binding(sessionId)
+    if (binding === undefined) throw new Error(`conversation.addAttachmentImageToDraft: unknown session "${sessionId}"`)
+    const result = await binding.session.readAttachment(attachment.attachmentId)
+    if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
+    const stored = result.value.attachment
+    const bytes = Uint8Array.from(result.value.data)
+    const file = new File([bytes.buffer], stored.name || 'presentation-slide.png', { type: stored.mediaType })
+    const drafts = this.createDraftImages([file])
+    if (this.input.for(binding.ctx).addImages(drafts.map(draft => draft.id))) return
+    this.releaseDraftImages(drafts)
+    throw new Error('当前输入框正忙，暂时无法加入图片。')
   }
 
   /**

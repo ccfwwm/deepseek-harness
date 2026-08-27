@@ -129,6 +129,24 @@ describe('ConversationController', () => {
     await b.runtime.dispose()
   })
 
+  it('adds a durable image to the requested session draft without sending it', async () => {
+    const attachment = {
+      attachmentId: AttachmentId('image-draft'), mediaType: 'image/png' as const, bytes: 3, width: 1, height: 1, name: 'slide-03.png',
+    }
+    const readAttachment = vi.fn(async () => ({ ok: true as const, value: { attachment, data: Uint8Array.of(1, 2, 3) } }))
+    const b = await bench(readAttachment)
+    const created = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:slide-draft')
+    try {
+      await b.root.addAttachmentImageToDraft(b.runtime.sessions.behavior('s1').sessionId, attachment)
+      expect(readAttachment).toHaveBeenCalledWith(attachment.attachmentId)
+      expect(b.shell.state.getSnapshot().imageIds).toHaveLength(1)
+      expect(b.prompt).not.toHaveBeenCalled()
+    } finally {
+      created.mockRestore()
+    }
+    await b.runtime.dispose()
+  })
+
   it('fails loudly from the root scope, on an unbound session, or without SessionRuntime', async () => {
     const b = await bench()
     await expect(b.root.send('x')).rejects.toThrow(/requires a session scope/)
