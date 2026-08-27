@@ -18,7 +18,7 @@ export interface Win32DialogWorkerLike {
    */
   on(event: 'message', listener: (message: Win32DialogWorkerMessage) => void): unknown
   on(event: 'error', listener: (error: Error) => void): unknown
-  on(event: 'exit', listener: (code: number) => void): unknown
+  on(event: 'exit', listener: (code: number | null, signal?: NodeJS.Signals | null) => void): unknown
   /**
    * Force-stop the child; the abort path's last resort when `WM_CLOSE`
    * never lands (e.g. the dialog window was never created).
@@ -150,9 +150,9 @@ export async function pickWin32Directory(
         reject(error)
       })
     })
-    worker.on('exit', () => {
+    worker.on('exit', (code, signal) => {
       settle(() => {
-        reject(new Error('win32 folder dialog worker exited before reporting a result'))
+        reject(new Error(`win32 folder dialog worker exited before reporting a result (code=${code ?? 'null'}, signal=${signal ?? 'none'}). Check Electron worker dependencies and NODE_PATH.`))
       })
     })
   })

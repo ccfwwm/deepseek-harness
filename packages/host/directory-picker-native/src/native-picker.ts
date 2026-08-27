@@ -73,7 +73,13 @@ export async function pickNativeDirectory(
     // tier: any failure surfaces as-is (no PowerShell fallback tier; see
     // .agents/notes/implemented/simplification/2026-08-04-drop-windows-powershell-picker-fallback.md).
     const pickDialog = internals.pickWin32Dialog ?? pickWin32Directory
-    return await pickDialog(signal)
+    try {
+      return await pickDialog(signal)
+    } catch (error) {
+      if (signal.aborted || internals.pickWin32Dialog !== undefined || !(error instanceof Error) || !error.message.includes('worker exited before reporting')) throw error
+      await new Promise<void>(resolve => setTimeout(resolve, 120))
+      return await pickDialog(signal)
+    }
   }
 
   if (platform === 'linux') {
