@@ -147,6 +147,26 @@ describe('ConversationController', () => {
     await b.runtime.dispose()
   })
 
+  it('creates a new session draft image from external bytes and appends its context', async () => {
+    const b = await bench()
+    const created = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:presentation-slide')
+    try {
+      b.shell.setDraft('请修改配色')
+      await b.root.addImageBytesToDraft(b.runtime.sessions.behavior('s1').sessionId, {
+        data: Uint8Array.of(1, 2, 3),
+        mediaType: 'image/png',
+        name: 'slide-04.png',
+        contextText: 'PPT 页面引用：presentationId=ppt-1, slideId=slide-4, page=4',
+      })
+      expect(b.shell.state.getSnapshot().imageIds).toHaveLength(1)
+      expect(b.shell.state.getSnapshot().draft).toBe('请修改配色\n\nPPT 页面引用：presentationId=ppt-1, slideId=slide-4, page=4')
+      expect(b.prompt).not.toHaveBeenCalled()
+    } finally {
+      created.mockRestore()
+    }
+    await b.runtime.dispose()
+  })
+
   it('fails loudly from the root scope, on an unbound session, or without SessionRuntime', async () => {
     const b = await bench()
     await expect(b.root.send('x')).rejects.toThrow(/requires a session scope/)

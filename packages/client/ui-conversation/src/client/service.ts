@@ -43,6 +43,18 @@ export interface IConversation {
   resolveImage(sessionId: SessionId, attachment: ImageAttachmentRef): Promise<string>
   addAttachmentImageToDraft(sessionId: SessionId, attachment: ImageAttachmentRef): Promise<void>
   /**
+   * Create a new session-owned draft image from trusted bytes supplied by another capability.
+   * @param sessionId - target composer session.
+   * @param input - image bytes, browser MIME, file name, and optional draft context.
+   * @returns completion after the image and context enter the target draft.
+   */
+  addImageBytesToDraft(sessionId: SessionId, input: {
+    data: Uint8Array
+    mediaType: ImageMediaType
+    name: string
+    contextText?: string
+  }): Promise<void>
+  /**
    * Apply one edit, remove, or strict steer operation to a pending queue occurrence.
    * @param itemId - agent-owned inbox occurrence identity.
    * @param action - requested queue operation.
@@ -313,6 +325,30 @@ export class ConversationController extends Service implements IConversation {
     if (this.input.for(binding.ctx).addImages(drafts.map(draft => draft.id))) return
     this.releaseDraftImages(drafts)
     throw new Error('当前输入框正忙，暂时无法加入图片。')
+  }
+
+  /** Create a new browser draft image from capability-owned bytes. */
+  async addImageBytesToDraft(sessionId: SessionId, input: {
+    data: Uint8Array
+    mediaType: ImageMediaType
+    name: string
+    contextText?: string
+  }): Promise<void> {
+    const binding = this.requireSessions().binding(sessionId)
+    if (binding === undefined) throw new Error(`conversation.addImageBytesToDraft: unknown session "${sessionId}"`)
+    const bytes = Uint8Array.from(input.data)
+    const file = new File([bytes.buffer], input.name || 'presentation-slide.png', { type: input.mediaType })
+    const drafts = this.createDraftImages([file])
+    const target = this.input.for(binding.ctx)
+    if (!target.addImages(drafts.map(draft => draft.id))) {
+      this.releaseDraftImages(drafts)
+      throw new Error('当前输入框正忙，暂时无法加入图片。')
+    }
+    const contextText = input.contextText?.trim()
+    if (contextText) {
+      const current = target.state.getSnapshot().draft
+      target.setDraft(current.trim() ? `${current}\n\n${contextText}` : contextText)
+    }
   }
 
   /**
