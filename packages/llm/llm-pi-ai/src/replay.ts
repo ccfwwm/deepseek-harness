@@ -193,7 +193,16 @@ function replayedAssistant(message: Message, source: ModelMessageSource, rawStat
       case 'reasoning': return {
         type: 'thinking',
         thinking: block.text,
-        ...replay.type === 'reasoning' && replay.thinkingSignature !== undefined ? { thinkingSignature: replay.thinkingSignature } : {},
+        // OpenAI-compatible gateways commonly require the assistant's
+        // reasoning lane to be echoed as `reasoning_text`, even when the
+        // upstream stream did not provide an explicit signature. Preserve the
+        // native signature when present and use that protocol's required field
+        // as a compatibility fallback for non-empty reasoning.
+        ...replay.type === 'reasoning' && replay.thinkingSignature !== undefined
+          ? { thinkingSignature: replay.thinkingSignature }
+          : state.response.api === 'openai-completions' && block.text.trim().length > 0
+            ? { thinkingSignature: 'reasoning_text' }
+            : {},
         ...replay.type === 'reasoning' && replay.redacted !== undefined ? { redacted: replay.redacted } : {},
       }
       case 'tool-call': return {
