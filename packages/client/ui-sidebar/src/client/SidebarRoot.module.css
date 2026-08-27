@@ -14,7 +14,7 @@
   padding: 6px var(--dsh-sidebar-inline-padding);
   box-sizing: border-box;
   background: var(--dsw-specific-sidebar-fill);
-  color: var(--dsw-alias-label-primary);
+  color: var(--dsw-alias-label-primary, #202428);
   font-size: 14px;
   /* The sidebar is elevated above the conversation surface, so a revealed
      scrollbar uses the l2 pair. .quietBars hides it without changing layout. */
@@ -193,7 +193,7 @@
 }
 
 .iconButton:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
+  background: var(--dsw-alias-interactive-bg-hover, #edf1f4);
 }
 
 .collapsed .iconButton {
@@ -336,6 +336,36 @@
   flex-direction: column;
   align-items: stretch;
   gap: 4px;
+}
+
+.footerActions :global(button),
+.footerActions :global(a),
+.settingsArea :global(button) {
+  min-height: 36px;
+  color: var(--dsw-alias-label-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.footerActions :global(svg),
+.settingsArea :global(svg) {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  stroke-width: 2;
+}
+
+.footerActions :global(button:hover),
+.footerActions :global(a:hover),
+.settingsArea :global(button:hover) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.footerActions :global(button:focus-visible),
+.footerActions :global(a:focus-visible),
+.settingsArea :global(button:focus-visible) {
+  outline: 2px solid var(--dsw-alias-focus-ring, #17765f);
+  outline-offset: 1px;
 }
 
 .collapsed .footArea {
