@@ -15,7 +15,7 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { StateDotState } from '@deepseek-ai/dsh-client-ui-primitives'
 import { abbreviateHomePath } from '@deepseek-ai/dsh-util-workspace-path'
-import type { WorkspaceBrowserProps } from '../contract/slots.ts'
+import type { WorkspaceBrowserProps, WorkspaceContextAction } from '../contract/slots.ts'
 import type { GroupNode, SearchResultNode, SessionNode } from '../tree.ts'
 import css from './Rows.module.css'
 
@@ -67,6 +67,18 @@ function WorkspaceHoverContent({ label, cwd, createdAt, t }: {
   )
 }
 
+function workspaceViewForGroup(group: GroupNode) {
+  if (group.workspaceId === undefined || group.cwd === undefined) return undefined
+  return {
+    workspaceId: group.workspaceId,
+    path: group.cwd,
+    title: group.label,
+    sessionIds: [],
+    createdAt: new Date(group.createdAt ?? 0).toISOString(),
+    updatedAt: new Date().toISOString(),
+  }
+}
+
 /**
  * Row drag wiring supplied by the tree owner. `drop` reports the half of the
  * row where the pointer released so the owner can resolve an insert anchor.
@@ -114,7 +126,7 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
   onToggle: () => void
   onCreate: () => void
   /** Real-Workspace actions; absent for the ungrouped bucket (no menu shown). */
-  actions?: { rename: () => void; delete: () => void } | undefined
+  actions?: { rename: () => void; delete: () => void; context?: readonly WorkspaceContextAction[] | undefined } | undefined
   /** Present only for real Workspace rows in the grouped view. */
   drag?: WorkspaceRowDragProps | undefined
   /** Host account home; POSIX home-rooted hover paths display as `~`. */
@@ -126,9 +138,14 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
   const label = row.workspaceId === undefined ? t('group.ungrouped') : row.label
   const active = group.expanded && group.containsCurrent
   const [menuOpen, setMenuOpen] = useState(false)
+  const workspace = workspaceViewForGroup(group)
   const workspaceMenuItems = [
     { id: 'rename', label: t('rename'), icon: <IconEditOutline16 /> },
     { id: 'delete', label: t('delete.workspace'), icon: <IconTrashOutline16 />, danger: true },
+    ...(workspace === undefined ? [] : (actions?.context ?? [])
+      .filter(action => action.isVisible?.(workspace) !== false)
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+      .map(action => ({ id: action.id, label: action.label }))),
   ]
   const ownRow = (
     <div
@@ -166,7 +183,13 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
               // Unknown ids leave before the dispatch: a future menu row must
               // not inherit the destructive branch as an else fallback.
               /* v8 ignore next -- Menu can emit only the rename and delete rows supplied above. */
-              if (id !== 'rename' && id !== 'delete') return
+              if (id !== 'rename' && id !== 'delete') {
+                const action = actions?.context?.find(item => item.id === id)
+                if (action !== undefined && workspace !== undefined) {
+                  void action.run(workspace)
+                }
+                return
+              }
               if (id === 'rename') actions.rename()
               else actions.delete()
             }}

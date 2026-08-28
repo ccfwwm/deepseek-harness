@@ -123,7 +123,13 @@ class UiWorkspaceService extends Service implements UiWorkspace {
       : undefined
     const target = workspaceId ?? currentWorkspaceId ?? recent
     if (target === undefined) {
-      this.sessions.clear()
+      // A blank Session is still a fully runnable conversation.  It uses the
+      // Host default cwd without registering a Workspace, so model selection,
+      // attachments, and tools receive a real session scope immediately.
+      void this.sessions.create().then(
+        (sessionId) => { this.sessions.open(sessionId) },
+        (reason: unknown) => { console.warn('new unscoped session failed:', reason) },
+      )
       return
     }
     void this.connectWorkspace(target).then(
