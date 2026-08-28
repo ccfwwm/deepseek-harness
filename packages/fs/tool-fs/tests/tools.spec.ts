@@ -902,6 +902,26 @@ describe('sandbox escalation API (write/edit)', () => {
     }])
   })
 
+  it('ignores a redundant equal or narrower target even when its justification is blank', async () => {
+    const { ctx, fs } = await setupConfining({ approval: true })
+    const prompted = vi.fn()
+    ctx.on('approval/request', () => { prompted(); return Promise.resolve('allowed-once' as const) })
+    const fullAccess = escalationAgent([{ type: 'sandbox/mode', data: { mode: 'danger-full-access' } }])
+    const write = await call(ctx, 'write', {
+      file_path: 'a.txt', content: 'x', sandbox_permissions: 'workspace-write', justification: '',
+    }, fullAccess)
+    const edit = await call(ctx, 'edit', {
+      file_path: 'a.txt', old_string: 'x', new_string: 'y', sandbox_permissions: 'danger-full-access', justification: '',
+    }, fullAccess)
+    expect(write.isError).toBe(false)
+    expect(edit.isError).toBe(false)
+    expect(fs.stamped).toEqual([
+      { mode: 'danger-full-access', workspaceRoot: resolve('/session-project') },
+      { mode: 'danger-full-access', workspaceRoot: resolve('/session-project') },
+    ])
+    expect(prompted).not.toHaveBeenCalled()
+  })
+
   it('a denied write maps to the shared marker plus the escalation hint (isError)', async () => {
     const { ctx, fs } = await setupConfining()
     fs.rejectWith = new FsError('denied', 'FS_SANDBOX_DENIED')
@@ -964,7 +984,7 @@ describe('sandbox escalation API (write/edit)', () => {
 
   it('rejects the escalation argument pairing (one field without the other)', async () => {
     const { ctx } = await setupConfining()
-    const missing = await call(ctx, 'write', { file_path: 'a.txt', content: 'x', sandbox_permissions: 'workspace-write' }, escalationAgent())
+    const missing = await call(ctx, 'write', { file_path: 'a.txt', content: 'x', sandbox_permissions: 'danger-full-access' }, escalationAgent())
     expect(missing.isError).toBe(true)
     expect(text(missing)).toContain('sandbox_permissions requires a justification')
   })
