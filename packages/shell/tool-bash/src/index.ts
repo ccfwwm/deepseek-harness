@@ -20,7 +20,7 @@ import type {} from '@deepseek-ai/dsh-jobs'
 import type {} from '@deepseek-ai/dsh-user-approval'
 import type {} from '@deepseek-ai/dsh-shell-env'
 import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
-import { ESCALATION_TARGETS, approveEscalation, canonicalPath, validateEscalationArgs } from '@deepseek-ai/dsh-sandbox'
+import { ESCALATION_TARGETS, approveEscalation, canonicalPath, isSandboxPermissionCovered, validateEscalationArgs } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
 import { DSH_ENV_PREFIX } from '@deepseek-ai/dsh-shell'
 import type { ShellRunResult } from '@deepseek-ai/dsh-shell'
@@ -330,11 +330,12 @@ export function apply(ctx: Context, config: Config = {}): void {
     async execute(args: BashToolArgs, exec) {
       // Description is display metadata; workdir defaults to the caller's session.
       const standingPolicy = resolveSandboxPolicy(exec)
-      // Echoing the already-active permission preset is not an escalation.
-      // Ignore it (including an empty reason) so full-access sessions do not
-      // fail before the command runs; genuine widening keeps strict approval.
-      const sameMode = args.sandbox_permissions !== undefined && standingPolicy?.mode === args.sandbox_permissions
-      const normalizedArgs: BashToolArgs = sameMode
+      // A permission already covered by the standing mode is not an
+      // escalation. Ignore it, including an empty reason; genuine widening
+      // keeps strict approval.
+      const permissionCovered = standingPolicy !== undefined
+        && isSandboxPermissionCovered(standingPolicy.mode, args.sandbox_permissions)
+      const normalizedArgs: BashToolArgs = permissionCovered
         ? (({ sandbox_permissions: _sandboxPermissions, justification: _justification, ...rest }) => rest)(args)
         : args
       validateBashArgs(normalizedArgs)

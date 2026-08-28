@@ -31,7 +31,7 @@ import type {} from '@deepseek-ai/dsh-jobs'
 import type {} from '@deepseek-ai/dsh-shell-env'
 import type {} from '@deepseek-ai/dsh-user-approval'
 import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
-import { ESCALATION_TARGETS, approveEscalation, validateEscalationArgs } from '@deepseek-ai/dsh-sandbox'
+import { ESCALATION_TARGETS, approveEscalation, isSandboxPermissionCovered, validateEscalationArgs } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
 import type { ShellRunResult } from '@deepseek-ai/dsh-shell'
 import { parseExitStatus } from '@deepseek-ai/dsh-shell'
@@ -347,12 +347,12 @@ export function apply(ctx: Context, config: Config = {}): void {
     async execute(args: PwshToolArgs, exec) {
       // Description is display metadata; workdir defaults to the caller's session.
       const standingPolicy = resolveSandboxPolicy(exec)
-      // Models sometimes echo the already-active preset (not an escalation),
-      // occasionally with an empty justification. Treat that as a no-op so a
-      // full-access session can continue executing commands; real widening
-      // requests still require the normal non-empty reason and approval flow.
-      const sameMode = args.sandbox_permissions !== undefined && standingPolicy?.mode === args.sandbox_permissions
-      const normalizedArgs: PwshToolArgs = sameMode
+      // Models sometimes echo a permission already covered by the standing
+      // mode, occasionally with an empty justification. It is not an
+      // escalation; real widening still requires a reason and approval.
+      const permissionCovered = standingPolicy !== undefined
+        && isSandboxPermissionCovered(standingPolicy.mode, args.sandbox_permissions)
+      const normalizedArgs: PwshToolArgs = permissionCovered
         ? (({ sandbox_permissions: _sandboxPermissions, justification: _justification, ...rest }) => rest)(args)
         : args
       validatePwshArgs(normalizedArgs)
