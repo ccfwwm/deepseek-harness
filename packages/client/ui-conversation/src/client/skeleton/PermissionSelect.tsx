@@ -61,6 +61,15 @@ function optionLabel(
   option: PermissionSelectValue['options'][number],
   t: ComposerBarProps['t'],
 ): string {
+  if (option.value === 'read-only' && (option.name === option.value || option.name === 'Read Only')) {
+    return t('access.preset.readOnly')
+  }
+  if (option.value === 'workspace-write' && (option.name === option.value || option.name === 'Workspace Write')) {
+    return t('access.preset.workspaceWrite')
+  }
+  if (option.value === FULL_ACCESS && (option.name === option.value || option.name === 'Full access')) {
+    return t('access.preset.fullAccess')
+  }
   return option.value === FULL_ACCESS ? t('access.fullLabel') : displayName(option.name)
 }
 

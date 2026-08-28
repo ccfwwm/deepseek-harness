@@ -307,7 +307,7 @@ describe('Web session model selection', () => {
     }
     const readImage = vi.fn(() => Promise.resolve({ ref, data: Uint8Array.of(1, 2) }))
     ctx.provide('attachments', { readImage } as never)
-    const api = createApiProxy(ctx, {
+    const remote = createSessionTestRemote(ctx, {
       defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
       cwd: '/tmp',
     })
@@ -318,10 +318,10 @@ describe('Web session model selection', () => {
       meta: { path: '/tmp/cat.png', model: 'gpt-image-2', image: ref },
     } as never, { surfaceOp: 'append' })
 
-    const allowed = await api.sessions.attachment(request({
+    const allowed = await remote.attachment(request({
       sessionId, attachmentId: 'att-generated' as never,
     }))
-    expect(allowed.result).toMatchObject({ ok: true, value: { attachment: ref, data: 'AQI=' } })
+    expect(allowed).toMatchObject({ ok: true, value: { attachment: ref, data: 'AQI=' } })
     expect(readImage).toHaveBeenCalledOnce()
     await ctx.fiber.dispose()
   })

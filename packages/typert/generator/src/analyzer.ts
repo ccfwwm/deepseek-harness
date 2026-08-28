@@ -69,6 +69,8 @@ export interface WorkspaceAnalyzerOptions {
   readonly packages?: readonly string[]
   /** Independently compiled faces to materialize; both are analyzed by default. */
   readonly faces?: readonly TypertFace[]
+  /** Additional workspace-relative package roots trusted by the aggregate projects. */
+  readonly packageRoots?: readonly string[]
   /** Whether to repeat TypeScript project diagnostics before model extraction. */
   readonly checkDiagnostics?: boolean
   /** Whether missing annotations fail or are written before a clean re-analysis. */
@@ -264,7 +266,7 @@ export class WorkspaceCaches {
 export class WorkspaceAnalyzer {
   private readonly options: Required<Pick<
     WorkspaceAnalyzerOptions,
-    'root' | 'hostConfig' | 'clientConfig' | 'faces' | 'checkDiagnostics' | 'mode'
+    'root' | 'hostConfig' | 'clientConfig' | 'faces' | 'packageRoots' | 'checkDiagnostics' | 'mode'
   >> & Pick<WorkspaceAnalyzerOptions, 'packages'>
   private queuedEdit: SourceEdit | undefined
   private readonly crossFaceLinks = new Map<string, CrossFaceLink>()
@@ -278,6 +280,7 @@ export class WorkspaceAnalyzer {
       hostConfig: options.hostConfig ?? 'tsconfig.host.json',
       clientConfig: options.clientConfig ?? 'tsconfig.client.json',
       faces: options.faces ?? ['host', 'client'],
+      packageRoots: options.packageRoots ?? ['packages'],
       checkDiagnostics: options.checkDiagnostics ?? true,
       mode: options.mode ?? 'check',
       ...(options.packages === undefined ? {} : { packages: options.packages }),
@@ -464,12 +467,8 @@ export class WorkspaceAnalyzer {
       for (const reference of aggregate.parsed.projectReferences ?? []) {
         const configPath = projectConfigPath(reference.path)
         const packageRoot = dirname(configPath)
-        const workspacePackageRoots = [
-          join(this.options.root, 'packages'),
-          join(this.options.root, 'plugins'),
-          join(this.options.root, 'dsh/source/packages'),
-          join(this.options.root, 'store'),
-        ]
+        const workspacePackageRoots = this.options.packageRoots
+          .map(root => realPath(resolve(this.options.root, root)))
         if (!workspacePackageRoots.some(root => isWithin(realPath(packageRoot), root))) continue
         const manifestPath = join(packageRoot, 'package.json')
         if (!existsSync(manifestPath)) continue
