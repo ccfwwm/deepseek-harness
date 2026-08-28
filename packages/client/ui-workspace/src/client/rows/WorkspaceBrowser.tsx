@@ -233,7 +233,7 @@ function workspaceGroupHalf(e: { clientY: number; currentTarget: HTMLElement }):
 type SessionTreeProps = Pick<
   WorkspaceBrowserProps,
   'useSessions' | 'useSessionPendingInteraction' | 'startSession' | 'open' | 'forkSession'
-  | 'insertWorkspaceBefore' | 'insertSessionBefore' | 't'
+  | 'insertWorkspaceBefore' | 'insertSessionBefore' | 't' | 'workspaceContextActions'
 > & {
   /** Host account home for POSIX hover-path abbreviation. */
   home?: string | undefined
@@ -269,6 +269,7 @@ function SessionTree({
   useSessions, useSessionPendingInteraction, startSession, open, forkSession, workspaces, archivedSessionIds,
   onRenameRequest, onDeleteRequest, onSessionRename, onSessionArchive,
   insertWorkspaceBefore, insertSessionBefore, orderBy,
+  workspaceContextActions,
   groupExpansion, setGroupExpanded,
   sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder, home, t,
 }: SessionTreeProps) {
@@ -515,6 +516,7 @@ function SessionTree({
                 actions={group.workspaceId === undefined
                   ? undefined
                   : {
+                    context: workspaceContextActions,
                     rename: () => {
                     /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
                       if (group.workspaceId !== undefined) onRenameRequest(group.workspaceId, group.label)
@@ -808,6 +810,7 @@ export function WorkspaceBrowser({
   useStore,
   actions,
   startSession,
+  workspaceContextActions,
   open,
   renameSession,
   forkSession,
@@ -1248,6 +1251,7 @@ export function WorkspaceBrowser({
                 startSession={startSession}
                 open={open}
                 insertWorkspaceBefore={insertWorkspaceBefore}
+                workspaceContextActions={workspaceContextActions}
                 insertSessionBefore={insertSessionBefore}
                 orderBy={orderBy}
                 home={home}

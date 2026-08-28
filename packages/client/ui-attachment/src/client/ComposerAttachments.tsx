@@ -14,12 +14,18 @@ interface ComposerRailItem extends AttachmentRailItem {
   attachment: Extract<ComposerAttachment, { kind: 'image' }>
 }
 
+type ComposerFileAttachment = Extract<ComposerAttachment, { kind: 'file' }>
+
 /** Draft-image rail, document drop target, and original-image preview slot entry. */
 export function ComposerAttachments({
   attachments, canAcceptDrop, onAddImages, onRemoveImage, dropLimits, t,
 }: ComposerAttachmentsProps) {
   const imageAttachments = useMemo(
     () => attachments.filter((attachment): attachment is Extract<ComposerAttachment, { kind: 'image' }> => attachment.kind === 'image'),
+    [attachments],
+  )
+  const fileAttachments = useMemo(
+    () => attachments.filter((attachment): attachment is ComposerFileAttachment => attachment.kind === 'file'),
     [attachments],
   )
   const [preview, setPreview] = useState<Extract<ComposerAttachment, { kind: 'image' }> | null>(null)
@@ -98,14 +104,20 @@ export function ComposerAttachments({
           labels={dropOverlayLabels(t, canAcceptDrop, dropLimits)}
         />
       )}
-      {railItems.length > 0 && (
+      {(railItems.length > 0 || fileAttachments.length > 0) && (
         <div className={css.rail}>
-          <AttachmentRail
+          {railItems.length > 0 && <AttachmentRail
             items={railItems}
             labels={attachmentRailLabels(t)}
             onOpen={(item) => { setPreview(item.attachment) }}
             onRemove={(item) => { onRemoveImage(item.attachment.id) }}
-          />
+          />}
+          {fileAttachments.length > 0 && <div className={css.files} role="list" aria-label={t('file.pending')}>
+            {fileAttachments.map(file => <div className={css.file} role="listitem" key={file.id}>
+              <span className={css.fileName} title={file.file.name}>{file.file.name || t('file.unnamed')}</span>
+              <button type="button" className={css.fileRemove} aria-label={t('file.remove', { name: file.file.name })} onClick={() => { onRemoveImage(file.id) }}>×</button>
+            </div>)}
+          </div>}
         </div>
       )}
       {preview !== null && (

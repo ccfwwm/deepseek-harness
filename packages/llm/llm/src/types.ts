@@ -74,6 +74,25 @@ export interface ImageBlock {
   attachment: ImageAttachmentRef
 }
 
+/** A durable parsed document attachment supplied by a host file service. */
+export interface FileBlock {
+  type: 'file'
+  attachment: {
+    attachmentId: string
+    name: string
+    mediaType: string
+    bytes: number
+    sha256: string
+    parser: string
+    status: string
+    textChars: number
+    preview: string
+    pageCount?: number
+    sheetCount?: number
+    warning?: string
+  }
+}
+
 /** A tool invocation requested by the model. */
 export interface ToolCallBlock {
   type: 'tool-call'
@@ -100,6 +119,7 @@ export interface ContentBlockMap {
   'text': TextBlock
   'reasoning': ReasoningBlock
   'image': ImageBlock
+  'file': FileBlock
   'tool-call': ToolCallBlock
   'tool-result': ToolResultBlock
 }

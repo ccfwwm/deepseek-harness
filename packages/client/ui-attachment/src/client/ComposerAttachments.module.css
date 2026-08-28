@@ -2,3 +2,46 @@
   min-width: 0;
   padding: 4px 12px 0;
 }
+
+.files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 6px;
+}
+
+.file {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(320px, 100%);
+  padding: 5px 8px;
+  border: 1px solid var(--dsw-alias-border-l2-darkmode-thin);
+  border-radius: 8px;
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.fileName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileRemove {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.fileRemove:hover {
+  background: var(--dsw-alias-interactive-bg-hover-solid);
+  color: var(--dsw-alias-label-primary);
+}

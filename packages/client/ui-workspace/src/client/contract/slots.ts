@@ -51,6 +51,15 @@ export interface DirectoryFlowOwnerProps {
   onError: (message: string) => void
 }
 
+/** Extensible actions shown on a real Workspace row's context menu. */
+export interface WorkspaceContextAction {
+  id: string
+  label: string
+  order?: number
+  isVisible?: (workspace: WorkspaceView) => boolean
+  run: (workspace: WorkspaceView) => Promise<void> | void
+}
+
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
     /** Directory-flow hole under the conversation empty-state picker (declared by the WorkspacePicker entry). */
@@ -137,6 +146,8 @@ export type WorkspaceBrowserInjected = {
   insertSessionBefore: (workspaceId: WorkspaceId, sessionId: SessionId, beforeSessionId?: SessionId) => Promise<void>
   /** Adopt a picked host directory as a real Workspace before targeting a Session. */
   createWorkspace: (input: { path: string }) => Promise<WorkspaceView>
+  /** Additional row-menu actions supplied by desktop/domain plugins. */
+  workspaceContextActions?: readonly WorkspaceContextAction[] | undefined
 }
 
 /** Full browser props: shell owner share + viewing store + injected actions + the locale seat. */

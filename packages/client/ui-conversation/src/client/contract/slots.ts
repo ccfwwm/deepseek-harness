@@ -23,7 +23,7 @@ import type { ConversationSnapshot } from './snapshot.ts'
 import type { ViewTab } from './views.ts'
 
 /** Browser-owned image that has not crossed the durable Host boundary. */
-export interface ComposerAttachment {
+export type ComposerAttachment = {
   kind: 'image'
   id: DraftAttachmentId
   file: File
@@ -32,6 +32,24 @@ export interface ComposerAttachment {
   width?: number
   /** Intrinsic pixel height, filled asynchronously by the intake header probe. */
   height?: number
+} | {
+  kind: 'file'
+  id: DraftAttachmentId
+  file: File
+  prepared: {
+    attachmentId: string
+    name: string
+    mediaType: string
+    bytes: number
+    sha256: string
+    parser: string
+    status: string
+    textChars: number
+    preview: string
+    pageCount?: number
+    sheetCount?: number
+    warning?: string
+  }
 }
 
 /** Input state handed to the optional attachment presentation plugin. */
@@ -265,6 +283,7 @@ export interface ComposerBarOwnerProps {
 export interface ComposerBarInjected {
   keyboard: ComposerKeyboard | undefined
   addImages: ((files: readonly File[]) => string | null) | undefined
+  addFiles: ((files: readonly File[]) => Promise<string | null>) | undefined
   removeImage: ((id: DraftAttachmentId) => void) | undefined
   draftImages: ((ids: readonly DraftAttachmentId[]) => readonly ComposerAttachment[]) | undefined
   resolveSubmitMode: (

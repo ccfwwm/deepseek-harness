@@ -76,6 +76,21 @@ export type PromptContentPart =
     readonly data: string
     readonly name?: string
   }
+  | {
+    readonly type: 'file'
+    readonly attachmentId: string
+    readonly name: string
+    readonly mediaType: string
+    readonly bytes: number
+    readonly sha256: string
+    readonly parser: string
+    readonly status: string
+    readonly textChars: number
+    readonly preview: string
+    readonly pageCount?: number
+    readonly sheetCount?: number
+    readonly warning?: string
+  }
 
 /** Complete model selection for one Session. */
 export interface ModelSelection {

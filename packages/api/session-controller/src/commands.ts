@@ -520,10 +520,12 @@ async function durablePromptContent(
   }
   const refs = await admitEncodedImages(ctx.attachments, content.filter(part => part.type === 'image'))
   let next = 0
-  return content.map(part => part.type === 'text'
-    ? { type: 'text', text: part.text }
+  return content.map((part) => {
+    if (part.type === 'text') return { type: 'text', text: part.text }
+    if (part.type === 'file') return { type: 'file', attachment: { ...part } }
     // admitEncodedImages returns one reference per image part in order.
-    : { type: 'image', attachment: refs[next++] as ImageAttachmentRef })
+    return { type: 'image', attachment: refs[next++] as ImageAttachmentRef }
+  })
 }
 
 function imageBlockIn(

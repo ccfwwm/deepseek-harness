@@ -125,6 +125,17 @@ export function apply(ctx: Context): void {
       await workspaces.insertSessionBefore(workspaceId, sessionId, beforeSessionId)
     },
     createWorkspace: input => workspaces.create(input),
+    workspaceContextActions: [{
+      id: 'open-in-explorer',
+      label: '在资源管理器中打开',
+      order: 10,
+      run: async (workspace) => {
+        const api = (globalThis as { zerowallDesktop?: { openFolder?: (path: string) => Promise<boolean> } }).zerowallDesktop
+        if (api?.openFolder === undefined) throw new Error('当前桌面运行时不支持在资源管理器中打开。')
+        const ok = await api.openFolder(workspace.path)
+        if (!ok) throw new Error('无法在资源管理器中打开该目录。')
+      },
+    }],
     hooks: { directoryFlow: browserFlowSource, connectionGeneration },
   })
   const pickerInjected = (): WorkspacePickerInjected => ({
