@@ -40,6 +40,27 @@ export const WIDER_MODES: Record<string, readonly SandboxMode[]> = {
  */
 export const ESCALATION_TARGETS: readonly SandboxMode[] = ['workspace-write', 'danger-full-access']
 
+const MODE_RANK: Record<SandboxMode, number> = {
+  'read-only': 0,
+  'workspace-write': 1,
+  'danger-full-access': 2,
+}
+
+/**
+ * Whether an already-active mode covers a valid escalation target. Models may
+ * echo a target that is equal to or narrower than the session's standing mode;
+ * that is redundant call metadata, not an approval request. Unknown values and
+ * the non-target `read-only` mode return false so normal validation rejects
+ * injected values instead of silently accepting them.
+ * @param effectiveMode - the session's standing mode for this call.
+ * @param requestedMode - the raw target supplied by the tool call.
+ * @returns true only when a valid escalation target is already covered.
+ */
+export function isSandboxPermissionCovered(effectiveMode: SandboxMode, requestedMode: string | undefined): boolean {
+  if (!ESCALATION_TARGETS.includes(requestedMode as SandboxMode)) return false
+  return MODE_RANK[effectiveMode] >= MODE_RANK[requestedMode as SandboxMode]
+}
+
 /**
  * Validate the escalation argument pairing a tool schema cannot express:
  * `sandbox_permissions` and `justification` travel together — an approval

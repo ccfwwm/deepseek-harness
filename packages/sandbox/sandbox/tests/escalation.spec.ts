@@ -12,6 +12,7 @@ import {
   WIDER_MODES,
   approveEscalation,
   escalationHintMarker,
+  isSandboxPermissionCovered,
   sandboxDenialMarker,
   validateEscalationArgs,
 } from '@deepseek-ai/dsh-sandbox'
@@ -26,6 +27,15 @@ describe('the strictly-wider ladder', () => {
 
   it('the target enum is the closed set every session could escalate TO (read-only is the floor)', () => {
     expect(ESCALATION_TARGETS).toEqual(['workspace-write', 'danger-full-access'])
+  })
+
+  it('recognizes valid targets already covered by the standing mode', () => {
+    expect(isSandboxPermissionCovered('workspace-write', 'workspace-write')).toBe(true)
+    expect(isSandboxPermissionCovered('danger-full-access', 'workspace-write')).toBe(true)
+    expect(isSandboxPermissionCovered('danger-full-access', 'danger-full-access')).toBe(true)
+    expect(isSandboxPermissionCovered('read-only', 'workspace-write')).toBe(false)
+    expect(isSandboxPermissionCovered('danger-full-access', 'read-only')).toBe(false)
+    expect(isSandboxPermissionCovered('danger-full-access', 'unknown-mode')).toBe(false)
   })
 })
 
