@@ -524,6 +524,7 @@ function imageInEvent(
   const data = event.data as {
     readonly content?: unknown
     readonly message?: { readonly content?: unknown }
+    readonly meta?: { readonly image?: unknown }
     readonly inserted?: readonly { readonly content?: unknown }[]
     readonly chunk?: { readonly type?: unknown; readonly block?: unknown }
   }
@@ -531,6 +532,10 @@ function imageInEvent(
   if (direct !== undefined) return direct
   const message = imageBlockIn(data.message?.content, match)
   if (message !== undefined) return message
+  if (typeof data.meta?.image === 'object' && data.meta.image !== null) {
+    const ref = data.meta.image as ImageAttachmentRef
+    if (match(ref)) return ref
+  }
   for (const inserted of data.inserted ?? []) {
     const found = imageBlockIn(inserted.content, match)
     if (found !== undefined) return found

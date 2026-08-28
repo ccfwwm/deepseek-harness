@@ -26,6 +26,8 @@ export interface WorkspaceTypertGeneratorOptions {
    * merges) run regardless.
    */
   readonly checkDiagnostics?: boolean
+  /** Additional workspace-relative roots containing explicitly referenced packages. */
+  readonly packageRoots?: readonly string[]
 }
 
 /** Discover, analyze, and emit package reflection from independent faces. */
@@ -53,6 +55,7 @@ export class WorkspaceTypertGenerator {
     return new WorkspaceAnalyzer({
       root: this.root,
       caches: this.caches,
+      ...(this.options.packageRoots === undefined ? {} : { packageRoots: this.options.packageRoots }),
       ...(faces === undefined ? {} : { faces }),
     }).discoverPackages()
   }
@@ -69,6 +72,7 @@ export class WorkspaceTypertGenerator {
       root: this.root,
       packages: selected,
       caches: this.caches,
+      ...(this.options.packageRoots === undefined ? {} : { packageRoots: this.options.packageRoots }),
       ...(faces === undefined ? {} : { faces }),
       ...(this.options.checkDiagnostics === undefined ? {} : { checkDiagnostics: this.options.checkDiagnostics }),
     }).analyze()

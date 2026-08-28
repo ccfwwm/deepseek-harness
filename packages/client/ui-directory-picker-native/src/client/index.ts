@@ -15,6 +15,22 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { NativeFlowInjected } from './flow.ts'
 import { NativeDirectoryFlow } from './flow.ts'
 
+interface DesktopDirectoryPickerBridge {
+  chooseDirectory?: () => Promise<string | null>
+}
+
+declare global {
+  interface Window {
+    zerowallDesktop?: DesktopDirectoryPickerBridge
+  }
+}
+
+/** Prefer the Electron main-process dialog when embedded in ZeroWall Desktop. */
+function pickDirectory(ctx: ClientContext): Promise<string | null> {
+  const desktopPick = typeof window === 'undefined' ? undefined : window.zerowallDesktop?.chooseDirectory
+  return desktopPick === undefined ? ctx.uiWorkspace.pickDirectory() : desktopPick()
+}
+
 
 /** Required services (cordis fiber inject): the slot registry and workspace UI service. */
 export const inject = ['slots', 'uiWorkspace']
@@ -26,7 +42,7 @@ export const inject = ['slots', 'uiWorkspace']
  * @param ctx - client root context.
  */
 export function apply(ctx: ClientContext): void {
-  const injected = (): NativeFlowInjected => ({ pick: () => ctx.uiWorkspace.pickDirectory() })
+  const injected = (): NativeFlowInjected => ({ pick: () => pickDirectory(ctx) })
   // Both declaration lifetimes must be live before the pair installs; the
   // generator makes the two registrations one transactional effect. The
   // outer/inner nesting order is arbitrary; neither hole has precedence.

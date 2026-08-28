@@ -882,7 +882,7 @@ describe('WorkspaceAnalyzer', { timeout: 60_000 }, () => {
     aggregate.references.push({ path: './plugins/host-extension' })
     writeFileSync(aggregatePath, `${JSON.stringify(aggregate, null, 2)}\n`)
 
-    expect(new WorkspaceAnalyzer({ root }).discoverPackages()).toContainEqual({
+    expect(new WorkspaceAnalyzer({ root, packageRoots: ['packages', 'plugins'] }).discoverPackages()).toContainEqual({
       package: '@fixture/host-extension',
       root: 'plugins/host-extension',
       faces: ['host'],
