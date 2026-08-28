@@ -50,6 +50,8 @@ export type ComposerAttachment = {
     sheetCount?: number
     warning?: string
   }
+  width?: number
+  height?: number
 }
 
 /** Input state handed to the optional attachment presentation plugin. */
@@ -279,7 +281,7 @@ export interface ComposerBarOwnerProps {
 export interface ComposerBarInjected {
   keyboard: ComposerKeyboard | undefined
   addImages: ((files: readonly File[]) => string | null) | undefined
-  addFiles: ((files: readonly File[]) => Promise<string | null>) | undefined
+  addFiles?: ((files: readonly File[]) => Promise<string | null>) | undefined
   removeImage: ((id: DraftAttachmentId) => void) | undefined
   draftImages: ((ids: readonly DraftAttachmentId[]) => readonly ComposerAttachment[]) | undefined
   resolveSubmitMode: (
