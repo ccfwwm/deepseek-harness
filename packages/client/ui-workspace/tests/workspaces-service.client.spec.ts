@@ -278,8 +278,12 @@ describe('UiWorkspaceService', () => {
     })
 
     const empty = bench()
+    empty.sessions.create.mockResolvedValue(sid('unscoped'))
     empty.uiWorkspace.startSession()
-    expect(empty.sessions.clear).toHaveBeenCalledOnce()
+    await vi.waitFor(() => {
+      expect(empty.sessions.open).toHaveBeenCalledWith(sid('unscoped'))
+    })
+    expect(empty.sessions.create).toHaveBeenCalledOnce()
 
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     b.sessions.create.mockRejectedValueOnce(new Error('create failed'))
@@ -306,6 +310,20 @@ describe('UiWorkspaceService', () => {
     expect(b.workspaces.list.getSnapshot().items.map(item => item.workspaceId)).toEqual([
       wid('stable-first'), wid('recent'),
     ])
+  })
+
+  it('creates and opens an unscoped Session when both baselines have no Workspace', async () => {
+    const b = bench()
+    b.sessions.create.mockResolvedValue(sid('unscoped-initial'))
+
+    b.workspaces.list.set(workspaceState([]))
+    b.sessions.list.set(sessionState())
+
+    await vi.waitFor(() => {
+      expect(b.sessions.open).toHaveBeenCalledWith(sid('unscoped-initial'))
+    })
+    expect(b.sessions.create).toHaveBeenCalledOnce()
+    expect(b.sessions.create.mock.calls[0]).toEqual([])
   })
 
   it('uses Workspace creation time when members are absent and preserves Host tie order', async () => {

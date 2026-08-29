@@ -316,12 +316,12 @@ export function ConversationRoot({
     </div>
   )
 
-  // The placeholder chip ("Choose workspace") and the Workspace-trigger input travel
-  // together: no workspace picked yet (cold start, no session at all), or a
-  // blank session whose workspace vanished (deleted from the sidebar). The
-  // bar is ONE session-maybe slot rendered unconditionally — inert is a prop,
-  // not a different tree, so the textarea DOM survives the transition.
-  const inert = sessionId === undefined || (hero && chipTitle === undefined)
+  // Only the absence of a Session makes the composer inert.  A blank Session
+  // may intentionally have no Workspace (for example, a fresh conversation
+  // from the New Session button); it still has a valid agent scope and must
+  // accept text, model selection, attachments, and tools.  The workspace
+  // chip remains available as an optional retarget action in that posture.
+  const inert = sessionId === undefined
   // A raised block is the same inert posture with the blocker's own reason:
   // one disabled textarea, never a second tree. The no-workspace state wins
   // when both hold — picking a workspace is the earlier prerequisite.

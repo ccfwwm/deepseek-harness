@@ -176,7 +176,25 @@ class UiWorkspaceService extends Service implements UiWorkspace {
       }
       const target = recentWorkspace(workspace.items, sessions.byId)
       if (target === undefined) {
-        initial = 'done'
+        // A deployment can have no registered Workspace on first launch.
+        // Create a normal unscoped Session so the conversation composer is
+        // immediately usable; this Session uses the Host's default cwd and
+        // is deliberately not added to the Workspace roster.
+        initial = 'connecting'
+        void this.sessions.create().then(
+          (sessionId) => {
+            if (disposed) return
+            if (this.sessions.list.getSnapshot().current === undefined) {
+              this.sessions.open(sessionId)
+            }
+            initial = 'done'
+          },
+          (reason: unknown) => {
+            if (disposed) return
+            initial = 'waiting'
+            console.warn('initial unscoped session creation failed:', reason)
+          },
+        )
         return
       }
       initial = 'connecting'
