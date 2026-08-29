@@ -319,7 +319,7 @@ export function apply(ctx: Context): void {
         },
         addFiles: async (files) => {
           try {
-            const documents = await conversation.createDraftFiles(files)
+            const documents = await conversation.createDraftFiles(files, sessionId)
             if (!shell.addImages(documents.map(file => file.id))) {
               conversation.releaseDraftImages(documents)
               return t('file.busy')
@@ -350,11 +350,10 @@ export function apply(ctx: Context): void {
               span: { ...selection, draftRev: snapshot.draftRev },
             })
           },
-        stop: () => {
-          scopedConversation(sessions, sessionId).cancel().catch(() => {
-            // Stop failure is published through Session promptError.
-          })
-        },
+        stop: () => scopedConversation(sessions, sessionId).cancel().catch(() => {
+          // Session.cancel records the failure on promptError; avoid an
+          // unhandled rejection when the DOM event cannot await the action.
+        }),
         command: async (line) => {
           const session = sessions.binding(sessionId)?.session
           if (session === undefined) return false

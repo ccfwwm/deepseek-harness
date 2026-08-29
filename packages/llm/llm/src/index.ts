@@ -986,12 +986,24 @@ export class LlmRuntime extends TypertRemoteService {
     })
   }
 
-  /** Run the adapter-owned protocol probe for one registered route. */
+  /**
+   * Run the adapter-owned protocol probe for one registered route.
+   * @param provider - registered provider route.
+   * @param model - exact model id.
+   * @param signal - optional cancellation signal.
+   * @returns protocol attempts and their success diagnostics.
+   */
   async probeModel(provider: string, model: string, signal?: AbortSignal): Promise<readonly LlmProbeAttempt[]> {
     return this.registration(provider).adapter.probeModel(provider, model, signal)
   }
 
-  /** Run an adapter-owned image-input probe without creating a conversation turn. */
+  /**
+   * Run an adapter-owned image-input probe without creating a conversation turn.
+   * @param provider - registered provider route.
+   * @param model - exact model id.
+   * @param signal - optional cancellation signal.
+   * @returns whether the model accepted a real image request.
+   */
   async probeVision(provider: string, model: string, signal?: AbortSignal): Promise<LlmVisionProbeResult> {
     return this.registration(provider).adapter.probeVision(provider, model, signal)
   }

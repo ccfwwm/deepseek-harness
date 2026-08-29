@@ -718,9 +718,10 @@ inspect( sessionId: SessionId, signal?: AbortSignal, ): Promise<SessionInspectio
 
 /**
  * Describe every currently routable model for Host-generation selectors.
+ * @param request - optional explicit health-check request; metadata-only when omitted.
  * @returns provider-grouped models, the deployment default, and isolated provider failures.
  */
-@Remote('modelCatalog') modelCatalog(): Promise<ModelCatalog>
+@Remote('modelCatalog') modelCatalog(request?: { readonly check?: boolean }): Promise<ModelCatalog>
 
 /**
  * Report whether this deployment can hand a Session workspace path to a native desktop.

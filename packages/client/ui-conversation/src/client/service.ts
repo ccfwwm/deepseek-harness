@@ -18,6 +18,7 @@ import type {
 } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { ImageMediaType } from '@deepseek-ai/dsh-attachment'
+import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { ComposerAttachment } from './contract/slots.ts'
 import type { QueueAction, QueueItemId } from './contract/queue.ts'
 import type { ComposerBlocks } from './contract/composer-blocks.ts'
@@ -45,6 +46,13 @@ export interface IConversation {
    * @returns completion; business failures reject (and land in promptError).
    */
   send(text: string): Promise<void>
+  /** Add capability-owned image bytes and optional context to one session draft. */
+  addImageBytesToDraft(sessionId: SessionId, input: {
+    data: Uint8Array
+    mediaType: ImageMediaType
+    name: string
+    contextText?: string
+  }): Promise<void>
   /**
    * Apply one edit, remove, or strict steer operation to a pending queue occurrence.
    * @param itemId - agent-owned inbox occurrence identity.
@@ -65,12 +73,24 @@ export interface IConversation {
 }
 
 /** Create one browser-only draft descriptor; only its id enters input state. */
-function browserDraftAttachment(file: File): ComposerAttachment {
+function browserDraftAttachment(file: File): Extract<ComposerAttachment, { kind: 'image' }> {
   return {
     kind: 'image',
     id: randomUUID() as DraftAttachmentId,
     previewUrl: URL.createObjectURL(file),
     file,
+  }
+}
+
+type PreparedFile = Extract<ComposerAttachment, { kind: 'file' }>['prepared']
+interface FilesRemote {
+  prepare(input: { sessionId: SessionId; name: string; mediaType?: string; data: string }): Promise<RemoteResult<PreparedFile>>
+}
+
+export class FileServiceUnavailableError extends Error {
+  constructor() {
+    super('the file parsing remote is not part of this composition')
+    this.name = 'FileServiceUnavailableError'
   }
 }
 
@@ -82,7 +102,7 @@ function browserDraftAttachment(file: File): ComposerAttachment {
  * reads the dimensions into an immutable echo snapshot, so this late write
  * does not require a store notification.
  */
-function probeDimensions(attachment: ComposerAttachment): void {
+function probeDimensions(attachment: Extract<ComposerAttachment, { kind: 'image' }>): void {
   if (typeof Image !== 'function') return
   const probe = new Image()
   probe.onload = () => {
@@ -164,7 +184,7 @@ export class ConversationController extends Service implements IConversation {
     this.blocks = config.blocks
     ctx.effect(() => () => {
       for (const attachment of this.draftAttachments.values()) {
-        revokePreview(attachment.previewUrl)
+        if (attachment.kind === 'image') revokePreview(attachment.previewUrl)
       }
       this.draftAttachments.clear()
     }, 'conversation draft attachments')
@@ -207,9 +227,9 @@ export class ConversationController extends Service implements IConversation {
     if (attachments.length !== imageIds.length) {
       throw new Error('conversation.sendSession: one or more draft images are no longer available')
     }
-    const snapshot = session.getSnapshot()
-    if (snapshot.subagent !== null) {
-      const uploaded = await this.serializeImages(attachments.map(attachment => attachment.file))
+    const images = attachments.filter((attachment): attachment is Extract<ComposerAttachment, { kind: 'image' }> => attachment.kind === 'image')
+    if (session.getSnapshot().subagent !== null) {
+      const uploaded = await this.serializeAttachments(attachments)
       const content = [...uploaded, ...(text === '' ? [] : [{ type: 'text' as const, text }])]
       const result = await session.prompt(content, mode, signal)
       return result.ok ? { kind: 'success' } : { kind: 'error' }
@@ -219,23 +239,22 @@ export class ConversationController extends Service implements IConversation {
       ? undefined
       : new Promise<PendingSubmissionRetirement>((resolve) => { finishRetirement = resolve })
     const submission = session.beginSubmission({
-      mode,
       text,
-      images: attachments.map(attachment => ({
+      images: images.map(attachment => ({
         previewUrl: attachment.previewUrl,
         ...(attachment.file.name === '' ? {} : { name: attachment.file.name }),
         ...(attachment.width === undefined ? {} : { width: attachment.width }),
         ...(attachment.height === undefined ? {} : { height: attachment.height }),
       })),
       onRetire: (settlement) => {
-        this.settleSubmittedImages(session.sessionId, attachments, settlement)
+        this.settleSubmittedImages(session.sessionId, images, settlement)
         finishRetirement?.(settlement)
       },
     })
     let content: Parameters<SessionFace['prompt']>[0]
     try {
       await nextPaint()
-      const uploaded = await this.serializeImages(attachments.map(attachment => attachment.file))
+      const uploaded = await this.serializeAttachments(attachments)
       content = [...uploaded, ...(text === '' ? [] : [{ type: 'text' as const, text }])]
     } catch (error) {
       submission.abandon()
@@ -260,6 +279,24 @@ export class ConversationController extends Service implements IConversation {
       probeDimensions(attachment)
       return attachment
     })
+  }
+
+  /** Parse ordinary files through the optional ZeroWall file service. */
+  async createDraftFiles(files: readonly File[], sessionId: SessionId): Promise<readonly ComposerAttachment[]> {
+    const remote = this.ctx.get('remote.zerowallFiles') as FilesRemote | undefined
+    if (remote === undefined) throw new FileServiceUnavailableError()
+    const prepared = await Promise.all(files.map(async (file) => {
+      const response = await remote.prepare({
+        sessionId,
+        name: file.name || 'uploaded-file',
+        ...(file.type === '' ? {} : { mediaType: file.type }),
+        data: await base64Of(file),
+      })
+      if (!response.ok) throw new Error(`${response.error.code}: ${response.error.message}`)
+      return { kind: 'file' as const, id: randomUUID() as DraftAttachmentId, file, prepared: response.value }
+    }))
+    for (const attachment of prepared) this.draftAttachments.set(attachment.id, attachment)
+    return prepared
   }
 
   /**
@@ -299,7 +336,7 @@ export class ConversationController extends Service implements IConversation {
     const attachment = this.draftAttachments.get(id)
     if (attachment === undefined) return
     this.draftAttachments.delete(id)
-    revokePreview(attachment.previewUrl)
+    if (attachment.kind === 'image') revokePreview(attachment.previewUrl)
   }
 
   /**
@@ -310,6 +347,32 @@ export class ConversationController extends Service implements IConversation {
     for (const attachment of attachments) this.releaseDraftImage(attachment.id)
   }
 
+  /** Create a browser draft image from trusted capability-owned bytes. */
+  async addImageBytesToDraft(sessionId: SessionId, input: {
+    data: Uint8Array
+    mediaType: ImageMediaType
+    name: string
+    contextText?: string
+  }): Promise<void> {
+    const binding = this.requireSessions().binding(sessionId)
+    if (binding === undefined) {
+      throw new Error(`conversation.addImageBytesToDraft: unknown session "${sessionId}"`)
+    }
+    const bytes = Uint8Array.from(input.data)
+    const file = new File([bytes.buffer], input.name || 'presentation-slide.png', { type: input.mediaType })
+    const drafts = this.createDraftImages([file])
+    const target = this.input.for(binding.ctx)
+    if (!target.addImages(drafts.map(draft => draft.id))) {
+      this.releaseDraftImages(drafts)
+      throw new Error('conversation.addImageBytesToDraft: composer is busy')
+    }
+    const contextText = input.contextText?.trim()
+    if (contextText !== undefined && contextText !== '') {
+      const current = target.state.getSnapshot().draft
+      target.setDraft(current.trim() === '' ? contextText : `${current}\n\n${contextText}`)
+    }
+  }
+
   /** Apply one operation to a pending queue occurrence. */
   async updateQueue(itemId: QueueItemId, action: QueueAction): Promise<void> {
     const session = this.scopedSession('updateQueue')
@@ -317,7 +380,7 @@ export class ConversationController extends Service implements IConversation {
     if (!result.ok) {
       if (
         action.kind === 'steer'
-        && (result.error.code === 'session/steer-unavailable' || result.error.code === 'session/queue-item-not-found')
+        && (result.error.code === 'steer-unavailable' || result.error.code === 'queue-item-not-found')
       ) return
       throw new Error(`conversation.updateQueue failed: ${result.error.code}: ${result.error.message}`)
     }
@@ -370,7 +433,7 @@ export class ConversationController extends Service implements IConversation {
    */
   private settleSubmittedImages(
     sessionId: SessionId,
-    attachments: readonly ComposerAttachment[],
+    attachments: readonly Extract<ComposerAttachment, { kind: 'image' }>[],
     retirement: PendingSubmissionRetirement,
   ): void {
     if (retirement.reason !== 'observed') return
@@ -381,13 +444,15 @@ export class ConversationController extends Service implements IConversation {
       this.draftAttachments.delete(attachment.id)
       const ref = retirement.attachments[index]
       if (ref !== undefined && uiConversation?.seedImageUrl(sessionId, ref, attachment.previewUrl) === true) return
-      revokePreview(attachment.previewUrl)
+      if (attachment.kind === 'image') revokePreview(attachment.previewUrl)
     })
   }
 
   /** Convert browser files to canonical base64 prompt parts. */
-  private serializeImages(images: readonly File[]): Promise<Parameters<SessionFace['prompt']>[0]> {
-    return Promise.all(images.map(async file => ({ type: 'image' as const, ...await this.encodeImage(file) })))
+  private serializeAttachments(attachments: readonly ComposerAttachment[]): Promise<Parameters<SessionFace['prompt']>[0]> {
+    return Promise.all(attachments.map(async attachment => attachment.kind === 'image'
+      ? { type: 'image' as const, ...await this.encodeImage(attachment.file) }
+      : { type: 'file' as const, ...attachment.prepared })) as Promise<Parameters<SessionFace['prompt']>[0]>
   }
 
   /** Canonical base64 wire form of one browser image file. */

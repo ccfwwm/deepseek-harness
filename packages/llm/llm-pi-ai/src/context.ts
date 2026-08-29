@@ -4,9 +4,8 @@
  * @module dsh-llm-pi-ai/context
  */
 
-import { brandString } from '@deepseek-ai/dsh-brand'
-import { contentHasImage, LlmError, offloadedImageText, offloadRequestImagesWithPolicy, requestImageHandleText } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, GenerateOptions, ImageAttachmentAccessResolver, Message, ToolCallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId, contentHasImage, fileAttachmentText, LlmError, offloadedImageText, offloadRequestImagesWithPolicy, requestImageHandleText } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, GenerateOptions, ImageAttachmentAccessResolver, Message } from '@deepseek-ai/dsh-llm'
 import type {
   AttachmentId,
   AttachmentStore,
@@ -21,8 +20,7 @@ import { DEFAULT_REQUEST_IMAGE_MAX_BYTES, DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET } f
 /** Join the text blocks of a harness message. */
 function flattenText(message: Message): string {
   return message.content
-    .filter(block => block.type === 'text')
-    .map(block => block.text)
+    .flatMap(block => block.type === 'text' ? [block.text] : block.type === 'file' ? [fileAttachmentText(block.attachment)] : [])
     .join('')
 }
 
@@ -31,6 +29,7 @@ function flattenText(message: Message): string {
 function toolResultText(blocks: readonly ContentBlock[]): string {
   return blocks.map(block => block.type === 'text'
     ? block.text
+    : block.type === 'file' ? fileAttachmentText(block.attachment)
     : block.type === 'tool-result' ? toolResultText(block.content) : '').join('')
 }
 
@@ -70,6 +69,9 @@ async function userContent(
         })
         break
       }
+      case 'file':
+        content.push({ type: 'text', text: fileAttachmentText(block.attachment) })
+        break
       case 'tool-result':
         {
           const nested = await userContent(block.content, requestImages, resolveImageAccess)
@@ -138,19 +140,6 @@ function piContext(options: GenerateOptions, messages: PiMessage[]): PiContext {
   }
 }
 
-function appendAssistant(
-  message: Message,
-  messages: PiMessage[],
-  toolNames: Map<ToolCallId, string>,
-  onReplayDegrade?: (reason: string) => void,
-): void {
-  const assistant = toPiAssistant(message, onReplayDegrade)
-  for (const block of assistant.content) {
-    if (block.type === 'toolCall') toolNames.set(brandString<ToolCallId>(block.id), block.name)
-  }
-  messages.push(assistant)
-}
-
 function textOnlyContext(options: GenerateOptions, onReplayDegrade?: (reason: string) => void): PiContext {
   const toolNames = new Map<ToolCallId, string>()
   const messages: PiMessage[] = []
@@ -163,7 +152,9 @@ function textOnlyContext(options: GenerateOptions, onReplayDegrade?: (reason: st
       continue
     }
     if (message.role === 'assistant') {
-      appendAssistant(message, messages, toolNames, onReplayDegrade)
+      const assistant = toPiAssistant(message, onReplayDegrade)
+      for (const block of assistant.content) if (block.type === 'toolCall') toolNames.set(ToolCallId(block.id), block.name)
+      messages.push(assistant)
       continue
     }
     const text = flattenText(message)
@@ -275,7 +266,11 @@ async function toPiContextWithImages(
       continue
     }
     if (message.role === 'assistant') {
-      appendAssistant(message, messages, toolNames, onReplayDegrade)
+      const assistant = toPiAssistant(message, onReplayDegrade)
+      for (const block of assistant.content) {
+        if (block.type === 'toolCall') toolNames.set(ToolCallId(block.id), block.name)
+      }
+      messages.push(assistant)
       continue
     }
     // user role: text + tool results (each result becomes its own message).

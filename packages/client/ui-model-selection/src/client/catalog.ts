@@ -1,7 +1,6 @@
 /** One Host-generation model catalog shared by every Session selector. */
 
-import type { Context as ClientContext } from '@deepseek-ai/cordis'
-import type { ModelCatalog } from '@deepseek-ai/dsh-api-remotes/client'
+import type { ClientRemote, ModelCatalog } from '@deepseek-ai/dsh-api-remotes/client'
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 
 /** Observable lifecycle of the shared model catalog. */
@@ -23,11 +22,8 @@ export class ModelCatalogDirectory {
   private generation = 0
   private inflight: Promise<ModelCatalog> | undefined
 
-  /**
-   * @param ctx - the providing plugin's context, whose `remote.session`
-   * namespace carries the Host-generation catalog.
-   */
-  constructor(private readonly ctx: ClientContext) {}
+  /** @param session - Session Remote namespace carrying the Host-generation catalog. */
+  constructor(private readonly session: Pick<ClientRemote['session'], 'modelCatalog'>) {}
 
   /**
    * Return the current generation's catalog, sharing its one in-flight load.
@@ -42,7 +38,9 @@ export class ModelCatalogDirectory {
       draft.status = 'loading'
       draft.error = null
     })
-    const operation = this.ctx.remote.session.modelCatalog().then((response) => {
+    // The first load belongs to Host startup. It performs the one real text
+    // and vision probe and is then shared by settings and every selector.
+    const operation = this.session.modelCatalog({ check: true }).then((response) => {
       if (!response.ok) {
         throw new Error(`${response.error.code}: ${response.error.message}`)
       }
@@ -65,6 +63,50 @@ export class ModelCatalogDirectory {
     return operation
   }
 
+  /** Explicitly refresh provider metadata without probing every model. */
+  sync(): Promise<ModelCatalog> {
+    return this.request({ refresh: true })
+  }
+
+  /** Explicit user action: probe every model in the current Host generation. */
+  checkAll(): Promise<ModelCatalog> {
+    return this.request({ check: true, refresh: true })
+  }
+
+  /** Explicit user action: probe one exact provider/model route. */
+  checkModel(provider: string, model: string): Promise<ModelCatalog> {
+    return this.request({ check: true, refresh: true, provider, model })
+  }
+
+  private request(request: {
+    check?: boolean
+    refresh?: boolean
+    provider?: string
+    model?: string
+  }): Promise<ModelCatalog> {
+    this.store.update((draft) => {
+      draft.status = request.check === true ? 'loading' : 'loading'
+      draft.error = null
+    })
+    const generation = this.generation
+    const operation = this.session.modelCatalog(request).then((response) => {
+      if (!response.ok) throw new Error(`${response.error.code}: ${response.error.message}`)
+      if (generation === this.generation) {
+        this.store.set({ value: response.value, status: 'ready', error: null })
+      }
+      return response.value
+    }).catch((error: unknown) => {
+      if (generation === this.generation) {
+        this.store.update((draft) => {
+          draft.status = 'error'
+          draft.error = error instanceof Error ? error.message : String(error)
+        })
+      }
+      throw error
+    })
+    return operation
+  }
+
   /**
    * Invalidate the loaded catalog; the next explicit menu read reloads it.
    * @param clear - whether values from the previous Host generation must be hidden.
@@ -79,7 +121,7 @@ export class ModelCatalogDirectory {
   /** Invalidate and reload the catalog after a Host-side model input changes. */
   refresh(): void {
     this.invalidate()
-    void this.load().catch(() => { /* the selector exposes the shared error */ })
+    void this.sync().catch(() => { /* the selector exposes the shared error */ })
   }
 
   /** Clear Host-specific values and load the replacement Host generation. */

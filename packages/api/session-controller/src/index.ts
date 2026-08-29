@@ -18,7 +18,7 @@ import { SessionControlController } from './control.ts'
 import { SessionHistoryController } from './history.ts'
 import { SessionFileReferences } from './file-references.ts'
 import { ApiSessionList, DEFAULT_COLD_BLANK_PROBE_MAX_BYTES } from './list.ts'
-import { buildModelCatalog } from './catalog.ts'
+import { buildModelCatalog, invalidateModelCatalog } from './catalog.ts'
 import { installModelSelectionProjection } from './model-selection-projection.ts'
 import { SessionSkillCatalog } from './skill-catalog.ts'
 import type {
@@ -137,6 +137,11 @@ export class SessionController extends TypertRemoteService {
     ctx.on('session/created', (session) => {
       ctx.emit('api-session/added', this.listState.summaryFor(session))
     })
+    // A provider/settings/credential generation change invalidates the one
+    // Host-generation catalog. The next explicit read performs the new
+    // startup-style check; opening a selector never probes by itself.
+    ctx.on('llm/adapters-updated', () => { invalidateModelCatalog(ctx) })
+    ctx.on('settings/document-updated', () => { invalidateModelCatalog(ctx) })
     ctx.on('session/disposed', (session) => {
       ctx.emit('api-session/removed', session.id)
     })
@@ -248,11 +253,17 @@ export class SessionController extends TypertRemoteService {
 
   /**
    * Describe every currently routable model for Host-generation selectors.
+   * @param request - optional explicit health-check request; metadata-only when omitted.
    * @returns provider-grouped models, the deployment default, and isolated provider failures.
    */
   @Remote('modelCatalog')
-  modelCatalog(): Promise<ModelCatalog> {
-    return buildModelCatalog(this.ctx)
+  modelCatalog(request?: {
+    readonly check?: boolean
+    readonly refresh?: boolean
+    readonly provider?: string
+    readonly model?: string
+  }): Promise<ModelCatalog> {
+    return buildModelCatalog(this.ctx, undefined, request)
   }
 
   /**

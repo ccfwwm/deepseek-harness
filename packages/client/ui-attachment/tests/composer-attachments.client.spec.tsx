@@ -29,8 +29,8 @@ const t = ((key: string, params?: Readonly<Record<string, unknown>>): string => 
     'image.openOriginal': '查看原图',
     'image.scrollLeft': '向左滚动图片',
     'image.scrollRight': '向右滚动图片',
-    'image.dropBlocked': '当前无法添加图片',
-    'image.dropTitle': '图片拖动到此处即可添加',
+    'image.dropBlocked': '当前无法添加附件',
+    'image.dropTitle': '附件拖动到此处即可添加',
   }
   if (key === 'image.remove') {
     const name = params?.name
@@ -82,7 +82,7 @@ describe('ComposerAttachments', () => {
     const image = attachment('dropped').file
     const dataTransfer = { types: ['Files'], files: [image], dropEffect: 'none' }
     expect(fireEvent.dragEnter(document.body, { dataTransfer })).toBe(false)
-    expect(view.getByRole('status').textContent).toContain('图片拖动到此处即可添加')
+    expect(view.getByRole('status').textContent).toContain('附件拖动到此处即可添加')
     expect(view.getByRole('status').textContent).toContain('最多 20 张，每张 5MB')
     expect(fireEvent.dragOver(document.body, { dataTransfer })).toBe(false)
     expect(dataTransfer.dropEffect).toBe('copy')
@@ -123,7 +123,7 @@ describe('ComposerAttachments', () => {
     const image = attachment('blocked').file
     const dataTransfer = { types: ['Files'], files: [image], dropEffect: 'copy' }
     fireEvent.dragEnter(document.body, { dataTransfer })
-    expect(view.getByRole('status').textContent).toBe('当前无法添加图片')
+    expect(view.getByRole('status').textContent).toBe('当前无法添加附件')
     fireEvent.dragOver(document.body, { dataTransfer })
     expect(dataTransfer.dropEffect).toBe('none')
     fireEvent.drop(document.body, { dataTransfer })

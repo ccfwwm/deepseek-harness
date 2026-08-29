@@ -111,6 +111,13 @@ export const en = {
   modelUnavailable: 'Unavailable',
   modelRequiresLogin: 'Login required',
   modelNotChecked: 'Not checked',
+  runtimeModels: 'Runtime models',
+  visionSupported: 'Vision supported',
+  visionUnsupported: 'Vision unavailable',
+  visionUnknown: 'Vision not checked',
+  checkModel: 'Check {model}',
+  modalitiesUnknown: 'Modalities unknown',
+  modalityText: 'Text',
 }
 
 /** The settings.models namespace key union. */
@@ -227,4 +234,11 @@ export const zh: { [Key in keyof typeof en]: string } = {
   modelUnavailable: '不可用',
   modelRequiresLogin: '需登录',
   modelNotChecked: '未检测',
+  runtimeModels: '运行时模型',
+  visionSupported: '支持视觉',
+  visionUnsupported: '不支持视觉',
+  visionUnknown: '视觉未检测',
+  checkModel: '检测 {model}',
+  modalitiesUnknown: '模态未知',
+  modalityText: '文本',
 }

@@ -79,6 +79,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 10px;
   min-height: 28px;
   padding: 3px 6px;
@@ -87,6 +88,7 @@
 }
 
 .runtimeModelName {
+  flex: 1 1 180px;
   min-width: 0;
   overflow: hidden;
   color: var(--dsw-alias-label-secondary);
@@ -103,13 +105,56 @@
   line-height: 16px;
 }
 
+.runtimeModelVision {
+  margin-left: auto;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.runtimeModelModalities {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.runtimeModelCheck {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+
+.runtimeModelCheck:hover:not(:disabled),
+.runtimeModelCheck:focus-visible {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.runtimeModelCheck:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.runtimeModel[data-vision='supported'] .runtimeModelVision {
+  color: var(--dsw-alias-state-success-primary);
+}
+
 .runtimeModel[data-status='available'] .runtimeModelStatus {
   color: var(--dsw-alias-state-success-primary);
 }
 
 .runtimeModel[data-status='unavailable'],
 .runtimeModel[data-status='requires-login'] {
-  opacity: 0.55;
+  background: var(--dsw-alias-interactive-bg-hover-danger);
 }
 
 .runtimeModel[data-status='unavailable'] .runtimeModelStatus,

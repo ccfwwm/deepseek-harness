@@ -75,6 +75,22 @@ function history(role: 'system' | 'assistant', content: ContentBlock[]): Message
 }
 
 describe('pi-ai request context conversion', () => {
+  it('keeps parsed document attachment text visible to the model as untrusted data', () => {
+    const context = toPiContext(request([user([{
+      type: 'file',
+      attachment: {
+        attachmentId: 'file-sha256:doc', name: '说明.docx', mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        bytes: 10, sha256: 'doc', parser: 'docx', status: 'parsed', textChars: 7, preview: '附件正文内容',
+      },
+    }])]))
+    expect(context.messages).toEqual([{
+      role: 'user',
+      content: expect.stringContaining('[Untrusted attachment content: 说明.docx]'),
+      timestamp: 0,
+    }])
+    expect(JSON.stringify(context.messages)).toContain('附件正文内容')
+  })
+
   it('omits absent and empty request-level optional fields', () => {
     const base = { provider: 'openai', model: 'gpt-4.1', messages: [] }
     expect(toPiContext(base)).toEqual({ messages: [] })

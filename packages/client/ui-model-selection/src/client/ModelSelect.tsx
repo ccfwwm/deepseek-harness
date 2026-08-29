@@ -17,9 +17,10 @@ import {
 } from 'react'
 import clsx from 'clsx'
 import type { ModelReasoningEffort, ModelSelection } from '@deepseek-ai/dsh-api-remotes/client'
+import type { ModelCatalogModel, ModelProviderGroup } from '@deepseek-ai/dsh-api-session-controller/types'
 import {
   IconCheckOutline16, IconChevronDownOutline14, IconChevronRightOutline14,
-  IconWarningOutline16, Toast,
+  IconRefreshOutline16, IconWarningOutline16, Toast,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ModelSelectInjected } from './slots.ts'
@@ -35,6 +36,17 @@ interface EffortChoice {
   label: string
 }
 
+function modalitiesLabel(model: ModelCatalogModel, t: PropsLocale<'model'>['t']): string {
+  if (model.inputModalities !== undefined && model.inputModalities.length > 0) {
+    return model.inputModalities.map(modality => modality === 'image' ? t('modalities.vision') : t('modalities.text')).join(' + ')
+  }
+  return model.visionStatus === 'supported'
+    ? t('modalities.vision')
+    : model.visionStatus === 'unsupported'
+      ? t('modalities.text')
+      : t('modalities.unknown')
+}
+
 /**
  * Render the composer model seat.
  * @param props - owner share (locked) + injected face (shared directory
@@ -42,7 +54,7 @@ interface EffortChoice {
  * @returns the trigger and, while open, the two-level menu.
  */
 export function ModelSelect(
-  { locked, available, directory, load, select, t }:
+  { locked, available, directory, load, sync, checkAll, checkModel, select, t }:
   ModelSelectInjected & { locked: boolean } & PropsLocale<'model'>,
 ) {
   const state = useSyncExternalStore(
@@ -57,13 +69,28 @@ export function ModelSelect(
   // action was a load.
   const lastActionRef = useRef<'load' | 'select'>('load')
   const [toast, setToast] = useState<{ seq: number; text: string } | null>(null)
+  const [catalogAction, setCatalogAction] = useState<string | null>(null)
   const toastSeq = useRef(0)
   const rootRef = useRef<HTMLDivElement | null>(null)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([])
   const id = useId()
 
-  const choices = useMemo(() => state.groups.flatMap(group =>
+  const displayGroups = useMemo<readonly ModelProviderGroup[]>(() => {
+    if (state.current === null) return state.groups
+    const currentGroup = state.groups.find(group => group.id === state.current?.provider)
+    if (currentGroup !== undefined && currentGroup.models.some(model => model.id === state.current?.model)) return state.groups
+    const fallbackModel: ModelCatalogModel = {
+      id: state.current.model,
+      name: `${state.current.provider}/${state.current.model}`,
+    }
+    const fallbackGroup = { id: state.current.provider, name: state.current.provider, models: [fallbackModel] }
+    return currentGroup === undefined
+      ? [...state.groups, fallbackGroup]
+      : state.groups.map(group => group.id === fallbackGroup.id ? { ...group, models: [...group.models, fallbackModel] } : group)
+  }, [state.current, state.groups])
+
+  const choices = useMemo(() => displayGroups.flatMap(group =>
     group.models.map(model => ({
       group,
       model,
@@ -74,7 +101,7 @@ export function ModelSelect(
           ? {}
           : { reasoningEffort: model.reasoning.defaultEffort },
       } satisfies ModelSelection,
-    }))), [state.groups])
+    }))), [displayGroups])
   const selectedIndex = state.current === null
     ? -1
     : choices.findIndex(c => c.selection.provider === state.current?.provider && c.selection.model === state.current.model)
@@ -98,7 +125,10 @@ export function ModelSelect(
         label: effort.name,
       })),
     ], [reasoning, t])
-  const busy = state.status === 'selecting'
+  const busy = state.status === 'selecting' || catalogAction !== null
+  const syncCatalog = sync ?? (() => Promise.resolve())
+  const checkAllCatalog = checkAll ?? (() => Promise.resolve())
+  const checkOneCatalog = checkModel ?? (() => Promise.resolve())
 
   const reload = (): void => {
     lastActionRef.current = 'load'
@@ -119,7 +149,17 @@ export function ModelSelect(
   const show = (): void => {
     setPane('root')
     setOpen(true)
-    reload()
+  }
+
+  const runCatalogAction = (key: string, operation: () => Promise<void>): void => {
+    setCatalogAction(key)
+    void operation().catch((error: unknown) => {
+      toastSeq.current += 1
+      setToast({
+        seq: toastSeq.current,
+        text: t('error.action', { message: error instanceof Error ? error.message : String(error) }),
+      })
+    }).finally(() => { setCatalogAction(null) })
   }
 
   const close = (restoreFocus = false): void => {
@@ -264,6 +304,28 @@ export function ModelSelect(
 
           {pane === 'model' && (
             <>
+              <div className={css.catalogActions}>
+                <button
+                  type="button"
+                  className={css.catalogAction}
+                  disabled={busy}
+                  aria-label={t('action.sync')}
+                  title={t('action.sync')}
+                  onClick={() => { runCatalogAction('sync', syncCatalog) }}
+                >
+                  <IconRefreshOutline16 />
+                  <span>{catalogAction === 'sync' ? t('status.loading') : t('action.sync')}</span>
+                </button>
+                <button
+                  type="button"
+                  className={css.catalogActionPrimary}
+                  disabled={busy}
+                  onClick={() => { runCatalogAction('check-all', checkAllCatalog) }}
+                >
+                  <IconRefreshOutline16 />
+                  <span>{catalogAction === 'check-all' ? t('status.checking') : t('action.checkAll')}</span>
+                </button>
+              </div>
               {state.status === 'loading' && (
                 <div className={css.status}>{t('status.loading')}</div>
               )}
@@ -280,7 +342,7 @@ export function ModelSelect(
                 </div>
               ))}
               <div className={clsx(css.groups, 'scrollable')}>
-                {state.groups.map((group) => {
+                {displayGroups.map((group) => {
                   const headingId = `${id}-${group.id}`
                   return (
                     <section role="group" aria-labelledby={headingId} className={css.group} key={group.id}>
@@ -288,24 +350,53 @@ export function ModelSelect(
                       {group.models.map((model) => {
                         const selected = state.current?.provider === group.id && state.current.model === model.id
                         return (
-                          <button
-                            ref={itemRef()}
-                            type="button"
-                            role="menuitemradio"
-                            aria-checked={selected}
-                            className={clsx(css.option, selected && css.selected)}
-                            key={model.id}
-                            title={model.name}
-                            disabled={busy}
-                            onClick={() => { choose({ provider: group.id, model: model.id }) }}
-                          >
+                          <div className={css.optionRow} key={model.id}>
+                            <button
+                              ref={itemRef()}
+                              type="button"
+                              role="menuitemradio"
+                              aria-checked={selected}
+                              className={clsx(css.option, selected && css.selected)}
+                              data-status={model.status ?? 'unknown'}
+                              data-vision={model.visionStatus ?? 'unknown'}
+                              title={model.name}
+                              disabled={busy}
+                              onClick={() => { choose({ provider: group.id, model: model.id }) }}
+                            >
                             <span className={css.optionCopy}>
                               <span className={css.modelName}>{model.name}</span>
+                              <span className={css.modelMeta} aria-hidden="true">
+                                {model.status === 'available'
+                                  ? t('status.available')
+                                  : model.status === 'requires-login'
+                                    ? t('status.requiresLogin')
+                                    : model.status === 'unavailable'
+                                      ? t('status.unavailable')
+                                      : model.status === 'checking'
+                                        ? t('status.checking')
+                                        : t('status.unknown')}
+                                {' · '}
+                                {modalitiesLabel(model, t)}
+                              </span>
                             </span>
-                            <span className={css.check}>
-                              {selected ? <IconCheckOutline16 /> : null}
-                            </span>
-                          </button>
+                              <span className={css.check}>
+                                {selected ? <IconCheckOutline16 /> : null}
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              className={css.modelCheck}
+                              disabled={busy}
+                              aria-label={t('action.checkModel', { model: model.name })}
+                              title={t('action.checkModel', { model: model.name })}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                runCatalogAction(`check:${group.id}:${model.id}`, () => checkOneCatalog(group.id, model.id))
+                              }}
+                            >
+                              <IconRefreshOutline16 />
+                            </button>
+                          </div>
                         )
                       })}
                     </section>

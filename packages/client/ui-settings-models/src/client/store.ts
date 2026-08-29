@@ -7,13 +7,12 @@
  * re-renders from the next describe, pushed or refetched.
  */
 
-import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {
-  CredentialInfo, LlmConfigurableProvider, LlmProviderInfo, SettingsNamespaceView,
+  ClientRemote, CredentialInfo, LlmConfigurableProvider, LlmProviderInfo, SettingsNamespaceView,
 } from '@deepseek-ai/dsh-api-remotes/client'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
-import type { SettingsDescribeFace } from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { SettingsDescribeFace, SettingsRemote } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { SettingsSchemaOperations } from './schema-operations.ts'
 
 /**
@@ -21,6 +20,40 @@ import type { SettingsSchemaOperations } from './schema-operations.ts'
  * names one that cannot collide with a configured route.
  */
 const PROBE_ROUTE = '\u0000probe'
+
+/** The credentials Remote methods the Models page reads and writes through. */
+export type ModelsCredentials = Pick<ClientRemote['credentials'], 'describe' | 'set' | 'unset'>
+
+/** LLM Remote methods used by the Models page. */
+export type ModelsLlm = Pick<
+  ClientRemote['llm'],
+  'discoverModels' | 'listConfigurableProviders' | 'listProviders'
+>
+
+/** Session-generation catalog endpoint used by the settings health panel. */
+export type ModelsSession = Pick<ClientRemote['session'], 'modelCatalog'>
+
+export interface RuntimeModel {
+  readonly id: string
+  readonly name: string
+  readonly inputModalities?: readonly ('text' | 'image')[]
+  readonly status?: 'unknown' | 'checking' | 'available' | 'unavailable' | 'requires-login'
+  readonly statusMessage?: string
+  readonly visionStatus?: 'supported' | 'unsupported' | 'unknown'
+  readonly visionMessage?: string
+  readonly lastCheckedAt?: number
+}
+
+export interface RuntimeModelGroup {
+  readonly id: string
+  readonly name: string
+  readonly models: readonly RuntimeModel[]
+}
+
+export interface RuntimeModelCatalog {
+  readonly groups: readonly RuntimeModelGroup[]
+  readonly failures: readonly { readonly id: string; readonly name: string; readonly message: string }[]
+}
 
 /** One provider row after joining the configurable directory with live routes. */
 export interface ProviderDirectoryEntry {
@@ -65,6 +98,20 @@ export function joinProviderDirectory(
   return rows
 }
 
+/**
+ * Every Remote wire face the Models page reaches.
+ */
+export interface ModelsWire {
+  /** The settings Remote namespace: the redacted read and the profile writes. */
+  settings: SettingsRemote
+  /** Credential state and writes for the references provider profiles name. */
+  credentials: ModelsCredentials
+  /** Provider directory reads and draft endpoint discovery. */
+  llm: ModelsLlm
+  /** Host-generation model catalog and explicit health probes. */
+  session?: ModelsSession
+}
+
 /** One provider row the page renders. */
 export interface ProviderRow {
   /** The directory entry (route id, display name, settings address, live state). */
@@ -99,6 +146,25 @@ export interface ModelsSettingsState {
   rows: readonly ProviderRow[]
   /** Namespace views by ns, for the editor's schema/layers/secrets. */
   namespaces: ReadonlyMap<string, SettingsNamespaceView>
+  /** Runtime model catalog shared with the conversation selector. */
+  catalogGroups?: readonly RuntimeModelGroup[]
+  catalogFailures?: readonly { readonly id: string; readonly name: string; readonly message: string }[]
+  catalogStatus?: 'idle' | 'loading' | 'checking' | 'ready' | 'error'
+  catalogError?: string | null
+  catalogUpdatedAt?: number | null
+  /** Provider/model key currently being probed; keeps single-row checks local. */
+  catalogCheckingKey?: string | null
+}
+
+/**
+ * Human text for a rejected wire call. A transport failure rejects with an
+ * Error; a host or a runtime can reject with anything, and the page still has
+ * to say something.
+ * @param error - the rejection value.
+ * @returns the message to show.
+ */
+export function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 /**
@@ -150,22 +216,89 @@ export class ModelsSettingsStore {
   /** The snapshot the section renders from (uSES-safe store). */
   readonly store: SnapshotStore<ModelsSettingsState> = createSnapshotStore<ModelsSettingsState>({
     status: 'idle', error: null, credentialError: null, writable: false, rows: [], namespaces: new Map(),
+    catalogGroups: [], catalogFailures: [], catalogStatus: 'idle', catalogError: null, catalogUpdatedAt: null, catalogCheckingKey: null,
   })
 
   /** Latest load wins; an older response never overwrites a newer one. */
   private generation = 0
+  /** The initial text+vision probe is a startup action, not a poll. */
+  private startupProbeStarted = false
 
   /**
-   * @param ctx - the page plugin's context, whose `remote.llm` and
-   * `remote.credentials` namespaces carry the directory and credential reads.
-   * @param schema - settings-owned schema and immutable path operations.
+   * @param api - the page's credentials Remote and LLM wire faces.
    * @param describeFace - the shared mirror's describe face (namespace views and writability).
    */
   constructor(
-    private readonly ctx: ClientContext,
+    private readonly api: Pick<ModelsWire, 'credentials' | 'llm' | 'session'>,
     private readonly schema: SettingsSchemaOperations,
     private readonly describeFace: SettingsDescribeFace,
   ) {}
+
+  /** Refresh or run real provider probes for the host-owned model catalog. */
+  async syncModels(check = false, refresh = false): Promise<void> {
+    const modelCatalog = this.api.session?.modelCatalog as unknown as
+      ((input?: { check?: boolean; refresh?: boolean }) => Promise<{ ok: boolean; value?: RuntimeModelCatalog; error?: { message?: string } }>) | undefined
+    if (modelCatalog === undefined) return
+    this.store.update((s) => {
+      s.catalogStatus = check ? 'checking' : 'loading'
+      s.catalogError = null
+    })
+    try {
+      const response = await modelCatalog(check ? { check: true, ...(refresh ? { refresh: true } : {}) } : { ...(refresh ? { refresh: true } : {}) })
+      if (!response.ok || response.value === undefined) throw new Error(response.error?.message ?? 'model catalog request failed')
+      this.store.update((s) => {
+        s.catalogGroups = response.value!.groups
+        s.catalogFailures = response.value!.failures
+        s.catalogStatus = 'ready'
+        s.catalogError = null
+        s.catalogUpdatedAt = Date.now()
+      })
+    } catch (error) {
+      this.store.update((s) => {
+        s.catalogStatus = 'error'
+        s.catalogError = messageOf(error)
+      })
+    }
+  }
+
+  /** Probe one exact provider/model route without rechecking the catalog. */
+  async checkModel(provider: string, model: string): Promise<void> {
+    const modelCatalog = this.api.session?.modelCatalog as unknown as
+      ((input?: { check?: boolean; refresh?: boolean; provider?: string; model?: string }) => Promise<{ ok: boolean; value?: RuntimeModelCatalog; error?: { message?: string } }>) | undefined
+    if (modelCatalog === undefined) return
+    const key = `${provider}:${model}`
+    this.store.update((s) => {
+      s.catalogCheckingKey = key
+      s.catalogError = null
+      if (s.catalogGroups !== undefined) {
+        s.catalogGroups = s.catalogGroups.map(group => group.id !== provider
+          ? group
+          : { ...group, models: group.models.map(entry => entry.id === model ? { ...entry, status: 'checking' as const } : entry) })
+      }
+    })
+    try {
+      const response = await modelCatalog({ check: true, refresh: true, provider, model })
+      if (!response.ok || response.value === undefined) throw new Error(response.error?.message ?? 'model check failed')
+      this.store.update((s) => {
+        const checked = response.value!.groups.find(group => group.id === provider)?.models.find(entry => entry.id === model)
+        if (checked === undefined) return
+        if (s.catalogGroups !== undefined) {
+          s.catalogGroups = s.catalogGroups.map(group => group.id !== provider
+            ? group
+            : { ...group, models: group.models.map(entry => entry.id === model ? checked : entry) })
+        }
+        s.catalogFailures = response.value!.failures
+        // A single-row check must not put the entire catalog into a loading
+        // state or replace unrelated model objects in the page.
+        if (s.catalogStatus === 'idle') s.catalogStatus = 'ready'
+        s.catalogError = null
+        s.catalogUpdatedAt = Date.now()
+        s.catalogCheckingKey = null
+      })
+    } catch (error) {
+      this.store.update((s) => { s.catalogCheckingKey = null; s.catalogError = messageOf(error) })
+    }
+  }
 
   /**
    * Refresh the whole page snapshot: the provider directory and the mirror's
@@ -178,21 +311,32 @@ export class ModelsSettingsStore {
   async load(): Promise<void> {
     const generation = ++this.generation
     this.store.update((s) => { s.status = 'loading'; s.error = null })
-    const [registered, declared] = await Promise.all([
-      this.ctx.remote.llm.listProviders(),
-      this.ctx.remote.llm.listConfigurableProviders(),
-      this.describeFace.ensure(),
-    ])
-    if (!registered.ok) { this.failLoad(generation, registered.error.message); return }
-    if (!declared.ok) { this.failLoad(generation, declared.error.message); return }
-    const mirrored = this.describeFace.getSnapshot()
-    if (mirrored.view === undefined) {
-      this.failLoad(generation, mirrored.error ?? 'settings are unavailable in this browser')
+    let providers: ProviderDirectoryEntry[]
+    let writable: boolean
+    let views: readonly SettingsNamespaceView[]
+    try {
+      const [registered, declared] = await Promise.all([
+        this.api.llm.listProviders(),
+        this.api.llm.listConfigurableProviders(),
+        this.describeFace.ensure(),
+      ])
+      if (!registered.ok) throw new Error(registered.error.message)
+      if (!declared.ok) throw new Error(declared.error.message)
+      const mirrored = this.describeFace.getSnapshot()
+      if (mirrored.view === undefined) {
+        throw new Error(mirrored.error ?? 'settings are unavailable in this browser')
+      }
+      providers = joinProviderDirectory(registered.value, declared.value)
+      writable = mirrored.view.writable
+      views = mirrored.view.namespaces
+    } catch (error) {
+      if (generation !== this.generation) return
+      this.store.update((s) => {
+        s.status = 'error'
+        s.error = error instanceof Error ? error.message : String(error)
+      })
       return
     }
-    const providers = joinProviderDirectory(registered.value, declared.value)
-    const writable = mirrored.view.writable
-    const views: readonly SettingsNamespaceView[] = mirrored.view.namespaces
     const namespaces = new Map(views.map(view => [view.ns, view]))
     const rows: ProviderRow[] = providers.map((entry) => {
       const namespace = namespaces.get(entry.settingsNs)
@@ -214,12 +358,16 @@ export class ModelsSettingsStore {
     let credentials: Record<string, CredentialInfo> = {}
     let credentialError: string | null = null
     if (refs.length > 0) {
-      const response = await this.ctx.remote.credentials.describe(refs)
-      // Credential state is an enrichment for the Models page: a failure
-      // degrades the badge instead of failing the load. The onboarding
-      // projection below retains the failure distinction.
-      if (response.ok) credentials = response.value
-      else credentialError = response.error.message
+      try {
+        const response = await this.api.credentials.describe(refs)
+        // Credential state is an enrichment for the Models page: neither a
+        // business rejection nor a transport failure fails the load. The
+        // onboarding projection below retains the failure distinction.
+        if (response.ok) credentials = response.value
+        else credentialError = response.error.message
+      } catch (error) {
+        credentialError = messageOf(error)
+      }
     }
     if (generation !== this.generation) return
     this.store.update((s) => {
@@ -238,15 +386,12 @@ export class ModelsSettingsStore {
       })
       s.namespaces = namespaces
     })
-  }
-
-  /** Publish one load's failure text, unless a newer load already took over. */
-  private failLoad(generation: number, message: string): void {
-    if (generation !== this.generation) return
-    this.store.update((s) => {
-      s.status = 'error'
-      s.error = message
-    })
+    // Startup performs one shared text + vision probe. Subsequent settings
+    // refreshes consume the Host-generation cache and never probe again.
+    if (!this.startupProbeStarted) {
+      this.startupProbeStarted = true
+      void this.syncModels(true)
+    }
   }
 }
 

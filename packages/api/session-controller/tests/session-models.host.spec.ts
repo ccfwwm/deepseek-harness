@@ -381,13 +381,13 @@ describe('Web session model selection', () => {
     })
     const remote = createSessionTestRemote(ctx, { defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }), cwd: '/tmp' })
 
-    const catalog = expectValue(await remote.modelCatalog())
+    const catalog = expectValue(await remote.modelCatalog({}))
     expect(currentSelection(ctx, sessionId)).toEqual({
       provider: 'deepseek-official',
       model: 'private-preview',
       reasoningEffort: 'max',
     })
-    expect(catalog.groups).toEqual([{
+    expect(catalog.groups).toEqual(expect.arrayContaining([{
       id: 'deepseek-official',
       name: 'DeepSeek',
       models: [
@@ -399,10 +399,13 @@ describe('Web session model selection', () => {
           reasoning: REASONING,
         },
       ],
-    }])
+    }, {
+      id: 'metadata-broken',
+      name: 'Metadata Broken',
+      models: [{ id: 'listed', name: 'Listed' }],
+    }]))
     expect(catalog.failures).toEqual([
       { id: 'broken', name: 'Broken Provider', message: 'catalog offline' },
-      { id: 'metadata-broken', name: 'Metadata Broken', message: 'reasoning metadata offline' },
       {
         id: 'duplicate',
         name: 'Duplicate Provider',
@@ -451,6 +454,40 @@ describe('Web session model selection', () => {
     expect(catalog.failures).toContainEqual({
       id: 'string-failure', name: 'String Failure', message: 'string catalog failure',
     })
+    await ctx.fiber.dispose()
+  })
+
+  it('reports explicit text availability and vision capability checks', async () => {
+    const { ctx } = await harness()
+    ctx.llm.registerAdapter(['checked'], new class extends CatalogAdapter {
+      override probeModel(): Promise<readonly { protocol: string; ok: boolean }[]> {
+        return Promise.resolve([{ protocol: 'native', ok: true }])
+      }
+
+      override probeVision(): Promise<{ status: 'supported' }> {
+        return Promise.resolve({ status: 'supported' })
+      }
+    }('Checked', [
+      { provider: 'checked', id: 'vision-model', name: 'Vision Model', inputModalities: ['text', 'image'] },
+    ]))
+    const remote = createSessionTestRemote(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+      cwd: '/tmp',
+    })
+
+    const catalog = expectValue(await remote.modelCatalog({ check: true }))
+    expect(catalog.groups).toEqual(expect.arrayContaining([{
+      id: 'checked',
+      name: 'Checked',
+      models: [{
+        id: 'vision-model',
+        name: 'Vision Model',
+        inputModalities: ['text', 'image'],
+        status: 'available',
+        visionStatus: 'supported',
+        lastCheckedAt: expect.any(Number),
+      }],
+    }]))
     await ctx.fiber.dispose()
   })
 

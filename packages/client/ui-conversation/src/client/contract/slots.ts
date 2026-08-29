@@ -290,7 +290,8 @@ export interface ComposerBarInjected {
     steeringAvailable: boolean,
   ) => InputSubmitMode
   toggleCommandMenu: ((selection: EditSelection) => void) | undefined
-  stop: (() => void) | undefined
+  /** Cancel the active turn; asynchronous failures are surfaced by the composer. */
+  stop: (() => void | Promise<void>) | undefined
   command: ((line: string) => Promise<boolean>) | undefined
   hooks: {
     notices: ObservableSnapshot<InputNotice | null>
