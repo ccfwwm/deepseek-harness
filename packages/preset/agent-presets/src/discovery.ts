@@ -22,6 +22,7 @@
  */
 
 import { existsSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { isBuiltin } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
@@ -114,6 +115,20 @@ export function entryListProblem(rows: unknown, at = ''): string | undefined {
  * @returns true when the package directory is installed above `base`.
  */
 function packageInstalled(name: string, base: string): boolean {
+  // Electron's ASAR resolver can load a package that is not addressable as a
+  // normal filesystem child by existsSync(). Use the same Node resolver used
+  // by mount() first, then retain the filesystem walk for source/user roots.
+  try {
+    const filePath = fileURLToPath(base)
+    const anchor = filePath.endsWith('\\') || filePath.endsWith('/')
+      ? join(filePath, 'package.json')
+      : filePath
+    createRequire(anchor).resolve(name)
+    return true
+  } catch {
+    // Fall through to the explicit walk below. This also covers package rows
+    // resolved through a workspace symlink in an unpacked source checkout.
+  }
   // A scoped name spends two segments on the package; anything after either
   // form is a subpath export, which lives inside the package directory.
   const pkg = name.split('/').slice(0, name.startsWith('@') ? 2 : 1).join('/')
