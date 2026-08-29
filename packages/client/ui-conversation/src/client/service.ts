@@ -84,7 +84,7 @@ function browserDraftAttachment(file: File): Extract<ComposerAttachment, { kind:
 
 type PreparedFile = Extract<ComposerAttachment, { kind: 'file' }>['prepared']
 interface FilesRemote {
-  prepare(input: { name: string; mediaType?: string; data: string }): Promise<RemoteResult<PreparedFile>>
+  prepare(input: { sessionId: SessionId; name: string; mediaType?: string; data: string }): Promise<RemoteResult<PreparedFile>>
 }
 
 export class FileServiceUnavailableError extends Error {
@@ -282,11 +282,12 @@ export class ConversationController extends Service implements IConversation {
   }
 
   /** Parse ordinary files through the optional ZeroWall file service. */
-  async createDraftFiles(files: readonly File[]): Promise<readonly ComposerAttachment[]> {
+  async createDraftFiles(files: readonly File[], sessionId: SessionId): Promise<readonly ComposerAttachment[]> {
     const remote = this.ctx.get('remote.zerowallFiles') as FilesRemote | undefined
     if (remote === undefined) throw new FileServiceUnavailableError()
     const prepared = await Promise.all(files.map(async (file) => {
       const response = await remote.prepare({
+        sessionId,
         name: file.name || 'uploaded-file',
         ...(file.type === '' ? {} : { mediaType: file.type }),
         data: await base64Of(file),

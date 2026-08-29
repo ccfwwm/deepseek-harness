@@ -61,7 +61,7 @@ export function refreshIfLoaded(controller: ModelsSettingsStore): void {
  * constrained; registration depends on each slot through `slots.inject()`.
  */
 export const inject = [
-  'slots', 'locale', 'remote', 'remote.credentials', 'remote.llm', 'remote.settings',
+  'slots', 'locale', 'remote', 'remote.credentials', 'remote.llm', 'remote.session', 'remote.settings',
   'settingsScope', 'settingsSchema',
 ]
 
@@ -79,9 +79,14 @@ export function apply(ctx: ClientContext): void {
   const wire: ModelsWire = {
     credentials: ctx.remote.credentials,
     llm: ctx.remote.llm,
+    session: ctx.remote.session,
     settings: ctx.remote.settings,
   }
   const controller = new ModelsSettingsStore(wire, schema, ctx.settingsScope.describe())
+  // Warm the provider/model catalog as the desktop starts. The store guards
+  // this probe so opening Settings or receiving invalidations does not cause
+  // a second full health check.
+  void controller.load()
   // Registration-time text (the nav label thunk) and the inject faces share
   // one bound translate; copy freshness rides the locale revision.
   const t = ctx.locale.bind(NS) as ModelsSectionInjected['t']

@@ -175,7 +175,7 @@ type FixtureSessionClient = {
 }
 
 interface FixtureSessionRemote {
-  modelCatalog(): Promise<ConnectionRpcResult<ModelCatalog>>
+  modelCatalog(request: { readonly check?: boolean }): Promise<ConnectionRpcResult<ModelCatalog>>
   follow(sessionId: SessionId, signal: AbortSignal): AsyncIterable<FixtureFollowFrame>
   control(signal: AbortSignal): AsyncIterable<FixtureControlFrame>
 }
@@ -447,7 +447,7 @@ function createSessionRemote(rpc: ClientConnectionRpc): FixtureSessionRemote {
     return stream as AsyncIterable<F>
   }
   return {
-    modelCatalog: () => rpc.call('/api', 'session/modelCatalog', { args: {} }) as
+    modelCatalog: (_request) => rpc.call('/api', 'session/modelCatalog', { args: {} }) as
       Promise<ConnectionRpcResult<ModelCatalog>>,
     follow: (sessionId, signal) => open<FixtureFollowFrame>('session/follow', {
       request: { address: { kind: 'session', sessionId } },
@@ -735,7 +735,7 @@ describe('createFixtureApi', () => {
   it('serves grouped models and keeps a selection for later history and fixture requests', async () => {
     const api = createFixtureApi()
     const sessionId = sid('fx-alpha')
-    const catalog = await api.sessionRemote.modelCatalog()
+    const catalog = await api.sessionRemote.modelCatalog({})
     if (!catalog.ok) throw new Error('models failed')
     expect(catalog.value.groups.map(group => group.name)).toEqual(['DeepSeek', 'OpenAI'])
     expect(catalog.value.groups[0]?.models.map(model => model.id))

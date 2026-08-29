@@ -321,7 +321,7 @@ export class SubagentModelSelectionCardController {
     this.catalogPartial = false
     this.publish()
     try {
-      const response = await this.session.modelCatalog()
+      const response = await this.session.modelCatalog({})
       if (generation !== this.catalogGeneration) return
       if (!response.ok) throw new Error(response.error.message)
       this.catalogGroups = response.value.groups

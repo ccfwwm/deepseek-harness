@@ -64,7 +64,11 @@ export function MessageIconActions({
     if (copied || copyPending.current) return
     const epoch = copyEpoch.current
     copyPending.current = true
-    void writeClipboard(text).then((ok) => {
+    void writeClipboard(text).then(async (ok) => {
+      if (!ok) {
+        const desktop = (globalThis as { zerowallDesktop?: { copyText?: (value: string) => Promise<boolean> } }).zerowallDesktop
+        ok = await desktop?.copyText?.(text) ?? false
+      }
       if (epoch !== copyEpoch.current) return
       copyPending.current = false
       if (!ok) return

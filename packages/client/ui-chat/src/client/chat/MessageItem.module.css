@@ -61,7 +61,13 @@
 }
 
 .fileIcon {
+  display: grid;
+  width: 28px;
+  height: 32px;
+  place-items: center;
+  border-radius: 6px;
   color: var(--dsw-alias-state-business-primary);
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 12%, transparent);
 }
 
 .fileBody {

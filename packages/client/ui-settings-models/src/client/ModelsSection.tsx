@@ -14,7 +14,7 @@
 
 import { useState } from 'react'
 import type { ReactNode } from 'react'
-import { Button, IconPlusOutline16, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconPlusOutline16, IconRefreshOutline16, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: pulls this package's SlotMap merge (the two Models child slots).
 import type {} from './slot-contract.ts'
@@ -192,6 +192,27 @@ export function providerCopy(template: string, target: ProviderIdentity): string
   return template.replace('{provider}', () => providerTargetLabel(target))
 }
 
+function availabilityLabel(status: string | undefined, t: ModelsSectionFace['t']): string {
+  switch (status) {
+    case 'available': return t('modelAvailable')
+    case 'unavailable': return t('modelUnavailable')
+    case 'requires-login': return t('modelRequiresLogin')
+    case 'checking': return t('checkingModels')
+    default: return t('modelNotChecked')
+  }
+}
+
+function visionLabel(status: string | undefined, t: ModelsSectionFace['t']): string {
+  if (status === 'supported') return t('visionSupported')
+  if (status === 'unsupported') return t('visionUnsupported')
+  return t('visionUnknown')
+}
+
+function modalitiesLabel(modalities: readonly ('text' | 'image')[] | undefined, t: ModelsSectionFace['t']): string {
+  if (modalities === undefined || modalities.length === 0) return t('modalitiesUnknown')
+  return modalities.map(modality => modality === 'image' ? t('visionSupported') : t('modalityText')).join(' + ')
+}
+
 /**
  * Render the Models section content column.
  * @param props - slot-delivered injected dependencies.
@@ -308,11 +329,63 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
   // one whose schema names the protocols one may speak; without it mounted
   // there is nothing to declare and the entry point stays disabled.
   const protocols = protocolChoices(state.namespaces.get('llm-pi-ai'), schema)
+  const catalogStatus = state.catalogStatus ?? 'idle'
+  const catalogGroups = state.catalogGroups ?? []
+  const catalogError = state.catalogError ?? null
+  const catalogCheckingKey = state.catalogCheckingKey ?? null
+  const catalogTime = state.catalogUpdatedAt === undefined || state.catalogUpdatedAt === null
+    ? null
+    : new Date(state.catalogUpdatedAt).toLocaleString()
+  const catalogBusy = catalogStatus === 'loading' || catalogStatus === 'checking'
 
   return (
     <div className={styles['section']}>
       <h2 className={styles['title']}>{t('title')}</h2>
       <p className={styles['intro']}>{t('intro')}</p>
+      <section className={styles['runtimeCatalog']} aria-busy={catalogBusy}>
+        <div className={styles['runtimeCatalogHead']}>
+          <div>
+            <h3 className={styles['runtimeCatalogTitle']}>{t('runtimeModels')}</h3>
+            {catalogTime !== null && <p className={styles['modelCatalogMeta']}>{`${t('catalogUpdated')} ${catalogTime}`}</p>}
+          </div>
+          <div className={styles['runtimeCatalogActions']}>
+            <button type="button" className={styles['secondaryButton']} disabled={catalogBusy} onClick={() => { void controller.syncModels(false, true) }}>
+              {catalogBusy && catalogStatus === 'loading' ? t('syncingModels') : t('syncModels')}
+            </button>
+            <button type="button" className={styles['primaryButton']} disabled={catalogBusy} onClick={() => { void controller.syncModels(true, true) }}>
+              {catalogBusy && catalogStatus === 'checking' ? t('checkingModels') : t('checkAllModels')}
+            </button>
+          </div>
+        </div>
+        {catalogError !== null && <p className={styles['error']}>{catalogError}</p>}
+        {catalogGroups.length === 0
+          ? <p className={styles['modelEmpty']}>{t('catalogEmpty')}</p>
+          : catalogGroups.map(group => (
+            <div className={styles['runtimeGroup']} key={group.id}>
+              <div className={styles['runtimeGroupTitle']}>{group.name}</div>
+              <ul className={styles['runtimeModels']}>
+                {group.models.map(model => (
+                  <li className={styles['runtimeModel']} data-status={model.status ?? 'unknown'} data-vision={model.visionStatus ?? 'unknown'} key={`${group.id}:${model.id}`}>
+                    <span className={styles['runtimeModelName']} title={model.id}>{model.name}</span>
+                    <span className={styles['runtimeModelStatus']}>{availabilityLabel(model.status, t)}</span>
+                    <span className={styles['runtimeModelModalities']}>{modalitiesLabel(model.inputModalities, t)}</span>
+                    <span className={styles['runtimeModelVision']} title={model.visionMessage}>{visionLabel(model.visionStatus, t)}</span>
+                    <button
+                      type="button"
+                      className={styles['runtimeModelCheck']}
+                      disabled={catalogBusy || catalogCheckingKey === `${group.id}:${model.id}`}
+                      aria-label={t('checkModel').replace('{model}', model.name)}
+                      title={t('checkModel').replace('{model}', model.name)}
+                      onClick={() => { void controller.checkModel(group.id, model.id) }}
+                    >
+                      <IconRefreshOutline16 />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+      </section>
       {!state.writable && state.status === 'ready' ? <p className={styles['notice']}>{t('readOnly')}</p> : null}
       {savedIdentity === undefined
         ? null

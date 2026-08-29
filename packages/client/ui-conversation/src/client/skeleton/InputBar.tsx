@@ -80,6 +80,14 @@ export function InputBar({
     setToast({ seq: toastSeq.current, text })
   }, [])
   const dismissToast = useCallback(() => { setToast(null) }, [])
+  const stopInFlight = useRef(false)
+  const stopNow = useCallback(() => {
+    if (stop === undefined || stopInFlight.current) return
+    stopInFlight.current = true
+    Promise.resolve(stop()).catch((error: unknown) => {
+      showToast(error instanceof Error ? error.message : String(error))
+    }).finally(() => { stopInFlight.current = false })
+  }, [showToast, stop])
   // The deployment's image-intake limits (absent while no attachment service
   // is composed — the pre-check below then defers entirely to the host).
   const imageLimits = useProjection('imageLimits')
@@ -325,7 +333,7 @@ export function InputBar({
   const primaryLabel = primaryStops ? t('input.stop') : t('input.send')
   const onPrimary = (): void => {
     if (primaryStops) {
-      stop?.()
+      stopNow()
       return
     }
     if (inputActions === undefined) return // absent machine: the button is disabled
@@ -482,7 +490,7 @@ export function InputBar({
                   aria-label={t('input.stop')}
                   disabled={stop === undefined}
                   onMouseDown={keepFocus}
-                  onClick={stop}
+                  onClick={stopNow}
                 >
                   <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden>
                     <rect x="3" y="3" width="10" height="10" rx="3" fill="currentColor" />

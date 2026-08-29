@@ -170,6 +170,15 @@ export function apply(ctx: ClientContext): void {
           load: () => {
             if (available) directory.load().catch(() => { /* surfaced on the store */ })
           },
+          sync: () => available
+            ? directory.sync().then(() => undefined)
+            : Promise.reject(new Error('model selection is unavailable for addressed subagent sessions')),
+          checkAll: () => available
+            ? directory.checkAll().then(() => undefined)
+            : Promise.reject(new Error('model selection is unavailable for addressed subagent sessions')),
+          checkModel: (provider: string, model: string) => available
+            ? directory.checkModel(provider, model).then(() => undefined)
+            : Promise.reject(new Error('model selection is unavailable for addressed subagent sessions')),
           select: (selection: ModelSelection) => available
             ? directory.select(selection).then(() => true, () => false)
             : Promise.resolve(false),

@@ -79,6 +79,30 @@ export class ModelDirectory {
     return this.store.getSnapshot()
   }
 
+  /** Explicit metadata synchronization shared by both model entries. */
+  async sync(): Promise<ModelDirectoryState> {
+    this.assertAvailable()
+    await this.catalog.sync()
+    this.syncInputs()
+    return this.store.getSnapshot()
+  }
+
+  /** Explicitly probe every model and update both selector surfaces. */
+  async checkAll(): Promise<ModelDirectoryState> {
+    this.assertAvailable()
+    await this.catalog.checkAll()
+    this.syncInputs()
+    return this.store.getSnapshot()
+  }
+
+  /** Explicitly probe one provider/model route. */
+  async checkModel(provider: string, model: string): Promise<ModelDirectoryState> {
+    this.assertAvailable()
+    await this.catalog.checkModel(provider, model)
+    this.syncInputs()
+    return this.store.getSnapshot()
+  }
+
   /**
    * Select the complete provider/model/reasoning selection. The durable
    * projection frame updates the shared current; failures surface on the store
@@ -139,6 +163,22 @@ export class ModelDirectory {
     if (this.disposed) return
     const catalog = this.catalog.store.getSnapshot()
     const projected = modelSelectionProjection(this.projected.getSnapshot())
+    const projectedCurrent = projected?.next ?? projected?.lastUsed
+    // A catalog transport failure must not erase the model that the Session
+    // already selected. Keep it directly selectable while the catalog can be
+    // retried, instead of leaving the composer with an empty model menu.
+    if (catalog.status === 'error' && projectedCurrent !== null && projectedCurrent !== undefined) {
+      this.resolved = true
+      this.store.set({
+        current: projectedCurrent,
+        routable: true,
+        groups: [],
+        failures: [],
+        status: 'ready',
+        error: catalog.error,
+      })
+      return
+    }
     if (catalog.status !== 'ready' || catalog.value === null || projected === undefined) {
       if (this.resolved) {
         if (catalog.status === 'error') {

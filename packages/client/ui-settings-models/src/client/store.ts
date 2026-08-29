@@ -30,6 +30,31 @@ export type ModelsLlm = Pick<
   'discoverModels' | 'listConfigurableProviders' | 'listProviders'
 >
 
+/** Session-generation catalog endpoint used by the settings health panel. */
+export type ModelsSession = Pick<ClientRemote['session'], 'modelCatalog'>
+
+export interface RuntimeModel {
+  readonly id: string
+  readonly name: string
+  readonly inputModalities?: readonly ('text' | 'image')[]
+  readonly status?: 'unknown' | 'checking' | 'available' | 'unavailable' | 'requires-login'
+  readonly statusMessage?: string
+  readonly visionStatus?: 'supported' | 'unsupported' | 'unknown'
+  readonly visionMessage?: string
+  readonly lastCheckedAt?: number
+}
+
+export interface RuntimeModelGroup {
+  readonly id: string
+  readonly name: string
+  readonly models: readonly RuntimeModel[]
+}
+
+export interface RuntimeModelCatalog {
+  readonly groups: readonly RuntimeModelGroup[]
+  readonly failures: readonly { readonly id: string; readonly name: string; readonly message: string }[]
+}
+
 /** One provider row after joining the configurable directory with live routes. */
 export interface ProviderDirectoryEntry {
   readonly provider: string
@@ -83,6 +108,8 @@ export interface ModelsWire {
   credentials: ModelsCredentials
   /** Provider directory reads and draft endpoint discovery. */
   llm: ModelsLlm
+  /** Host-generation model catalog and explicit health probes. */
+  session?: ModelsSession
 }
 
 /** One provider row the page renders. */
@@ -119,6 +146,14 @@ export interface ModelsSettingsState {
   rows: readonly ProviderRow[]
   /** Namespace views by ns, for the editor's schema/layers/secrets. */
   namespaces: ReadonlyMap<string, SettingsNamespaceView>
+  /** Runtime model catalog shared with the conversation selector. */
+  catalogGroups?: readonly RuntimeModelGroup[]
+  catalogFailures?: readonly { readonly id: string; readonly name: string; readonly message: string }[]
+  catalogStatus?: 'idle' | 'loading' | 'checking' | 'ready' | 'error'
+  catalogError?: string | null
+  catalogUpdatedAt?: number | null
+  /** Provider/model key currently being probed; keeps single-row checks local. */
+  catalogCheckingKey?: string | null
 }
 
 /**
@@ -181,20 +216,89 @@ export class ModelsSettingsStore {
   /** The snapshot the section renders from (uSES-safe store). */
   readonly store: SnapshotStore<ModelsSettingsState> = createSnapshotStore<ModelsSettingsState>({
     status: 'idle', error: null, credentialError: null, writable: false, rows: [], namespaces: new Map(),
+    catalogGroups: [], catalogFailures: [], catalogStatus: 'idle', catalogError: null, catalogUpdatedAt: null, catalogCheckingKey: null,
   })
 
   /** Latest load wins; an older response never overwrites a newer one. */
   private generation = 0
+  /** The initial text+vision probe is a startup action, not a poll. */
+  private startupProbeStarted = false
 
   /**
    * @param api - the page's credentials Remote and LLM wire faces.
    * @param describeFace - the shared mirror's describe face (namespace views and writability).
    */
   constructor(
-    private readonly api: Pick<ModelsWire, 'credentials' | 'llm'>,
+    private readonly api: Pick<ModelsWire, 'credentials' | 'llm' | 'session'>,
     private readonly schema: SettingsSchemaOperations,
     private readonly describeFace: SettingsDescribeFace,
   ) {}
+
+  /** Refresh or run real provider probes for the host-owned model catalog. */
+  async syncModels(check = false, refresh = false): Promise<void> {
+    const modelCatalog = this.api.session?.modelCatalog as unknown as
+      ((input?: { check?: boolean; refresh?: boolean }) => Promise<{ ok: boolean; value?: RuntimeModelCatalog; error?: { message?: string } }>) | undefined
+    if (modelCatalog === undefined) return
+    this.store.update((s) => {
+      s.catalogStatus = check ? 'checking' : 'loading'
+      s.catalogError = null
+    })
+    try {
+      const response = await modelCatalog(check ? { check: true, ...(refresh ? { refresh: true } : {}) } : { ...(refresh ? { refresh: true } : {}) })
+      if (!response.ok || response.value === undefined) throw new Error(response.error?.message ?? 'model catalog request failed')
+      this.store.update((s) => {
+        s.catalogGroups = response.value!.groups
+        s.catalogFailures = response.value!.failures
+        s.catalogStatus = 'ready'
+        s.catalogError = null
+        s.catalogUpdatedAt = Date.now()
+      })
+    } catch (error) {
+      this.store.update((s) => {
+        s.catalogStatus = 'error'
+        s.catalogError = messageOf(error)
+      })
+    }
+  }
+
+  /** Probe one exact provider/model route without rechecking the catalog. */
+  async checkModel(provider: string, model: string): Promise<void> {
+    const modelCatalog = this.api.session?.modelCatalog as unknown as
+      ((input?: { check?: boolean; refresh?: boolean; provider?: string; model?: string }) => Promise<{ ok: boolean; value?: RuntimeModelCatalog; error?: { message?: string } }>) | undefined
+    if (modelCatalog === undefined) return
+    const key = `${provider}:${model}`
+    this.store.update((s) => {
+      s.catalogCheckingKey = key
+      s.catalogError = null
+      if (s.catalogGroups !== undefined) {
+        s.catalogGroups = s.catalogGroups.map(group => group.id !== provider
+          ? group
+          : { ...group, models: group.models.map(entry => entry.id === model ? { ...entry, status: 'checking' as const } : entry) })
+      }
+    })
+    try {
+      const response = await modelCatalog({ check: true, refresh: true, provider, model })
+      if (!response.ok || response.value === undefined) throw new Error(response.error?.message ?? 'model check failed')
+      this.store.update((s) => {
+        const checked = response.value!.groups.find(group => group.id === provider)?.models.find(entry => entry.id === model)
+        if (checked === undefined) return
+        if (s.catalogGroups !== undefined) {
+          s.catalogGroups = s.catalogGroups.map(group => group.id !== provider
+            ? group
+            : { ...group, models: group.models.map(entry => entry.id === model ? checked : entry) })
+        }
+        s.catalogFailures = response.value!.failures
+        // A single-row check must not put the entire catalog into a loading
+        // state or replace unrelated model objects in the page.
+        if (s.catalogStatus === 'idle') s.catalogStatus = 'ready'
+        s.catalogError = null
+        s.catalogUpdatedAt = Date.now()
+        s.catalogCheckingKey = null
+      })
+    } catch (error) {
+      this.store.update((s) => { s.catalogCheckingKey = null; s.catalogError = messageOf(error) })
+    }
+  }
 
   /**
    * Refresh the whole page snapshot: the provider directory and the mirror's
@@ -282,6 +386,12 @@ export class ModelsSettingsStore {
       })
       s.namespaces = namespaces
     })
+    // Startup performs one shared text + vision probe. Subsequent settings
+    // refreshes consume the Host-generation cache and never probe again.
+    if (!this.startupProbeStarted) {
+      this.startupProbeStarted = true
+      void this.syncModels(true)
+    }
   }
 }
 

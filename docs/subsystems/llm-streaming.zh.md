@@ -999,6 +999,24 @@ async resolveCallConfig(config: LlmCallConfig, signal?: AbortSignal): Promise<Ll
 async prepareCall(config: LlmCallConfig, signal?: AbortSignal): Promise<PreparedLlmCall>
 
 /**
+ * Run the adapter-owned protocol probe for one registered route.
+ * @param provider - registered provider route.
+ * @param model - exact model id.
+ * @param signal - optional cancellation signal.
+ * @returns protocol attempts and their success diagnostics.
+ */
+async probeModel(provider: string, model: string, signal?: AbortSignal): Promise<readonly LlmProbeAttempt[]>
+
+/**
+ * Run an adapter-owned image-input probe without creating a conversation turn.
+ * @param provider - registered provider route.
+ * @param model - exact model id.
+ * @param signal - optional cancellation signal.
+ * @returns whether the model accepted a real image request.
+ */
+async probeVision(provider: string, model: string, signal?: AbortSignal): Promise<LlmVisionProbeResult>
+
+/**
  * Stream one model call as raw chunks (token-level deltas). Replay state is
  * retained only when the same adapter instance owns its historical provider
  * and the target provider. Final adapter selection remains fixed through

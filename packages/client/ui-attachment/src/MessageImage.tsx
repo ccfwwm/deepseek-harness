@@ -135,8 +135,17 @@ export function MessageImage({ image, load, variant, labels }: {
       canvas.height = image.naturalHeight
       canvas.getContext('2d')?.drawImage(image, 0, 0)
       const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(value => value === null ? reject(new Error('image encode failed')) : resolve(value), 'image/png'))
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
-      setCopyState('copied')
+      try {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+        setCopyState('copied')
+      } catch {
+        const desktop = (globalThis as { zerowallDesktop?: { copyImage?: (input: { data: string }) => Promise<boolean> } }).zerowallDesktop
+        const bytes = new Uint8Array(await blob.arrayBuffer())
+        let binary = ''
+        for (const byte of bytes) binary += String.fromCharCode(byte)
+        const copied = await desktop?.copyImage?.({ data: btoa(binary) }) ?? false
+        setCopyState(copied ? 'copied' : 'failed')
+      }
     } catch {
       setCopyState('failed')
     }
@@ -156,7 +165,21 @@ export function MessageImage({ image, load, variant, labels }: {
         >
           {src === null
             ? <span className={css.loading}>{labels.loading}</span>
-            : <img src={src} alt={label} style={fit === undefined ? undefined : { objectPosition: fit.objectPosition }} />}
+            : <img
+              src={src}
+              alt={label}
+              draggable
+              data-zerowall-image-url={src}
+              style={fit === undefined ? undefined : { objectPosition: fit.objectPosition }}
+              onDragStart={(event) => {
+                // Browser image drags commonly expose only a URI. Preserve it
+                // so the composer can fetch the bytes and create a durable
+                // attachment instead of treating the drag as a no-op.
+                event.dataTransfer.effectAllowed = 'copy'
+                event.dataTransfer.setData('text/uri-list', src)
+                event.dataTransfer.setData('text/plain', src)
+              }}
+            />}
         </button>
         {src !== null && (
           <button

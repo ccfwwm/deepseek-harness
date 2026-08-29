@@ -2,8 +2,8 @@ import { memo, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { PendingSubmission } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { MessageImageSource } from '@deepseek-ai/dsh-client-ui-conversation/client'
-import { JsonBlock, projectUserText, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { ChatNodeOwnerProps, ChatNodeViewProps, ChatViewSlotProps } from '../contract/slots.ts'
+import { IconArchiveOutline20, IconBrowseOutline16, IconCodeOutline16, IconCopyOutline16, IconDataOutline16, IconFolderClose16, JsonBlock, projectUserText, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { ChatFileAttachment, ChatNodeOwnerProps, ChatNodeViewProps, ChatViewSlotProps } from '../contract/slots.ts'
 import type { ModelRetryNode, TurnErrorNode, UserMessageNode } from '../contract/snapshot.ts'
 import { CompactionItem } from './CompactionItem.tsx'
 import { ContextInjectionRow } from './ContextInjectionRow.tsx'
@@ -15,10 +15,12 @@ type UserImage = Extract<UserMessageNode['content'][number], { type: 'image' }>
 function contentParts(content: readonly unknown[]): {
   text: string
   images: { attachment: UserImage['attachment'] }[]
+  files: ChatFileAttachment[]
   rest: unknown[]
 } {
   const texts: string[] = []
   const images: { attachment: UserImage['attachment'] }[] = []
+  const files: ChatFileAttachment[] = []
   const rest: unknown[] = []
   for (const block of content) {
     const b = block as { type?: string; text?: string; attachment?: unknown }
@@ -26,9 +28,62 @@ function contentParts(content: readonly unknown[]): {
     else if (b.type === 'image' && b.attachment !== undefined) {
       images.push({ attachment: (b as UserImage).attachment })
     }
+    else if (b.type === 'file' && b.attachment !== undefined && typeof b.attachment === 'object') {
+      const attachment = b.attachment as Partial<ChatFileAttachment>
+      if (typeof attachment.attachmentId === 'string' && typeof attachment.name === 'string') files.push({
+        attachmentId: attachment.attachmentId,
+        name: attachment.name,
+        mediaType: typeof attachment.mediaType === 'string' ? attachment.mediaType : 'application/octet-stream',
+        bytes: typeof attachment.bytes === 'number' ? attachment.bytes : 0,
+        ...(typeof attachment.parser === 'string' ? { parser: attachment.parser } : {}),
+        ...(typeof attachment.status === 'string' ? { status: attachment.status } : {}),
+        ...(typeof attachment.textChars === 'number' ? { textChars: attachment.textChars } : {}),
+        ...(typeof attachment.pageCount === 'number' ? { pageCount: attachment.pageCount } : {}),
+        ...(typeof attachment.sheetCount === 'number' ? { sheetCount: attachment.sheetCount } : {}),
+        ...(typeof attachment.preview === 'string' ? { preview: attachment.preview } : {}),
+      })
+      else rest.push(block)
+    }
     else rest.push(block)
   }
-  return { text: texts.join(''), images, rest }
+  return { text: texts.join(''), images, files, rest }
+}
+
+function formatFileBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function fileIconFor(file: ChatFileAttachment): ReactNode {
+  const extension = file.name.split('.').pop()?.toLocaleLowerCase() ?? ''
+  if (file.mediaType.includes('zip') || file.mediaType.includes('compressed') || ['zip', '7z', 'rar', 'tar', 'gz'].includes(extension)) return <IconArchiveOutline20 size={22} />
+  if (file.mediaType.includes('json') || file.mediaType.includes('javascript') || ['ts', 'tsx', 'js', 'jsx', 'py', 'rs', 'go'].includes(extension)) return <IconCodeOutline16 size={22} />
+  if (file.mediaType.startsWith('image/') || ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(extension)) return <IconBrowseOutline16 size={22} />
+  if (file.mediaType.includes('spreadsheet') || file.mediaType.includes('excel') || ['xls', 'xlsx', 'csv'].includes(extension)) return <IconDataOutline16 size={22} />
+  if (file.mediaType.includes('presentation') || ['ppt', 'pptx', 'key'].includes(extension)) return <IconFolderClose16 size={22} />
+  return <IconDataOutline16 size={22} />
+}
+
+function FileCards({ files, openAttachment, copyAttachment }: {
+  files: readonly ChatFileAttachment[]
+  openAttachment?: ((attachment: ChatFileAttachment) => void) | undefined
+  copyAttachment?: ((attachment: ChatFileAttachment) => void) | undefined
+}): ReactNode {
+  if (files.length === 0) return null
+  return <div className={css.fileCards} role="list" aria-label="附件">
+    {files.map(file => <div className={css.fileCard} role="listitem" key={file.attachmentId}>
+      <button type="button" className={css.fileOpen} onClick={() => openAttachment?.(file)} disabled={openAttachment === undefined} title="预览附件">
+        <span className={css.fileIcon} aria-hidden>{fileIconFor(file)}</span>
+        <span className={css.fileBody}>
+          <span className={css.fileName}>{file.name}</span>
+          <span className={css.fileMeta}>{file.mediaType} · {formatFileBytes(file.bytes)}{file.pageCount === undefined ? '' : ` · ${file.pageCount} 页`}</span>
+          {file.preview && <span className={css.filePreview}>{file.preview.replace(/\s+/gu, ' ').trim()}</span>}
+        </span>
+      </button>
+      <button type="button" className={css.fileCopy} onClick={() => copyAttachment?.(file)} disabled={copyAttachment === undefined} title="复制附件"><IconCopyOutline16 /></button>
+    </div>)}
+  </div>
 }
 
 function retrySeconds(milliseconds: number): number {
@@ -148,10 +203,12 @@ function TurnMaxTokensItem({ t }: {
 
 /** Right-aligned bubble shared by user and steering rows. */
 function UserStyleBubble({
-  content, renderMessageImages, actions, pending = false, echo = false, referenceLabels = [], previewImages, t,
+  content, renderMessageImages, openAttachment, copyAttachment, actions, pending = false, echo = false, referenceLabels = [], previewImages, t,
 }: {
   content: readonly unknown[]
   renderMessageImages: ChatNodeOwnerProps['renderMessageImages']
+  openAttachment?: ChatNodeOwnerProps['openAttachment']
+  copyAttachment?: ChatNodeOwnerProps['copyAttachment']
   /** Optional IconActions (or similar) below the bubble; receives the joined text. */
   actions?: (text: string) => ReactNode
   /** Whether this is the Host-authoritative pre-admission steering projection. */
@@ -164,7 +221,7 @@ function UserStyleBubble({
   previewImages?: readonly MessageImageSource[]
   t: ChatViewSlotProps['t']
 }): ReactNode {
-  const { text, images: contentImages, rest } = contentParts(content)
+  const { text, images: contentImages, files, rest } = contentParts(content)
   const images = previewImages ?? contentImages
   const truncated = (total: number): string => t('json.truncated', { total })
   const showBubble = text !== '' || rest.length > 0
@@ -177,6 +234,7 @@ function UserStyleBubble({
     >
       <div className={css.userStack}>
         {renderMessageImages({ images, align: 'end' })}
+        <FileCards files={files} openAttachment={openAttachment} copyAttachment={copyAttachment} />
         {showBubble && <div className={css.bubble}>
           {projectUserText(text, referenceLabels)}
           {rest.map((block, i) => <JsonBlock key={i} label={t('message.extraBlock')} payload={block} truncatedLabel={truncated} />)}
@@ -206,6 +264,8 @@ export function PendingSteeringBubble({ content, renderMessageImages, t }: {
   return (
     <UserStyleBubble
       content={content}
+      openAttachment={undefined}
+      copyAttachment={undefined}
       renderMessageImages={renderMessageImages}
       pending
       t={t}
@@ -271,13 +331,15 @@ export function PendingSubmissionBubble({ submission, renderMessageImages, t }: 
 
 /** User and admitted-steering keyed Chat renderer. */
 export const UserMessageNodeView = memo(function UserMessageNodeView({
-  node, renderMessageImages, t,
+  node, renderMessageImages, openAttachment, copyAttachment, t,
 }: ChatNodeViewProps<'user' | 'steering'>) {
   const data = node.data
   return (
     <UserStyleBubble
       content={data.content}
       renderMessageImages={renderMessageImages}
+      openAttachment={openAttachment}
+      copyAttachment={copyAttachment}
       {...data.referenceLabels === undefined ? {} : { referenceLabels: data.referenceLabels }}
       t={t}
       actions={text => (

@@ -128,12 +128,26 @@ export interface ModelReasoning {
   readonly defaultEffort?: string
 }
 
+/** Runtime availability reported by the explicit model health check. */
+export type ModelAvailability = 'unknown' | 'checking' | 'available' | 'unavailable' | 'requires-login'
+
+/** Runtime result of an image-input probe, independent from text availability. */
+export type ModelVisionStatus = 'supported' | 'unsupported' | 'unknown'
+
 /** One model displayed inside its provider group. */
 export interface ModelCatalogModel {
   readonly id: string
   readonly name: string
   readonly description?: string
+  /** Accepted input modalities; absent means the adapter cannot state this. */
+  readonly inputModalities?: readonly ('text' | 'image')[]
   readonly reasoning?: ModelReasoning
+  /** Result of the last explicit availability check. */
+  readonly status?: ModelAvailability
+  readonly statusMessage?: string
+  readonly visionStatus?: ModelVisionStatus
+  readonly visionMessage?: string
+  readonly lastCheckedAt?: number
 }
 
 /** One provider and its successfully loaded model catalog. */

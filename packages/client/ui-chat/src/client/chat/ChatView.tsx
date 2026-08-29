@@ -7,6 +7,7 @@ import type {
 } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { Button, IconChevronDownOutline14, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChatViewSlotProps } from '../contract/slots.ts'
+import type { ChatFileAttachment } from '../contract/slots.ts'
 import type { ChatSnapshot, TurnNavigationItem } from '../contract/snapshot.ts'
 import { PendingSteeringBubble, PendingSubmissionBubble } from './MessageItem.tsx'
 import { ChatNodeSeat } from './ChatNodeSeat.tsx'
@@ -277,6 +278,17 @@ export function ChatView({
     owner => renderSlot('conversation.message.images', { ...owner, loadImage }),
     [loadImage, renderSlot],
   )
+  const attachmentDetail = useCallback((attachment: ChatFileAttachment) => ({
+    file: attachment,
+    sessionId,
+    ...(cwd === undefined ? {} : { cwd }),
+  }), [cwd, sessionId])
+  const openAttachment = useCallback((attachment: ChatFileAttachment): void => {
+    window.dispatchEvent(new CustomEvent('zerowall:attachment-open', { detail: attachmentDetail(attachment) }))
+  }, [attachmentDetail])
+  const copyAttachment = useCallback((attachment: ChatFileAttachment): void => {
+    window.dispatchEvent(new CustomEvent('zerowall:attachment-copy', { detail: attachmentDetail(attachment) }))
+  }, [attachmentDetail])
   const runningTurnStart = useMemo(() => runningTurnStartTime(timeline), [timeline])
 
   const listRef = useRef<HTMLDivElement | null>(null)
@@ -606,6 +618,9 @@ export function ChatView({
               openFile={requestOpenFile}
               inspectCall={inspectCall}
               forkAt={forkAt}
+              sessionId={sessionId}
+              openAttachment={openAttachment}
+              copyAttachment={copyAttachment}
               renderMessageImages={renderMessageImages}
               fileMentions={fileMentions}
               renderSlot={renderSlot}

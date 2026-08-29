@@ -79,6 +79,20 @@ function inlineImageOptions(
 }
 
 describe('serializeMessages', () => {
+  it('serializes parsed document attachment text instead of dropping the file block', () => {
+    const wire = serializeMessages([createUserMessage({
+      content: [{
+        type: 'file',
+        attachment: {
+          attachmentId: 'file-sha256:doc', name: '说明.docx', mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          bytes: 10, sha256: 'doc', parser: 'docx', status: 'parsed', textChars: 7, preview: '附件正文内容',
+        },
+      }],
+      source: { kind: 'plugin', plugin: 'test' },
+    })])
+    expect(wire).toEqual([{ role: 'user', content: expect.stringContaining('附件正文内容') }])
+  })
+
   it('maps user text to string content', () => {
     const wire = serializeMessages([
       createUserMessage({

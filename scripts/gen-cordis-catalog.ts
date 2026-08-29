@@ -705,6 +705,8 @@ export const TYPE_LINK_EXEMPTIONS: Readonly<Record<string, string>> = {
   InvokeRemoteRequest: 'gateway invocation contract is owned by packages/api/gateway/README.md',
   LocaleDict: 'service-local dictionary fields are owned by packages/client/i18n/src/index.ts',
   ThemeTokens: 'service-local token dictionary is owned by packages/client/ui-theme/src/index.ts',
+  LlmProbeAttempt: 'model health probe diagnostics are owned by packages/llm/llm/src/index.ts',
+  LlmVisionProbeResult: 'model vision probe diagnostics are owned by packages/llm/llm/src/index.ts',
   Translate: 'service-local bound translator is owned by packages/client/i18n/src/index.ts',
   WebUpgradeRoute:
     'upgrade route registration contract is owned by packages/host/webserver/src/index.ts',

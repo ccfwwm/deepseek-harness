@@ -61,15 +61,34 @@ export interface ChatNodeTurnDataInjected {
 
 /** Stable owner currency delivered to a keyed Chat renderer. */
 export interface ChatNodeOwnerProps {
+  /** Current session identity used by attachment actions in transcript rows. */
+  sessionId?: string | undefined
   selectedCallId?: ToolCallId | undefined
   cwd?: string | undefined
   openFile: (path: string) => void
   inspectCall: (callId: ToolCallId) => void
   forkAt: (seq: number) => void
   renderMessageImages: RenderMessageImages
+  /** Open or copy an admitted file attachment from a transcript row. */
+  openAttachment?: ((attachment: ChatFileAttachment) => void) | undefined
+  copyAttachment?: ((attachment: ChatFileAttachment) => void) | undefined
   fileMentions: (owner: TurnTailOwnerProps) => MarkdownFileMentions | undefined
   /** Turn-process state when this Node belongs to a projected Turn. */
   turnProcess?: TurnProcessOwnerProps | undefined
+}
+
+/** Durable file reference rendered in a user or tool message. */
+export interface ChatFileAttachment {
+  readonly attachmentId: string
+  readonly name: string
+  readonly mediaType: string
+  readonly bytes: number
+  readonly parser?: string
+  readonly status?: string
+  readonly textChars?: number
+  readonly pageCount?: number
+  readonly sheetCount?: number
+  readonly preview?: string
 }
 
 /** Shared presentation state for one Turn-process answer generation. */

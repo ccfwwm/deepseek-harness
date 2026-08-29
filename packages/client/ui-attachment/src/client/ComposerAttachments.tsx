@@ -40,7 +40,7 @@ export function ComposerAttachments({
   useEffect(() => {
     const fileTransfer = (event: globalThis.DragEvent): DataTransfer | null => {
       const dataTransfer = event.dataTransfer
-      if (dataTransfer === null || !dataTransfer.types.includes('Files')) return null
+      if (dataTransfer === null || (!dataTransfer.types.includes('Files') && !dataTransfer.types.includes('text/uri-list') && !dataTransfer.types.includes('text/html'))) return null
       return dataTransfer
     }
     const reset = (): void => {
@@ -72,7 +72,27 @@ export function ComposerAttachments({
       if (dataTransfer === null) return
       event.preventDefault()
       reset()
-      if (canAcceptDrop) onAddImages([...dataTransfer.files])
+      if (!canAcceptDrop) return
+      const files = [...dataTransfer.files]
+      if (files.length > 0) {
+        onAddImages(files)
+        return
+      }
+      const rawUri = dataTransfer.getData('text/uri-list').split(/\r?\n/u).find(value => value.trim() !== '' && !value.startsWith('#'))?.trim()
+        ?? (() => {
+          const html = dataTransfer.getData('text/html')
+          const match = html.match(/<img[^>]+src=["']([^"']+)["']/iu)
+          return match?.[1]
+        })()
+      if (!rawUri) return
+      void fetch(rawUri).then(response => {
+        if (!response.ok) throw new Error(`image drag fetch failed: ${response.status}`)
+        return response.blob()
+      }).then(blob => {
+        const name = rawUri.split(/[/?#]/u).filter(Boolean).pop() || 'dropped-image'
+        const extension = blob.type === 'image/jpeg' ? '.jpg' : blob.type === 'image/webp' ? '.webp' : '.png'
+        onAddImages([new File([blob], name.includes('.') ? name : `${name}${extension}`, { type: blob.type || 'image/png' })])
+      }).catch(() => undefined)
     }
     document.addEventListener('dragenter', onDragEnter)
     document.addEventListener('dragover', onDragOver)
