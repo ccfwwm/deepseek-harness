@@ -111,8 +111,7 @@ export interface HeroShellProps {
  * @param props - see {@link HeroShellProps}.
  * @returns the centered hero element tree.
  */
-export function HeroShell({ t, renderSlot, children }: HeroShellProps) {
-  const preview = t('hero.preview').trim()
+export function HeroShell({ renderSlot, children }: HeroShellProps) {
   return (
     <div className={css.root}>
       <div className={css.stack}>
@@ -122,8 +121,7 @@ export function HeroShell({ t, renderSlot, children }: HeroShellProps) {
               fallback: <FishLogo size={34} className={css.fish} />,
             })}
           </span>
-          <span className={css.headlineText}>{t('hero.headline')}</span>
-          {preview === '' ? null : <span className={css.previewBadge}>{preview}</span>}
+          <span className={css.headlineText}>ZeroWall Science</span>
         </div>
         <div className={css.body}>
           {/* The composer remains mounted outside this component. */}
