@@ -14,7 +14,8 @@
  * @module @deepseek-ai/dsh-agent-presets/mount
  */
 
-import { pathToFileURL } from 'node:url'
+import { createRequire } from 'node:module'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Context, type Fiber } from '@deepseek-ai/cordis'
 import { Include } from '@deepseek-ai/cordis-plugin-include'
 import type { EntryTree } from '@deepseek-ai/cordis-plugin-loader'
@@ -100,7 +101,20 @@ class PresetTree extends Include {
     /* v8 ignore next -- Node always supplies the internal module loader; the branch keeps a
        hypothetical embedder from losing the row's name in a resolution error. */
     if (internal === undefined) return super.import(row.specifier, getOuterStack)
-    return internal.import(row.specifier, base, {})
+    // Cordis' internal module loader resolves through the current loader
+    // graph. In the packaged Electron runtime that graph is rooted inside
+    // the preset's ASAR path and does not consult the child process NODE_PATH,
+    // so a valid shipped @deepseek-ai package can still be reported missing.
+    // Resolve from the recorded Harness anchor as Node itself would, then
+    // import the concrete URL. Keep the internal path first for source/HMR
+    // loaders and use the Node resolver only for the packaged fallback.
+    return internal.import(row.specifier, base, {}).catch(async (error: unknown) => {
+      if (row.kind !== 'package') throw error
+      const anchor = pathToFileURL(fileURLToPath(base)).href
+      const require = createRequire(anchor.endsWith('/') ? `${anchor}package.json` : anchor)
+      const resolved = require.resolve(row.specifier)
+      return await import(pathToFileURL(resolved).href)
+    })
   }
 
   /**
