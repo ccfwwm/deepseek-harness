@@ -40,7 +40,7 @@ export class ModelCatalogDirectory {
     })
     // The first load belongs to Host startup. It performs the one real text
     // and vision probe and is then shared by settings and every selector.
-    const operation = this.session.modelCatalog({ check: true }).then((response) => {
+    const operation = this.session.modelCatalog({ check: true, refresh: true }).then((response) => {
       if (!response.ok) {
         throw new Error(`${response.error.code}: ${response.error.message}`)
       }
@@ -124,9 +124,9 @@ export class ModelCatalogDirectory {
   }
 
   /** Invalidate and reload the catalog after a Host-side model input changes. */
-  refresh(): void {
+  refresh(check = false): void {
     this.invalidate()
-    void this.sync().catch(() => { /* the selector exposes the shared error */ })
+    void (check ? this.checkAll() : this.sync()).catch(() => { /* the selector exposes the shared error */ })
   }
 
   /** Clear Host-specific values and load the replacement Host generation. */
