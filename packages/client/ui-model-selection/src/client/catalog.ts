@@ -84,8 +84,13 @@ export class ModelCatalogDirectory {
     provider?: string
     model?: string
   }): Promise<ModelCatalog> {
+    const targeted = request.provider !== undefined && request.model !== undefined
+    const previous = this.store.getSnapshot()
+    // A targeted probe must not put the shared catalog into the global
+    // loading state. The existing value remains authoritative for every
+    // other row while the caller's action button tracks the in-flight probe.
     this.store.update((draft) => {
-      draft.status = request.check === true ? 'loading' : 'loading'
+      draft.status = targeted && previous.value !== null ? 'ready' : 'loading'
       draft.error = null
     })
     const generation = this.generation
@@ -98,7 +103,7 @@ export class ModelCatalogDirectory {
     }).catch((error: unknown) => {
       if (generation === this.generation) {
         this.store.update((draft) => {
-          draft.status = 'error'
+          draft.status = targeted && previous.value !== null ? 'ready' : 'error'
           draft.error = error instanceof Error ? error.message : String(error)
         })
       }
