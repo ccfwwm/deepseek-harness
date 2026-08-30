@@ -85,6 +85,7 @@ function browserDraftAttachment(file: File): Extract<ComposerAttachment, { kind:
 type PreparedFile = Extract<ComposerAttachment, { kind: 'file' }>['prepared']
 interface FilesRemote {
   prepare(input: { sessionId: SessionId; name: string; mediaType?: string; data: string }): Promise<RemoteResult<PreparedFile>>
+  inspect(input: { sessionId: SessionId; attachmentId: string }): Promise<RemoteResult<PreparedFile>>
 }
 
 export class FileServiceUnavailableError extends Error {
@@ -296,7 +297,26 @@ export class ConversationController extends Service implements IConversation {
       return { kind: 'file' as const, id: randomUUID() as DraftAttachmentId, file, prepared: response.value }
     }))
     for (const attachment of prepared) this.draftAttachments.set(attachment.id, attachment)
+    const binding = this.requireSessions().binding(sessionId)
+    if (binding === undefined) return prepared
+    const shell = this.input.for(binding.ctx)
+    for (const attachment of prepared) this.watchFileParse(sessionId, attachment, shell, remote)
     return prepared
+  }
+
+  private watchFileParse(sessionId: SessionId, attachment: Extract<ComposerAttachment, { kind: 'file' }>, shell: ReturnType<SessionInputResolver['for']>, remote: FilesRemote): void {
+    let attempts = 0
+    const poll = async (): Promise<void> => {
+      if (attempts++ > 240) return
+      const response = await remote.inspect({ sessionId, attachmentId: attachment.prepared.attachmentId }).catch(() => undefined)
+      if (response?.ok === true) {
+        attachment.prepared = response.value
+        shell.setDraft(shell.state.getSnapshot().draft)
+        if (response.value.parseStatus === 'done' || response.value.parseStatus === 'failed' || response.value.parseStatus === 'idle') return
+      }
+      setTimeout(() => { void poll() }, 1500)
+    }
+    setTimeout(() => { void poll() }, 250)
   }
 
   /**
