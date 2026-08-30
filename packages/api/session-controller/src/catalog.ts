@@ -68,7 +68,9 @@ export async function buildModelCatalog(
     const base = cache.value ?? await buildModelCatalog(ctx, defaultSelection, {})
     const value = await checkOneModel(ctx, base, options)
     cache.value = value
-    cache.checked = true
+    // A targeted probe only establishes one row. Keep the generation marked
+    // as partially checked so the next startup/explicit all-model check still
+    // probes every remaining model instead of treating unknown rows as fresh.
     return value
   }
   const operation = buildModelCatalogUncached(ctx, defaultSelection, options)
@@ -106,7 +108,7 @@ async function buildModelCatalogUncached(
   const catalog = await Promise.all(providers.map(async (provider) => {
     try {
       const models = await ctx.llm.listModels(provider.id)
-      const entries = await mapWithConcurrency(models, options.concurrency ?? DEFAULT_PROBE_CONCURRENCY, async (model) =>
+      const entries = await mapWithConcurrency(models, options.concurrency ?? DEFAULT_PROBE_CONCURRENCY, async model =>
         modelEntry(ctx, provider.id, model, options))
       return { kind: 'group' as const, group: { id: provider.id, name: provider.name, models: entries } }
     } catch (error) {
@@ -128,7 +130,7 @@ async function buildModelCatalogUncached(
 async function checkOneModel(ctx: Context, base: ModelCatalog, options: ModelCatalogOptions): Promise<ModelCatalog> {
   if (options.provider === undefined || options.model === undefined) return base
   let found = false
-  const groups = await Promise.all(base.groups.map(async group => {
+  const groups = await Promise.all(base.groups.map(async (group) => {
     if (group.id !== options.provider) return group
     const model = group.models.find(candidate => candidate.id === options.model)
     if (model === undefined) return group
@@ -226,7 +228,9 @@ async function mapWithConcurrency<T, R>(items: readonly T[], limit: number, fn: 
     while (true) {
       const index = next++
       if (index >= items.length) return
-      results[index] = await fn(items[index]!)
+      const item = items[index]
+      if (item === undefined) return
+      results[index] = await fn(item)
     }
   }
   await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, () => worker()))
@@ -277,7 +281,7 @@ function safeMessage(error: unknown): string {
 /** Do not send credentials or long bearer fragments to the browser catalog. */
 function redact(message: string): string {
   return message
-    .replace(/Bearer\s+[A-Za-z0-9._~-]+/gi, 'Bearer [redacted]')
+    .replace(/Bearer\s+[^\s,;]+/gi, 'Bearer [redacted]')
     .replace(/(api[_ -]?key|token|secret)\s*[:=]\s*[^\s,;]+/gi, '$1=[redacted]')
     .slice(0, 240)
 }
