@@ -419,7 +419,20 @@ export class ModelsSettingsStore {
     // so a later successful load performs the automatic initial check.
     if (!this.startupProbeStarted && this.api.session?.modelCatalog !== undefined) {
       this.startupProbeStarted = true
-      void this.syncModels(true)
+      // Always bypass the Host-generation cache on first launch. A metadata
+      // catalog may have been populated just before this store mounted, and
+      // without refresh the UI can remain at "未检测" for the whole session.
+      void this.syncModels(true, true).then(() => {
+        const snapshot = this.store.getSnapshot()
+        if (snapshot.catalogStatus === 'error' && this.startupRetryCount < 3) {
+          this.startupRetryCount += 1
+          this.startupProbeStarted = false
+          this.startupRetryTimer = setTimeout(() => {
+            this.startupRetryTimer = undefined
+            void this.load()
+          }, 1500)
+        }
+      })
     }
   }
 }
