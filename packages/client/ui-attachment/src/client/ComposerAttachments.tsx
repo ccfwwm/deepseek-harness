@@ -15,6 +15,10 @@ interface ComposerRailItem extends AttachmentRailItem {
 }
 
 type ComposerFileAttachment = Extract<ComposerAttachment, { kind: 'file' }>
+type MineruPreparedFile = ComposerFileAttachment['prepared'] & {
+  parseStatus?: 'idle' | 'queued' | 'running' | 'done' | 'failed'
+  parseProgress?: number
+}
 
 /** Draft-image rail, document drop target, and original-image preview slot entry. */
 export function ComposerAttachments({
@@ -85,10 +89,10 @@ export function ComposerAttachments({
           return match?.[1]
         })()
       if (!rawUri) return
-      void fetch(rawUri).then(response => {
+      void fetch(rawUri).then((response) => {
         if (!response.ok) throw new Error(`image drag fetch failed: ${response.status}`)
         return response.blob()
-      }).then(blob => {
+      }).then((blob) => {
         const name = rawUri.split(/[/?#]/u).filter(Boolean).pop() || 'dropped-image'
         const extension = blob.type === 'image/jpeg' ? '.jpg' : blob.type === 'image/webp' ? '.webp' : '.png'
         onAddImages([new File([blob], name.includes('.') ? name : `${name}${extension}`, { type: blob.type || 'image/png' })])
@@ -135,6 +139,10 @@ export function ComposerAttachments({
           {fileAttachments.length > 0 && <div className={css.files} role="list" aria-label={t('file.pending')}>
             {fileAttachments.map(file => <div className={css.file} role="listitem" key={file.id}>
               <span className={css.fileName} title={file.file.name}>{file.file.name || t('file.unnamed')}</span>
+              {(file.prepared as MineruPreparedFile).parseStatus === 'queued' && <span className={css.fileStatus}>MinerU 排队中</span>}
+              {(file.prepared as MineruPreparedFile).parseStatus === 'running' && <span className={css.fileStatus}>MinerU 解析中 {(file.prepared as MineruPreparedFile).parseProgress ?? 0}%</span>}
+              {(file.prepared as MineruPreparedFile).parseStatus === 'done' && <span className={css.fileStatus}>MinerU 已完成</span>}
+              {(file.prepared as MineruPreparedFile).parseStatus === 'failed' && <span className={css.fileStatus}>MinerU 失败，已保留原文件</span>}
               <button type="button" className={css.fileRemove} aria-label={t('file.remove', { name: file.file.name })} onClick={() => { onRemoveImage(file.id) }}>×</button>
             </div>)}
           </div>}

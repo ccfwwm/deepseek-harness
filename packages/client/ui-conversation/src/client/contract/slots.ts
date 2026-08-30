@@ -44,6 +44,9 @@ export type ComposerAttachment = {
     sha256: string
     parser: string
     status: string
+    parseStatus?: 'idle' | 'queued' | 'running' | 'done' | 'failed'
+    parseProgress?: number
+    parseError?: string
     textChars: number
     preview: string
     pageCount?: number

@@ -27,6 +27,12 @@
   white-space: nowrap;
 }
 
+.fileStatus {
+  flex: 0 0 auto;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+}
+
 .fileRemove {
   display: grid;
   flex: 0 0 auto;
