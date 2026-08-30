@@ -248,12 +248,19 @@ export class ModelsSettingsStore {
   async syncModels(check = false, refresh = false): Promise<void> {
     const modelCatalog = this.api.session?.modelCatalog as unknown as ModelCatalogCall | undefined
     if (modelCatalog === undefined) return
+    // Metadata and health are separate phases. The metadata phase publishes
+    // selectable rows immediately; health then probes each exact route.
+    if (check) {
+      await this.syncModels(false, refresh)
+      await this.checkAllModels()
+      return
+    }
     this.store.update((s) => {
-      s.catalogStatus = check ? 'checking' : 'loading'
+      s.catalogStatus = 'loading'
       s.catalogError = null
     })
     try {
-      const request = check ? { check: true, ...(refresh ? { refresh: true } : {}) } : { ...(refresh ? { refresh: true } : {}) }
+      const request = { ...(refresh ? { refresh: true } : {}) }
       const response = await modelCatalog(request)
       if (!response.ok || response.value === undefined) throw new Error(response.error?.message ?? 'model catalog request failed')
       const value = response.value
@@ -270,6 +277,12 @@ export class ModelsSettingsStore {
         s.catalogError = messageOf(error)
       })
     }
+  }
+
+  private async checkAllModels(): Promise<void> {
+    const snapshot = this.store.getSnapshot()
+    const targets = (snapshot.catalogGroups ?? []).flatMap(group => group.models.map(model => ({ provider: group.id, model: model.id })))
+    await Promise.all(targets.map(target => this.checkModel(target.provider, target.model)))
   }
 
   /** Probe one exact provider/model route without rechecking the catalog. */
@@ -422,7 +435,7 @@ export class ModelsSettingsStore {
       // Always bypass the Host-generation cache on first launch. A metadata
       // catalog may have been populated just before this store mounted, and
       // without refresh the UI can remain at "未检测" for the whole session.
-      void this.syncModels(true, true).then(() => {
+      void this.syncModels(false, true).then(() => this.checkAllModels()).then(() => {
         const snapshot = this.store.getSnapshot()
         if (snapshot.catalogStatus === 'error' && this.startupRetryCount < 3) {
           this.startupRetryCount += 1

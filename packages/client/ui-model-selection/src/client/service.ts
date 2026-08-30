@@ -48,10 +48,15 @@ export class ModelDirectoryResolver extends Service {
   constructor(ctx: Context, config: { blockReason: () => string }) {
     super(ctx, 'modelDirectories')
     this.blockReason = config.blockReason
-    this.catalog = new ModelCatalogDirectory(ctx)
-    void this.catalog.load().catch(() => { /* selectors expose the shared error */ })
+    this.catalog = new ModelCatalogDirectory(ctx.remote.session)
+    // Publish metadata immediately, then probe each model independently in the
+    // background. This keeps the selector usable while health checks run.
+    void this.catalog.load()
+      .then(() => this.catalog.checkAll())
+      .catch(() => { /* selectors expose the shared error */ })
     ctx.on('connection/reset', () => {
       this.catalog.resetGeneration()
+      void this.catalog.load().then(() => this.catalog.checkAll()).catch(() => { /* selector exposes error */ })
       for (const directory of this.live.directories.values()) directory.resetConnected()
     })
     ctx.remote.$on('llm/adapters-updated', () => { this.catalog.refresh(true) })
