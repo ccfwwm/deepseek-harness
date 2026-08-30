@@ -38,9 +38,10 @@ export class ModelCatalogDirectory {
       draft.status = 'loading'
       draft.error = null
     })
-    // The first load belongs to Host startup. It performs the one real text
-    // and vision probe and is then shared by settings and every selector.
-    const operation = this.session.modelCatalog({ check: true, refresh: true }).then((response) => {
+    // Load metadata first so the selector becomes usable immediately. Health
+    // probes are deliberately scheduled by the owning service and merged one
+    // model at a time; a slow provider must not block model switching.
+    const operation = this.session.modelCatalog({ refresh: true }).then((response) => {
       if (!response.ok) {
         throw new Error(`${response.error.code}: ${response.error.message}`)
       }
@@ -69,8 +70,11 @@ export class ModelCatalogDirectory {
   }
 
   /** Explicit user action: probe every model in the current Host generation. */
-  checkAll(): Promise<ModelCatalog> {
-    return this.request({ check: true, refresh: true })
+  async checkAll(): Promise<ModelCatalog> {
+    const base = await this.load()
+    const models = base.groups.flatMap(group => group.models.map(model => ({ provider: group.id, model: model.id })))
+    await Promise.all(models.map(target => this.checkModel(target.provider, target.model)))
+    return this.store.getSnapshot().value ?? base
   }
 
   /** Explicit user action: probe one exact provider/model route. */
@@ -92,12 +96,40 @@ export class ModelCatalogDirectory {
     this.store.update((draft) => {
       draft.status = targeted && previous.value !== null ? 'ready' : 'loading'
       draft.error = null
+      if (targeted && draft.value !== null) {
+        draft.value = {
+          ...draft.value,
+          groups: draft.value.groups.map(group => group.id !== request.provider
+            ? group
+            : {
+              ...group,
+              models: group.models.map(model => model.id !== request.model
+                ? model
+                : { ...model, status: 'checking' as const }),
+            }),
+        }
+      }
     })
     const generation = this.generation
     const operation = this.session.modelCatalog(request).then((response) => {
       if (!response.ok) throw new Error(`${response.error.code}: ${response.error.message}`)
       if (generation === this.generation) {
-        this.store.set({ value: response.value, status: 'ready', error: null })
+        if (targeted && previous.value !== null) {
+          const current = this.store.getSnapshot().value ?? previous.value
+          const next = response.value
+          const provider = request.provider
+          const model = request.model
+          const groups = current.groups.map((group) => {
+            if (group.id !== provider) return group
+            const checked = next.groups.find(candidate => candidate.id === provider)?.models.find(candidate => candidate.id === model)
+            return checked === undefined
+              ? group
+              : { ...group, models: group.models.map(entry => entry.id === model ? checked : entry) }
+          })
+          this.store.set({ value: { ...current, groups, failures: next.failures }, status: 'ready', error: null })
+        } else {
+          this.store.set({ value: response.value, status: 'ready', error: null })
+        }
       }
       return response.value
     }).catch((error: unknown) => {

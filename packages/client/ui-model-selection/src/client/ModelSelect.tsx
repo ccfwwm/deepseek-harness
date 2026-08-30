@@ -125,7 +125,9 @@ export function ModelSelect(
         label: effort.name,
       })),
     ], [reasoning, t])
-  const busy = state.status === 'selecting' || catalogAction !== null
+  // A catalog probe is row-scoped. Only selection itself blocks the menu;
+  // checking one model must never disable switching to another model.
+  const busy = state.status === 'selecting'
   const syncCatalog = sync ?? (() => Promise.resolve())
   const checkAllCatalog = checkAll ?? (() => Promise.resolve())
   const checkOneCatalog = checkModel ?? (() => Promise.resolve())
@@ -308,7 +310,7 @@ export function ModelSelect(
                 <button
                   type="button"
                   className={css.catalogAction}
-                  disabled={busy}
+                  disabled={busy || catalogAction !== null}
                   aria-label={t('action.sync')}
                   title={t('action.sync')}
                   onClick={() => { runCatalogAction('sync', syncCatalog) }}
@@ -319,7 +321,7 @@ export function ModelSelect(
                 <button
                   type="button"
                   className={css.catalogActionPrimary}
-                  disabled={busy}
+                  disabled={busy || catalogAction !== null}
                   onClick={() => { runCatalogAction('check-all', checkAllCatalog) }}
                 >
                   <IconRefreshOutline16 />
@@ -360,25 +362,25 @@ export function ModelSelect(
                               data-status={model.status ?? 'unknown'}
                               data-vision={model.visionStatus ?? 'unknown'}
                               title={model.name}
-                              disabled={busy}
+                              disabled={busy || catalogAction === `check:${group.id}:${model.id}`}
                               onClick={() => { choose({ provider: group.id, model: model.id }) }}
                             >
-                            <span className={css.optionCopy}>
-                              <span className={css.modelName}>{model.name}</span>
-                              <span className={css.modelMeta} aria-hidden="true">
-                                {model.status === 'available'
-                                  ? t('status.available')
-                                  : model.status === 'requires-login'
-                                    ? t('status.requiresLogin')
-                                    : model.status === 'unavailable'
-                                      ? t('status.unavailable')
-                                      : model.status === 'checking'
-                                        ? t('status.checking')
-                                        : t('status.unknown')}
-                                {' · '}
-                                {modalitiesLabel(model, t)}
+                              <span className={css.optionCopy}>
+                                <span className={css.modelName}>{model.name}</span>
+                                <span className={css.modelMeta} aria-hidden="true">
+                                  {model.status === 'available'
+                                    ? t('status.available')
+                                    : model.status === 'requires-login'
+                                      ? t('status.requiresLogin')
+                                      : model.status === 'unavailable'
+                                        ? t('status.unavailable')
+                                        : model.status === 'checking'
+                                          ? t('status.checking')
+                                          : t('status.unknown')}
+                                  {' · '}
+                                  {modalitiesLabel(model, t)}
+                                </span>
                               </span>
-                            </span>
                               <span className={css.check}>
                                 {selected ? <IconCheckOutline16 /> : null}
                               </span>
@@ -386,7 +388,7 @@ export function ModelSelect(
                             <button
                               type="button"
                               className={css.modelCheck}
-                              disabled={busy}
+                              disabled={busy || catalogAction === `check:${group.id}:${model.id}`}
                               aria-label={t('action.checkModel', { model: model.name })}
                               title={t('action.checkModel', { model: model.name })}
                               onClick={(event) => {

@@ -39,7 +39,8 @@ describe('ModelCatalogDirectory', () => {
     await subject.load()
 
     const check = subject.checkModel('fixture', 'two')
-    expect(subject.store.getSnapshot()).toMatchObject({ value: initial, status: 'ready', error: null })
+    expect(subject.store.getSnapshot()).toMatchObject({ status: 'ready', error: null })
+    expect(subject.store.getSnapshot().value?.groups[0]?.models[1]?.status).toBe('checking')
     pending.resolve({ ok: true, value: checked })
     await expect(check).resolves.toEqual(checked)
     expect(subject.store.getSnapshot()).toMatchObject({ value: checked, status: 'ready', error: null })
