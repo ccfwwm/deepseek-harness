@@ -159,6 +159,10 @@ async function modelEntry(
     ...(model.description === undefined ? {} : { description: model.description }),
     ...(model.inputModalities === undefined ? {} : { inputModalities: [...model.inputModalities] }),
   }
+  // Metadata catalog construction must remain local and fast. Resolving a
+  // provider route can perform network/auth work, so defer it to the explicit
+  // health-check path instead of blocking the first model list.
+  if (options.check !== true) return entry
   try {
     const resolved = await ctx.llm.resolveModelInfo(provider, model.id)
     const reasoning: ModelReasoning | undefined = resolved.reasoning === undefined
@@ -183,8 +187,6 @@ async function modelEntry(
     // A broken metadata lookup must not hide every other model in the group.
     if (options.check === true) entry = { ...entry, status: availabilityOfError(error), statusMessage: redact(safeMessage(error)) }
   }
-  if (options.check !== true) return entry
-
   const checkedAt = Date.now()
   let status: ModelAvailability = 'unavailable'
   let statusMessage: string | undefined

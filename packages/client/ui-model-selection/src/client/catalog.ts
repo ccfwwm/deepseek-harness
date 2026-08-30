@@ -73,7 +73,15 @@ export class ModelCatalogDirectory {
   async checkAll(): Promise<ModelCatalog> {
     const base = await this.load()
     const models = base.groups.flatMap(group => group.models.map(model => ({ provider: group.id, model: model.id })))
-    await Promise.all(models.map(target => this.checkModel(target.provider, target.model)))
+    let next = 0
+    const worker = async (): Promise<void> => {
+      while (next < models.length) {
+        const target = models[next++]
+        if (target === undefined) return
+        await this.checkModel(target.provider, target.model)
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(3, Math.max(1, models.length)) }, () => worker()))
     return this.store.getSnapshot().value ?? base
   }
 

@@ -282,7 +282,15 @@ export class ModelsSettingsStore {
   private async checkAllModels(): Promise<void> {
     const snapshot = this.store.getSnapshot()
     const targets = (snapshot.catalogGroups ?? []).flatMap(group => group.models.map(model => ({ provider: group.id, model: model.id })))
-    await Promise.all(targets.map(target => this.checkModel(target.provider, target.model)))
+    let next = 0
+    const worker = async (): Promise<void> => {
+      while (next < targets.length) {
+        const target = targets[next++]
+        if (target === undefined) return
+        await this.checkModel(target.provider, target.model)
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(3, Math.max(1, targets.length)) }, () => worker()))
   }
 
   /** Probe one exact provider/model route without rechecking the catalog. */
