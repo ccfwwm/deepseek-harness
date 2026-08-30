@@ -14,6 +14,37 @@ function directory(models: () => Promise<unknown>): ModelCatalogDirectory {
 }
 
 describe('ModelCatalogDirectory', () => {
+  it('keeps the shared catalog ready while one model is being checked', async () => {
+    const initial: ModelCatalog = {
+      default: { provider: 'fixture', model: 'one' },
+      routableProviders: ['fixture'],
+      groups: [{ id: 'fixture', name: 'Fixture', models: [
+        { id: 'one', name: 'one', status: 'available' },
+        { id: 'two', name: 'two', status: 'unavailable' },
+      ] }],
+      failures: [],
+    }
+    const checked: ModelCatalog = {
+      ...initial,
+      groups: [{ ...initial.groups[0]!, models: [
+        initial.groups[0]!.models[0]!,
+        { id: 'two', name: 'two', status: 'available', lastCheckedAt: 1 },
+      ] }],
+    }
+    const pending = Promise.withResolvers<unknown>()
+    const models = vi.fn()
+      .mockResolvedValueOnce({ ok: true, value: initial })
+      .mockReturnValueOnce(pending.promise)
+    const subject = directory(models)
+    await subject.load()
+
+    const check = subject.checkModel('fixture', 'two')
+    expect(subject.store.getSnapshot()).toMatchObject({ value: initial, status: 'ready', error: null })
+    pending.resolve({ ok: true, value: checked })
+    await expect(check).resolves.toEqual(checked)
+    expect(subject.store.getSnapshot()).toMatchObject({ value: checked, status: 'ready', error: null })
+  })
+
   it('shares one failing request, exposes the RPC error, and permits a retry', async () => {
     const models = vi.fn()
       .mockResolvedValueOnce({
