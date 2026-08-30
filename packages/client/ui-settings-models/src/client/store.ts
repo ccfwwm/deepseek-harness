@@ -112,6 +112,13 @@ export interface ModelsWire {
   session?: ModelsSession
 }
 
+type ModelCatalogCall = (input?: {
+  check?: boolean
+  refresh?: boolean
+  provider?: string
+  model?: string
+}) => Promise<{ ok: boolean; value?: RuntimeModelCatalog; error?: { message?: string } }>
+
 /** One provider row the page renders. */
 export interface ProviderRow {
   /** The directory entry (route id, display name, settings address, live state). */
@@ -223,6 +230,9 @@ export class ModelsSettingsStore {
   private generation = 0
   /** The initial text+vision probe is a startup action, not a poll. */
   private startupProbeStarted = false
+  /** A connection can still be opening when the settings plugin mounts. */
+  private startupRetryTimer: ReturnType<typeof setTimeout> | undefined
+  private startupRetryCount = 0
 
   /**
    * @param api - the page's credentials Remote and LLM wire faces.
@@ -236,19 +246,20 @@ export class ModelsSettingsStore {
 
   /** Refresh or run real provider probes for the host-owned model catalog. */
   async syncModels(check = false, refresh = false): Promise<void> {
-    const modelCatalog = this.api.session?.modelCatalog as unknown as
-      ((input?: { check?: boolean; refresh?: boolean }) => Promise<{ ok: boolean; value?: RuntimeModelCatalog; error?: { message?: string } }>) | undefined
+    const modelCatalog = this.api.session?.modelCatalog as unknown as ModelCatalogCall | undefined
     if (modelCatalog === undefined) return
     this.store.update((s) => {
       s.catalogStatus = check ? 'checking' : 'loading'
       s.catalogError = null
     })
     try {
-      const response = await modelCatalog(check ? { check: true, ...(refresh ? { refresh: true } : {}) } : { ...(refresh ? { refresh: true } : {}) })
+      const request = check ? { check: true, ...(refresh ? { refresh: true } : {}) } : { ...(refresh ? { refresh: true } : {}) }
+      const response = await modelCatalog(request)
       if (!response.ok || response.value === undefined) throw new Error(response.error?.message ?? 'model catalog request failed')
+      const value = response.value
       this.store.update((s) => {
-        s.catalogGroups = response.value!.groups
-        s.catalogFailures = response.value!.failures
+        s.catalogGroups = value.groups
+        s.catalogFailures = value.failures
         s.catalogStatus = 'ready'
         s.catalogError = null
         s.catalogUpdatedAt = Date.now()
@@ -263,8 +274,7 @@ export class ModelsSettingsStore {
 
   /** Probe one exact provider/model route without rechecking the catalog. */
   async checkModel(provider: string, model: string): Promise<void> {
-    const modelCatalog = this.api.session?.modelCatalog as unknown as
-      ((input?: { check?: boolean; refresh?: boolean; provider?: string; model?: string }) => Promise<{ ok: boolean; value?: RuntimeModelCatalog; error?: { message?: string } }>) | undefined
+    const modelCatalog = this.api.session?.modelCatalog as unknown as ModelCatalogCall | undefined
     if (modelCatalog === undefined) return
     const key = `${provider}:${model}`
     this.store.update((s) => {
@@ -279,15 +289,16 @@ export class ModelsSettingsStore {
     try {
       const response = await modelCatalog({ check: true, refresh: true, provider, model })
       if (!response.ok || response.value === undefined) throw new Error(response.error?.message ?? 'model check failed')
+      const value = response.value
       this.store.update((s) => {
-        const checked = response.value!.groups.find(group => group.id === provider)?.models.find(entry => entry.id === model)
+        const checked = value.groups.find(group => group.id === provider)?.models.find(entry => entry.id === model)
         if (checked === undefined) return
         if (s.catalogGroups !== undefined) {
           s.catalogGroups = s.catalogGroups.map(group => group.id !== provider
             ? group
             : { ...group, models: group.models.map(entry => entry.id === model ? checked : entry) })
         }
-        s.catalogFailures = response.value!.failures
+        s.catalogFailures = value.failures
         // A single-row check must not put the entire catalog into a loading
         // state or replace unrelated model objects in the page.
         if (s.catalogStatus === 'idle') s.catalogStatus = 'ready'
@@ -335,6 +346,16 @@ export class ModelsSettingsStore {
         s.status = 'error'
         s.error = error instanceof Error ? error.message : String(error)
       })
+      // The first load may race the initial transport handshake. Retry a few
+      // times so model health is populated on startup without requiring the
+      // user to open Settings or click a manual refresh button.
+      if (this.startupRetryCount < 3 && this.startupRetryTimer === undefined) {
+        this.startupRetryCount += 1
+        this.startupRetryTimer = setTimeout(() => {
+          this.startupRetryTimer = undefined
+          void this.load()
+        }, 750)
+      }
       return
     }
     const namespaces = new Map(views.map(view => [view.ns, view]))
@@ -386,9 +407,17 @@ export class ModelsSettingsStore {
       })
       s.namespaces = namespaces
     })
+    this.startupRetryCount = 0
+    if (this.startupRetryTimer !== undefined) {
+      clearTimeout(this.startupRetryTimer)
+      this.startupRetryTimer = undefined
+    }
     // Startup performs one shared text + vision probe. Subsequent settings
     // refreshes consume the Host-generation cache and never probe again.
-    if (!this.startupProbeStarted) {
+    // The Session face can be attached a moment after the settings face during
+    // connection startup. Leave the flag unset until the probe endpoint exists
+    // so a later successful load performs the automatic initial check.
+    if (!this.startupProbeStarted && this.api.session?.modelCatalog !== undefined) {
       this.startupProbeStarted = true
       void this.syncModels(true)
     }

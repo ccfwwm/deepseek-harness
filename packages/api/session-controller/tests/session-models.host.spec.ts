@@ -443,6 +443,25 @@ describe('Web session model selection', () => {
     await ctx.fiber.dispose()
   })
 
+  it('keeps other model health results unchanged after a targeted check', async () => {
+    const { ctx } = await harness()
+    ctx.llm.registerAdapter(['targeted'], new class extends CatalogAdapter {
+      override probeModel(): Promise<readonly { protocol: string; ok: boolean }[]> {
+        return Promise.resolve([{ protocol: 'native', ok: true }])
+      }
+    }('Targeted', [
+      { provider: 'targeted', id: 'one', name: 'One' },
+      { provider: 'targeted', id: 'two', name: 'Two' },
+    ]))
+    const defaultSelection = { provider: 'deepseek-official', model: 'deepseek-chat' }
+    const first = await buildModelCatalog(ctx, defaultSelection, { check: true })
+    const second = await buildModelCatalog(ctx, defaultSelection, { check: true, provider: 'targeted', model: 'one', refresh: true })
+    const beforeTwo = first.groups.find(group => group.id === 'targeted')?.models.find(model => model.id === 'two')
+    const afterTwo = second.groups.find(group => group.id === 'targeted')?.models.find(model => model.id === 'two')
+    expect(afterTwo).toEqual(beforeTwo)
+    await ctx.fiber.dispose()
+  })
+
   it('accepts an advisory-unlisted model, rejects an unavailable provider, and switches only after the next assembly', async () => {
     const { ctx, agent, sessionId } = await harness()
     const remote = createSessionTestRemote(ctx, { defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }), cwd: '/tmp' })
