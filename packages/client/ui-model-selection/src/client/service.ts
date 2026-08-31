@@ -77,7 +77,6 @@ export class ModelDirectoryResolver extends Service {
   private refreshInBackground(): void {
     this.cancelScheduledCheck?.()
     void this.catalog.refresh(false)
-      .then(() => { this.scheduleBackgroundCheck() })
       .catch(() => { /* selectors expose the shared error */ })
   }
 

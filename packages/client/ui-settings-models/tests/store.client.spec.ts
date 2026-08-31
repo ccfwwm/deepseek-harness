@@ -109,6 +109,29 @@ function api(overrides: {
 }
 
 describe('ModelsSettingsStore', () => {
+  it('opens the settings page from the shared snapshot without starting a health probe', async () => {
+    const { face, mirror } = api()
+    const catalog = {
+      default: { provider: 'fixture', model: 'one' },
+      routableProviders: ['fixture'],
+      groups: [{ id: 'fixture', name: 'Fixture', models: [
+        { id: 'one', name: 'One', status: 'available' as const, lastCheckedAt: 1 },
+      ] }],
+      failures: [],
+    }
+    const modelCatalog = vi.fn((_request?: { check?: boolean }) => Promise.resolve(remoteOk(catalog)))
+    ;(face as unknown as { session: { modelCatalog: typeof modelCatalog } }).session = { modelCatalog }
+    const store = new ModelsSettingsStore(face, settingsSchema, mirror)
+
+    await store.load()
+    await vi.waitFor(() => { expect(store.store.getSnapshot().catalogStatus).toBe('ready') })
+
+    expect(modelCatalog).toHaveBeenCalledTimes(1)
+    expect(modelCatalog).toHaveBeenCalledWith({})
+    expect(modelCatalog.mock.calls.some(([request]) => request?.check === true)).toBe(false)
+    expect(store.store.getSnapshot().catalogGroups).toEqual(catalog.groups)
+  })
+
   it('uses one background Host batch instead of probing every model from the settings page', async () => {
     const { face, mirror } = api()
     const catalog = {

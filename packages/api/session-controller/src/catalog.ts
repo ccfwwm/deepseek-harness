@@ -1,6 +1,9 @@
 /** Shared projection of the live LLM registry into the browser model catalog. */
 
 import type { Context } from '@deepseek-ai/cordis'
+import { randomUUID } from 'node:crypto'
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { dirname, join, resolve } from 'node:path'
 import type { LlmModelInfo, LlmProbeAttempt, LlmVisionProbeResult } from '@deepseek-ai/dsh-llm'
 import type {
   ModelAvailability,
@@ -39,6 +42,16 @@ interface CatalogCache {
   metadataInflight?: Promise<ModelCatalog> | undefined
   checkInflight?: Promise<ModelCatalog> | undefined
   visionSupported: Set<string>
+  health: Map<string, PersistedModelHealth>
+  hydration?: Promise<void> | undefined
+}
+
+interface PersistedModelHealth {
+  status: ModelAvailability
+  statusMessage?: string
+  visionStatus?: ModelVisionStatus
+  visionMessage?: string
+  lastCheckedAt: number
 }
 
 const catalogCaches = new WeakMap<object, CatalogCache>()
@@ -50,11 +63,12 @@ export async function buildModelCatalog(
   options: ModelCatalogOptions = {},
 ): Promise<ModelCatalog> {
   const cache = catalogCacheFor(ctx)
+  await hydrateHealth(cache)
   const targeted = options.provider !== undefined || options.model !== undefined
   if (options.check !== true) {
-    if (cache.value !== undefined) return cache.value
+    if (options.refresh !== true && cache.value !== undefined) return cache.value
     if (cache.metadataInflight !== undefined) return cache.metadataInflight
-    const operation = buildModelCatalogUncached(ctx, defaultSelection, {})
+    const operation = buildModelCatalogUncached(ctx, defaultSelection, {}).then(value => mergeHealth(value, cache.health))
     cache.metadataInflight = operation
     try {
       const value = await operation
@@ -70,6 +84,8 @@ export async function buildModelCatalog(
     const base = cache.value ?? await buildModelCatalog(ctx, defaultSelection, {})
     const value = await checkOneModel(ctx, base, options)
     cache.value = value
+    captureHealth(cache, value)
+    await persistHealth(cache)
     // A targeted probe only establishes one row. Keep the generation marked
     // as partially checked so the next startup/explicit all-model check still
     // probes every remaining model instead of treating unknown rows as fresh.
@@ -81,6 +97,8 @@ export async function buildModelCatalog(
     const value = await operation
     cache.value = value
     cache.checked = true
+    captureHealth(cache, value)
+    await persistHealth(cache)
     return value
   } finally {
     if (cache.checkInflight === operation) cache.checkInflight = undefined
@@ -94,15 +112,11 @@ async function checkAllModels(
 ): Promise<ModelCatalog> {
   const cache = catalogCacheFor(ctx)
   const base = cache.value ?? await buildModelCatalogUncached(ctx, defaultSelection, {})
-  const checking: ModelCatalog = {
-    ...base,
-    groups: base.groups.map(group => ({
-      ...group,
-      models: group.models.map(model => ({ ...model, status: 'checking' as const })),
-    })),
-  }
-  cache.value = checking
-  const targets = checking.groups.flatMap(group => group.models.map(model => ({
+  // Keep the last known row states visible while probes run. The caller owns
+  // the batch progress indicator; replacing every row with "checking" makes
+  // the selector look unavailable and destroys useful startup history.
+  cache.value = base
+  const targets = base.groups.flatMap(group => group.models.map(model => ({
     provider: group.id,
     model,
   })))
@@ -115,9 +129,9 @@ async function checkAllModels(
       ...(target.model.inputModalities === undefined ? {} : { inputModalities: [...target.model.inputModalities] }),
     }, { ...options, check: true })
     const entry = target.model.reasoning === undefined ? checked : { ...checked, reasoning: target.model.reasoning }
-    cache.value = replaceModel(cache.value ?? checking, target.provider, target.model.id, entry)
+    cache.value = replaceModel(cache.value ?? base, target.provider, target.model.id, entry)
   })
-  return cache.value ?? checking
+  return cache.value ?? base
 }
 
 function replaceModel(
@@ -136,16 +150,117 @@ function replaceModel(
 
 /** Drop the cached catalog when a provider/settings generation changes. */
 export function invalidateModelCatalog(ctx: Context): void {
-  catalogCaches.delete(ctx)
+  const cache = catalogCaches.get(ctx as object)
+  if (cache === undefined) return
+  if (cache.value !== undefined) captureHealth(cache, cache.value)
+  delete cache.value
+  cache.checked = false
+  delete cache.metadataInflight
+  delete cache.checkInflight
 }
 
 function catalogCacheFor(ctx: Context): CatalogCache {
   const key = ctx as object
   const existing = catalogCaches.get(key)
   if (existing !== undefined) return existing
-  const created: CatalogCache = { checked: false, visionSupported: new Set() }
+  const created: CatalogCache = { checked: false, visionSupported: new Set(), health: new Map() }
   catalogCaches.set(key, created)
   return created
+}
+
+function healthKey(provider: string, model: string): string { return `${provider}\0${model}` }
+
+function mergeHealth(catalog: ModelCatalog, health: ReadonlyMap<string, PersistedModelHealth>): ModelCatalog {
+  return {
+    ...catalog,
+    groups: catalog.groups.map(group => ({
+      ...group,
+      models: group.models.map((model) => {
+        const saved = health.get(healthKey(group.id, model.id))
+        if (saved === undefined) return model
+        return {
+          ...model,
+          status: saved.status,
+          ...(saved.statusMessage === undefined ? {} : { statusMessage: saved.statusMessage }),
+          ...(saved.visionStatus === undefined ? {} : { visionStatus: saved.visionStatus }),
+          ...(saved.visionMessage === undefined ? {} : { visionMessage: saved.visionMessage }),
+          lastCheckedAt: saved.lastCheckedAt,
+        }
+      }),
+    })),
+  }
+}
+
+function captureHealth(cache: CatalogCache, catalog: ModelCatalog): void {
+  for (const group of catalog.groups) {
+    for (const model of group.models) {
+      if (model.status === undefined || model.status === 'checking' || model.lastCheckedAt === undefined) continue
+      cache.health.set(healthKey(group.id, model.id), {
+        status: model.status,
+        ...(model.statusMessage === undefined ? {} : { statusMessage: model.statusMessage }),
+        ...(model.visionStatus === undefined ? {} : { visionStatus: model.visionStatus }),
+        ...(model.visionMessage === undefined ? {} : { visionMessage: model.visionMessage }),
+        lastCheckedAt: model.lastCheckedAt,
+      })
+      if (model.visionStatus === 'supported') cache.visionSupported.add(healthKey(group.id, model.id))
+    }
+  }
+}
+
+async function hydrateHealth(cache: CatalogCache): Promise<void> {
+  if (cache.hydration !== undefined) return cache.hydration
+  const operation = (async () => {
+    const path = modelHealthPath()
+    if (path === undefined) return
+    try {
+      const parsed = JSON.parse(await readFile(path, 'utf8')) as { version?: unknown; models?: unknown }
+      if (parsed.version !== 1 || typeof parsed.models !== 'object' || parsed.models === null || Array.isArray(parsed.models)) return
+      for (const [key, candidate] of Object.entries(parsed.models)) {
+        const value = persistedHealth(candidate)
+        if (value === undefined) continue
+        cache.health.set(key, value)
+        if (value.visionStatus === 'supported') cache.visionSupported.add(key)
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return
+    }
+  })()
+  cache.hydration = operation
+  await operation
+}
+
+function persistedHealth(candidate: unknown): PersistedModelHealth | undefined {
+  if (typeof candidate !== 'object' || candidate === null || Array.isArray(candidate)) return undefined
+  const value = candidate as Record<string, unknown>
+  const status = value.status
+  const visionStatus = value.visionStatus
+  if (status !== 'available' && status !== 'unavailable' && status !== 'requires-login' && status !== 'unknown') return undefined
+  if (typeof value.lastCheckedAt !== 'number' || !Number.isFinite(value.lastCheckedAt)) return undefined
+  if (visionStatus !== undefined && visionStatus !== 'supported' && visionStatus !== 'unsupported' && visionStatus !== 'unknown') return undefined
+  return {
+    status,
+    ...(typeof value.statusMessage === 'string' ? { statusMessage: value.statusMessage } : {}),
+    ...(visionStatus === undefined ? {} : { visionStatus }),
+    ...(typeof value.visionMessage === 'string' ? { visionMessage: value.visionMessage } : {}),
+    lastCheckedAt: value.lastCheckedAt,
+  }
+}
+
+async function persistHealth(cache: CatalogCache): Promise<void> {
+  const path = modelHealthPath()
+  if (path === undefined) return
+  const temporary = `${path}.${randomUUID()}.tmp`
+  const models = Object.fromEntries([...cache.health.entries()].sort(([left], [right]) => left.localeCompare(right)))
+  try {
+    await mkdir(dirname(path), { recursive: true })
+    await writeFile(temporary, `${JSON.stringify({ version: 1, models })}\n`, { encoding: 'utf8', mode: 0o600 })
+    await rename(temporary, path)
+  } catch { /* health persistence must never make a working model probe fail */ }
+}
+
+function modelHealthPath(): string | undefined {
+  const home = process.env.DSH_HOME?.trim()
+  return home === undefined || home === '' ? undefined : join(resolve(home), 'cache', 'model-health-v1.json')
 }
 
 async function buildModelCatalogUncached(
@@ -259,7 +374,7 @@ async function modelEntry(
     status = availabilityOfError(error)
   }
 
-  const visionKey = `${provider}:${model.id}`
+  const visionKey = healthKey(provider, model.id)
   let visionStatus: ModelVisionStatus = catalogCacheFor(ctx).visionSupported.has(visionKey) ? 'supported' : 'unknown'
   let visionMessage: string | undefined
   try {

@@ -44,7 +44,7 @@ export class ModelCatalogDirectory {
     // Load metadata first so the selector becomes usable immediately. Health
     // probes are deliberately scheduled by the owning service and merged one
     // model at a time; a slow provider must not block model switching.
-    const operation = this.session.modelCatalog({ refresh: true }).then((response) => {
+    const operation = this.session.modelCatalog().then((response) => {
       if (!response.ok) {
         throw new Error(`${response.error.code}: ${response.error.message}`)
       }
@@ -83,30 +83,12 @@ export class ModelCatalogDirectory {
   }
 
   private async runCheckAll(background: boolean): Promise<ModelCatalog> {
-    const base = await this.load()
+    await this.load()
     const generation = this.generation
-    this.publishChecking(base, generation)
-    let settled = false
     const operation = this.session.modelCatalog({
       check: true,
-      refresh: true,
-      ...(background ? { background: true } : {}),
+      ...(background ? { background: true } : { refresh: true }),
     })
-    const poll = async (): Promise<void> => {
-      let intervalMs = background ? 2_000 : 750
-      while (!settled && generation === this.generation) {
-        await delay(intervalMs)
-        if (settled || generation !== this.generation) return
-        try {
-          const snapshot = await this.session.modelCatalog()
-          if (snapshot.ok && generation === this.generation) {
-            this.store.set({ value: snapshot.value, status: 'ready', error: null })
-          }
-        } catch { /* the owning check request reports transport failure */ }
-        intervalMs = Math.min(5_000, Math.round(intervalMs * 1.6))
-      }
-    }
-    void poll()
     try {
       const response = await operation
       if (!response.ok) throw new Error(`${response.error.code}: ${response.error.message}`)
@@ -120,29 +102,12 @@ export class ModelCatalogDirectory {
         })
       }
       throw error
-    } finally {
-      settled = true
     }
   }
 
   /** Explicit user action: probe one exact provider/model route. */
   checkModel(provider: string, model: string): Promise<ModelCatalog> {
     return this.request({ check: true, refresh: true, provider, model })
-  }
-
-  private publishChecking(base: ModelCatalog, generation: number): void {
-    if (generation !== this.generation) return
-    this.store.set({
-      value: {
-        ...base,
-        groups: base.groups.map(group => ({
-          ...group,
-          models: group.models.map(model => ({ ...model, status: 'checking' as const })),
-        })),
-      },
-      status: 'ready',
-      error: null,
-    })
   }
 
   private request(request: {
@@ -236,8 +201,4 @@ export class ModelCatalogDirectory {
     this.invalidate(true)
     void this.load().catch(() => { /* the selector exposes the shared error */ })
   }
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms))
 }
