@@ -42,13 +42,14 @@ export type ComposerAttachment = {
     mediaType: string
     bytes: number
     sha256: string
-    parser: string
-    status: string
+    storageStatus: 'pending' | 'stored' | 'failed'
+    parser?: string
+    status?: string
     parseStatus?: 'idle' | 'queued' | 'running' | 'done' | 'failed'
     parseProgress?: number
     parseError?: string
-    textChars: number
-    preview: string
+    textChars?: number
+    preview?: string
     pageCount?: number
     sheetCount?: number
     warning?: string

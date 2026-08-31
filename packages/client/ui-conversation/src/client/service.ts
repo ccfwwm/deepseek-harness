@@ -239,6 +239,7 @@ export class ConversationController extends Service implements IConversation {
       throw new Error('conversation.sendSession: one or more draft images are no longer available')
     }
     const images = attachments.filter((attachment): attachment is Extract<ComposerAttachment, { kind: 'image' }> => attachment.kind === 'image')
+    const files = attachments.filter((attachment): attachment is Extract<ComposerAttachment, { kind: 'file' }> => attachment.kind === 'file')
     if (session.getSnapshot().subagent !== null) {
       const uploaded = await this.serializeAttachments(attachments)
       const content = [...uploaded, ...(text === '' ? [] : [{ type: 'text' as const, text }])]
@@ -256,6 +257,10 @@ export class ConversationController extends Service implements IConversation {
         ...(attachment.file.name === '' ? {} : { name: attachment.file.name }),
         ...(attachment.width === undefined ? {} : { width: attachment.width }),
         ...(attachment.height === undefined ? {} : { height: attachment.height }),
+      })),
+      files: files.map(attachment => ({
+        name: attachment.file.name || 'uploaded-file',
+        mediaType: attachment.file.type || 'application/octet-stream',
       })),
       onRetire: (settlement) => {
         this.settleSubmittedImages(session.sessionId, images, settlement)
@@ -313,14 +318,7 @@ export class ConversationController extends Service implements IConversation {
           mediaType: file.type || 'application/octet-stream',
           bytes: file.size,
           sha256: '',
-          parser: 'pending',
-          status: 'pending',
-          // The durable file service performs the built-in local extraction
-          // first. MinerU is an optional, separately reported background
-          // action; optimistic `queued` here made every upload look remote.
-          parseStatus: 'idle',
-          textChars: 0,
-          preview: '',
+          storageStatus: 'pending',
         },
       }
       this.draftAttachments.set(id, attachment)
@@ -348,16 +346,13 @@ export class ConversationController extends Service implements IConversation {
       if (live?.kind === 'file') {
         live.prepared = response.value
         shell?.setDraft(shell.state.getSnapshot().draft)
-        if (response.value.parseStatus !== undefined && response.value.parseStatus !== 'idle') {
-          this.watchFileParse(sessionId, live, shell, remote)
-        }
       }
       return response.value
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       const live = this.draftAttachments.get(attachment.id)
       if (live?.kind === 'file') {
-        live.prepared = { ...live.prepared, status: 'failed', parseStatus: 'failed', parseError: message }
+        live.prepared = { ...live.prepared, storageStatus: 'failed' }
         shell?.setDraft(shell.state.getSnapshot().draft)
         shell?.notify('error', `附件 ${live.file.name || 'uploaded-file'} 上传失败：${message}`)
       }
@@ -365,21 +360,6 @@ export class ConversationController extends Service implements IConversation {
     } finally {
       this.pendingFilePreparations.delete(attachment.id)
     }
-  }
-
-  private watchFileParse(sessionId: SessionId, attachment: Extract<ComposerAttachment, { kind: 'file' }>, shell: ReturnType<SessionInputResolver['for']> | undefined, remote: FilesRemote): void {
-    let attempts = 0
-    const poll = async (): Promise<void> => {
-      if (attempts++ > 240) return
-      const response = await remote.inspect({ sessionId, attachmentId: attachment.prepared.attachmentId }).catch(() => undefined)
-      if (response?.ok === true) {
-        attachment.prepared = response.value
-        shell?.setDraft(shell.state.getSnapshot().draft)
-        if (response.value.parseStatus === 'done' || response.value.parseStatus === 'failed' || response.value.parseStatus === 'idle') return
-      }
-      setTimeout(() => { void poll() }, 1500)
-    }
-    setTimeout(() => { void poll() }, 250)
   }
 
   /**
@@ -537,7 +517,7 @@ export class ConversationController extends Service implements IConversation {
     return Promise.all(attachments.map(async (attachment) => {
       if (attachment.kind === 'image') return { type: 'image' as const, ...await this.encodeImage(attachment.file) }
       const prepared = await (this.pendingFilePreparations.get(attachment.id) ?? Promise.resolve(attachment.prepared))
-      if (prepared.status === 'failed' || prepared.attachmentId.startsWith('pending:')) {
+      if (prepared.storageStatus === 'failed' || prepared.attachmentId.startsWith('pending:')) {
         throw new Error(`附件 ${attachment.file.name || 'uploaded-file'} 尚未准备完成`)
       }
       return { type: 'file' as const, ...prepared }

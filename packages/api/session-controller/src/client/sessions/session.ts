@@ -94,7 +94,6 @@ export class Session implements SessionFace {
    * engaging edge of the phase machine (see ComposerPhase).
    */
   private promptAttempted = false
-  private nextSubmissionRequestId: SessionRequestId | undefined
   /** A first accepted prompt stays in the engaging phase until its turn is observable. */
   private firstPromptPendingTurn = false
   /** Empty-log mirror (see ConversationSnapshot.blank); unknown bare sessions begin conservatively blank. */
@@ -193,9 +192,9 @@ export class Session implements SessionFace {
       time: Date.now(),
       text: input.text,
       images: input.images,
+      files: input.files ?? [],
     }]
     this.submissionSettlements.set(requestId, { onRetire: input.onRetire, retiring: false })
-    this.nextSubmissionRequestId = requestId
     // The blank → engaging edge flips here, ahead of prompt(): the composer
     // docks and the echo renders on the click's own frame.
     this.promptAttempted = true
@@ -217,7 +216,7 @@ export class Session implements SessionFace {
     signal?: AbortSignal,
     requestId?: SessionRequestId,
   ): Promise<ClientResult<{ accepted: true }>> {
-    const effectiveRequestId = requestId ?? this.nextSubmissionRequestId
+    const effectiveRequestId = requestId
     this.promptError = null
     this.lastAgentError = null
     // Synchronous, before the first await: the blank → engaging edge must be
@@ -270,7 +269,6 @@ export class Session implements SessionFace {
           result = routed.ok ? { ok: true, value: { accepted: true } } : routed
         }
       }
-      this.nextSubmissionRequestId = undefined
     } catch (error) {
       result = transportResult(error)
     }
