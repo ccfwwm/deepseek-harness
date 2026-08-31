@@ -171,6 +171,8 @@ export class ConversationController extends Service implements IConversation {
   /** The per-session composer-block registry. */
   readonly blocks: ComposerBlocks
   private readonly draftAttachments = new Map<DraftAttachmentId, ComposerAttachment>()
+  /** File uploads admitted before the Host preparation round-trip settles. */
+  private readonly pendingFilePreparations = new Map<DraftAttachmentId, Promise<PreparedFile>>()
 
   /**
    * @param ctx - owning root context (the plugin apply context; the service
@@ -187,6 +189,7 @@ export class ConversationController extends Service implements IConversation {
       for (const attachment of this.draftAttachments.values()) {
         if (attachment.kind === 'image') revokePreview(attachment.previewUrl)
       }
+      this.pendingFilePreparations.clear()
       this.draftAttachments.clear()
     }, 'conversation draft attachments')
   }
@@ -290,35 +293,86 @@ export class ConversationController extends Service implements IConversation {
   }
 
   /** Parse ordinary files through the optional ZeroWall file service. */
-  async createDraftFiles(files: readonly File[], sessionId: SessionId): Promise<readonly ComposerAttachment[]> {
+  createDraftFiles(files: readonly File[], sessionId: SessionId): readonly ComposerAttachment[] {
     const remote = this.ctx.get('remote.zerowallFiles') as FilesRemote | undefined
     if (remote === undefined) throw new FileServiceUnavailableError()
-    const prepared = await Promise.all(files.map(async (file) => {
-      const response = await remote.prepare({
-        sessionId,
-        name: file.name || 'uploaded-file',
-        ...(file.type === '' ? {} : { mediaType: file.type }),
-        data: await base64Of(file),
-      })
-      if (!response.ok) throw new Error(`${response.error.code}: ${response.error.message}`)
-      return { kind: 'file' as const, id: randomUUID() as DraftAttachmentId, file, prepared: response.value }
-    }))
-    for (const attachment of prepared) this.draftAttachments.set(attachment.id, attachment)
     const binding = this.requireSessions().binding(sessionId)
-    if (binding === undefined) return prepared
-    const shell = this.input.for(binding.ctx)
-    for (const attachment of prepared) this.watchFileParse(sessionId, attachment, shell, remote)
-    return prepared
+    const shell = binding === undefined ? undefined : this.input.for(binding.ctx)
+    // Put stable pending descriptors into the registry before reading bytes or
+    // calling the remote. The Composer can paint the dropped files immediately;
+    // submit serialization awaits each descriptor's preparation promise.
+    return files.map((file) => {
+      const id = randomUUID() as DraftAttachmentId
+      const attachment: Extract<ComposerAttachment, { kind: 'file' }> = {
+        kind: 'file',
+        id,
+        file,
+        prepared: {
+          attachmentId: `pending:${id}`,
+          name: file.name || 'uploaded-file',
+          mediaType: file.type || 'application/octet-stream',
+          bytes: file.size,
+          sha256: '',
+          parser: 'pending',
+          status: 'pending',
+          parseStatus: 'queued',
+          parseProgress: 0,
+          textChars: 0,
+          preview: '',
+        },
+      }
+      this.draftAttachments.set(id, attachment)
+      this.pendingFilePreparations.set(id, this.prepareDraftFile(remote, sessionId, attachment, shell))
+      return attachment
+    })
   }
 
-  private watchFileParse(sessionId: SessionId, attachment: Extract<ComposerAttachment, { kind: 'file' }>, shell: ReturnType<SessionInputResolver['for']>, remote: FilesRemote): void {
+  /** Complete one pending upload without delaying composer admission. */
+  private async prepareDraftFile(
+    remote: FilesRemote,
+    sessionId: SessionId,
+    attachment: Extract<ComposerAttachment, { kind: 'file' }>,
+    shell: ReturnType<SessionInputResolver['for']> | undefined,
+  ): Promise<PreparedFile> {
+    try {
+      const response = await remote.prepare({
+        sessionId,
+        name: attachment.file.name || 'uploaded-file',
+        ...(attachment.file.type === '' ? {} : { mediaType: attachment.file.type }),
+        data: await base64Of(attachment.file),
+      })
+      if (!response.ok) throw new Error(`${response.error.code}: ${response.error.message}`)
+      const live = this.draftAttachments.get(attachment.id)
+      if (live?.kind === 'file') {
+        live.prepared = response.value
+        shell?.setDraft(shell.state.getSnapshot().draft)
+        if (response.value.parseStatus !== undefined && response.value.parseStatus !== 'idle') {
+          this.watchFileParse(sessionId, live, shell, remote)
+        }
+      }
+      return response.value
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      const live = this.draftAttachments.get(attachment.id)
+      if (live?.kind === 'file') {
+        live.prepared = { ...live.prepared, status: 'failed', parseStatus: 'failed', parseError: message }
+        shell?.setDraft(shell.state.getSnapshot().draft)
+        shell?.notify('error', `附件 ${live.file.name || 'uploaded-file'} 上传失败：${message}`)
+      }
+      throw error
+    } finally {
+      this.pendingFilePreparations.delete(attachment.id)
+    }
+  }
+
+  private watchFileParse(sessionId: SessionId, attachment: Extract<ComposerAttachment, { kind: 'file' }>, shell: ReturnType<SessionInputResolver['for']> | undefined, remote: FilesRemote): void {
     let attempts = 0
     const poll = async (): Promise<void> => {
       if (attempts++ > 240) return
       const response = await remote.inspect({ sessionId, attachmentId: attachment.prepared.attachmentId }).catch(() => undefined)
       if (response?.ok === true) {
         attachment.prepared = response.value
-        shell.setDraft(shell.state.getSnapshot().draft)
+        shell?.setDraft(shell.state.getSnapshot().draft)
         if (response.value.parseStatus === 'done' || response.value.parseStatus === 'failed' || response.value.parseStatus === 'idle') return
       }
       setTimeout(() => { void poll() }, 1500)
@@ -362,6 +416,7 @@ export class ConversationController extends Service implements IConversation {
   releaseDraftImage(id: DraftAttachmentId): void {
     const attachment = this.draftAttachments.get(id)
     if (attachment === undefined) return
+    this.pendingFilePreparations.delete(id)
     this.draftAttachments.delete(id)
     if (attachment.kind === 'image') revokePreview(attachment.previewUrl)
   }
@@ -477,9 +532,14 @@ export class ConversationController extends Service implements IConversation {
 
   /** Convert browser files to canonical base64 prompt parts. */
   private serializeAttachments(attachments: readonly ComposerAttachment[]): Promise<Parameters<SessionFace['prompt']>[0]> {
-    return Promise.all(attachments.map(async attachment => attachment.kind === 'image'
-      ? { type: 'image' as const, ...await this.encodeImage(attachment.file) }
-      : { type: 'file' as const, ...attachment.prepared })) as Promise<Parameters<SessionFace['prompt']>[0]>
+    return Promise.all(attachments.map(async (attachment) => {
+      if (attachment.kind === 'image') return { type: 'image' as const, ...await this.encodeImage(attachment.file) }
+      const prepared = await (this.pendingFilePreparations.get(attachment.id) ?? Promise.resolve(attachment.prepared))
+      if (prepared.status === 'failed' || prepared.attachmentId.startsWith('pending:')) {
+        throw new Error(`附件 ${attachment.file.name || 'uploaded-file'} 尚未准备完成`)
+      }
+      return { type: 'file' as const, ...prepared }
+    })) as Promise<Parameters<SessionFace['prompt']>[0]>
   }
 
   /** Canonical base64 wire form of one browser image file. */
