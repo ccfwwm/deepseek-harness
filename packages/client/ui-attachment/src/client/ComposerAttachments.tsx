@@ -139,6 +139,7 @@ export function ComposerAttachments({
           {fileAttachments.length > 0 && <div className={css.files} role="list" aria-label={t('file.pending')}>
             {fileAttachments.map(file => <div className={css.file} role="listitem" key={file.id}>
               <span className={css.fileName} title={file.file.name}>{file.file.name || t('file.unnamed')}</span>
+              {file.prepared.status === 'pending' && <span className={css.fileStatus}>本地解析中</span>}
               {(file.prepared as MineruPreparedFile).parseStatus === 'queued' && <span className={css.fileStatus}>MinerU 排队中</span>}
               {(file.prepared as MineruPreparedFile).parseStatus === 'running' && <span className={css.fileStatus}>MinerU 解析中 {(file.prepared as MineruPreparedFile).parseProgress ?? 0}%</span>}
               {(file.prepared as MineruPreparedFile).parseStatus === 'done' && <span className={css.fileStatus}>MinerU 已完成</span>}
