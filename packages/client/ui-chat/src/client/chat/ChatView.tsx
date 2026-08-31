@@ -627,12 +627,6 @@ export function ChatView({
               t={t}
             />
           ))}
-          {/* No pending placeholders: questions (ui-user-questions) and approvals
-              (ApprovalPanel) both take over the composer, so a flow card would
-              double-render the same wait. */}
-          {/* Turn-level loading signal: rides the whole running turn (first-token
-              wait, tool execution, streaming) so it never flickers per step. */}
-          {running && <TurnStatus startTime={runningTurnStart} t={t} />}
           {pendingSteering.map(item => (
             <PendingSteeringBubble
               key={item.id}
@@ -641,6 +635,9 @@ export function ChatView({
               t={t}
             />
           ))}
+          {/* The local echo is registered before attachment persistence and Host
+              admission. Keep it ahead of the activity line so one click always
+              produces an immediate user message followed by visible progress. */}
           {visibleSubmissions.map(submission => (
             <PendingSubmissionBubble
               key={submission.requestId}
@@ -649,6 +646,13 @@ export function ChatView({
               t={t}
             />
           ))}
+          {/* During admission the Host may not have published `running` yet. A
+              pending local echo still needs a live response signal; once the
+              durable turn begins the same status remains mounted through tools
+              and streaming. */}
+          {(running || visibleSubmissions.length > 0) && (
+            <TurnStatus startTime={running ? runningTurnStart : null} t={t} />
+          )}
         </div>
         {!atBottom && (
           <div className={css.toBottomSlot}>

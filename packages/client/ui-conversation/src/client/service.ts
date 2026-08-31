@@ -86,6 +86,11 @@ type PreparedFile = Extract<ComposerAttachment, { kind: 'file' }>['prepared']
 interface FilesRemote {
   prepare(input: { sessionId: SessionId; name: string; mediaType?: string; data: string }): Promise<RemoteResult<PreparedFile>>
   inspect(input: { sessionId: SessionId; attachmentId: string }): Promise<RemoteResult<PreparedFile>>
+  extract(input: {
+    sessionId: SessionId
+    attachmentId: string
+    mode: 'local' | 'auto' | 'mineru'
+  }): Promise<RemoteResult<unknown>>
 }
 
 export class FileServiceUnavailableError extends Error {
@@ -347,6 +352,15 @@ export class ConversationController extends Service implements IConversation {
         live.prepared = response.value
         shell?.setDraft(shell.state.getSnapshot().draft)
       }
+      // Start extraction as soon as the original bytes are safely stored. The
+      // Host's auto route selects MinerU only when its Token is configured and
+      // otherwise uses the built-in parser. This work is intentionally detached:
+      // sending waits for the original attachment, never for extraction.
+      void Promise.resolve().then(() => remote.extract({
+        sessionId,
+        attachmentId: response.value.attachmentId,
+        mode: 'auto',
+      })).catch(() => { /* extraction status is owned by the Files service */ })
       return response.value
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)

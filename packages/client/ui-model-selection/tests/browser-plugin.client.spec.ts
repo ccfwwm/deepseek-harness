@@ -60,13 +60,16 @@ async function bench() {
   let defaultSelection: ModelSelection = { provider: 'deepseek-official', model: 'deepseek-v4-flash' }
   let selected = defaultSelection
   const calls = { models: 0, select: 0 }
+  const modelRequests: unknown[] = []
+  let rejectNextSelection = false
   const projections = new Map<SessionId, SnapshotStore<ModelSelectionProjection | undefined>>()
   // Whether the Host reports an adapter for the current route; the composer
   // block follows this, never catalog membership.
   let routable = true
   const sessionRemote = {
-    modelCatalog: () => {
+    modelCatalog: (request?: unknown) => {
       calls.models += 1
+      modelRequests.push(request)
       return Promise.resolve({
         ok: true as const,
         value: {
@@ -79,6 +82,13 @@ async function bench() {
     },
     selectModel: (payload: { sessionId: SessionId; provider: string; model: string; reasoningEffort?: string }) => {
       calls.select += 1
+      if (rejectNextSelection) {
+        rejectNextSelection = false
+        return Promise.resolve({
+          ok: false as const,
+          error: { code: 'model-unavailable', message: 'route rejected', details: {} },
+        })
+      }
       selected = {
         provider: payload.provider,
         model: payload.model,
@@ -155,7 +165,7 @@ async function bench() {
     return handle
   }
   return {
-    ctx, fiber, mint, calls, remote,
+    ctx, fiber, mint, calls, modelRequests, remote,
     contribution: () => contribution!,
     seat: () => seats.get('conversation.input.model')!,
     hostCurrent: () => selected,
@@ -163,6 +173,7 @@ async function bench() {
     setProjected: (id: SessionId, value: ModelSelectionProjection) => { projections.get(id)?.set(value) },
     address: (id: SessionId) => { addressed.add(id) },
     setRoutable: (next: boolean) => { routable = next },
+    rejectNextSelection: () => { rejectNextSelection = true },
     blockOf: (key: string) => blocks.get(sid(key)),
   }
 }
@@ -211,6 +222,39 @@ describe('ui-model-selection dual entry', () => {
     // The POPUP's next options pass reflects it without a seat-side reload.
     const options = await b.contribution().ui.options(projection('s1'), new AbortController().signal)
     expect(options.find((o: SelectOption) => o.label === 'DeepSeek-V4-Pro')).toMatchObject({ active: true })
+  })
+
+  it('shows a selection optimistically and rolls back only that selection on failure', async () => {
+    const b = await bench()
+    b.mint('s1')
+    const face = b.seat().inject!(sid('s1'))
+    await face.load()
+    b.rejectNextSelection()
+
+    const switching = face.select({ provider: 'deepseek-official', model: 'deepseek-v4-pro' })
+    expect(face.directory.getSnapshot()).toMatchObject({
+      current: { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+      status: 'ready',
+      selectionInFlight: true,
+    })
+    await expect(switching).resolves.toBe(false)
+    expect(face.directory.getSnapshot()).toMatchObject({
+      current: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+      status: 'ready',
+      selectionInFlight: false,
+      error: 'model-unavailable: route rejected',
+    })
+  })
+
+  it('does not run a full health probe when selectModel persists the default', async () => {
+    const b = await bench()
+    b.mint('s1')
+    await vi.waitFor(() => { expect(b.modelRequests.length).toBeGreaterThanOrEqual(2) })
+    const before = b.modelRequests.length
+
+    b.remote.emit('settings/document-updated', ['agent-default-model', 2])
+    await vi.waitFor(() => { expect(b.modelRequests).toHaveLength(before + 1) })
+    expect(b.modelRequests.at(-1)).toEqual({ refresh: true })
   })
 
   it('a popup selection lands on the seat store — the reverse direction of the same state', async () => {
