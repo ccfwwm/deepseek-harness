@@ -8,7 +8,7 @@
  */
 
 import type {
-  ClientRemote, CredentialInfo, LlmConfigurableProvider, LlmProviderInfo, SettingsNamespaceView,
+  ClientRemote, CredentialInfo, LlmConfigurableProvider, LlmProviderInfo, ModelCatalog, SettingsNamespaceView,
 } from '@deepseek-ai/dsh-api-remotes/client'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
@@ -242,6 +242,17 @@ export class ModelsSettingsStore {
     private readonly schema: SettingsSchemaOperations,
     private readonly describeFace: SettingsDescribeFace,
   ) {}
+
+  /** Consume the shared model directory's incremental Host snapshot. */
+  acceptModelCatalog(value: ModelCatalog): void {
+    this.store.update((s) => {
+      s.catalogGroups = value.groups
+      s.catalogFailures = value.failures
+      s.catalogStatus = 'ready'
+      s.catalogError = null
+      s.catalogUpdatedAt = Date.now()
+    })
+  }
 
   /** Refresh or run real provider probes for the host-owned model catalog. */
   async syncModels(check = false, refresh = false, background = false): Promise<void> {

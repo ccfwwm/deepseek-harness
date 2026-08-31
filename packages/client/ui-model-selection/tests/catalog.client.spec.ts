@@ -16,7 +16,7 @@ function directory(models: () => Promise<unknown>): ModelCatalogDirectory {
 }
 
 describe('ModelCatalogDirectory', () => {
-  it('uses one Host check request without polling or clearing the last known rows', async () => {
+  it('checks routes incrementally without clearing the last known rows', async () => {
     const initial = catalog('one')
     const completedCatalog: ModelCatalog = {
       ...initial,
@@ -36,12 +36,13 @@ describe('ModelCatalogDirectory', () => {
     expect(models.mock.calls.filter(([request]) => request?.check === true)).toHaveLength(1)
     expect(subject.store.getSnapshot().value).toEqual(initial)
     expect(models).toHaveBeenCalledTimes(2)
+    expect(models).toHaveBeenLastCalledWith({ check: true, refresh: true, provider: 'fixture', model: 'one' })
     completed.resolve({ ok: true, value: completedCatalog })
     await expect(check).resolves.toEqual(completedCatalog)
     expect(subject.store.getSnapshot().value).toEqual(completedCatalog)
   })
 
-  it('coalesces concurrent checks and marks startup probes as background work', async () => {
+  it('coalesces concurrent startup checks into one incremental route probe', async () => {
     const initial = catalog('one')
     const completed = Promise.withResolvers<unknown>()
     const models = vi.fn((request?: { check?: boolean; background?: boolean }) => request?.check === true
@@ -55,7 +56,7 @@ describe('ModelCatalogDirectory', () => {
     expect(second).toBe(first)
     await Promise.resolve()
     expect(models.mock.calls.filter(([request]) => request?.check === true)).toEqual([[
-      { check: true, background: true },
+      { check: true, refresh: true, provider: 'fixture', model: 'one' },
     ]])
 
     completed.resolve({ ok: true, value: initial })

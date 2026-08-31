@@ -44,6 +44,7 @@ interface CatalogCache {
   visionSupported: Set<string>
   health: Map<string, PersistedModelHealth>
   hydration?: Promise<void> | undefined
+  persistTail?: Promise<void> | undefined
 }
 
 interface PersistedModelHealth {
@@ -82,10 +83,17 @@ export async function buildModelCatalog(
   if (!targeted && cache.checkInflight !== undefined) return cache.checkInflight
   if (targeted) {
     const base = cache.value ?? await buildModelCatalog(ctx, defaultSelection, {})
-    const value = await checkOneModel(ctx, base, options)
+    const checkedValue = await checkOneModel(ctx, base, options)
+    const checked = checkedValue.groups
+      .find(group => group.id === options.provider)?.models
+      .find(model => model.id === options.model)
+    const value = checked === undefined || options.provider === undefined || options.model === undefined
+      ? (cache.value ?? checkedValue)
+      : replaceModel(cache.value ?? base, options.provider, options.model, checked)
     cache.value = value
     captureHealth(cache, value)
     await persistHealth(cache)
+    ctx.emit('api-session/model-catalog', value)
     // A targeted probe only establishes one row. Keep the generation marked
     // as partially checked so the next startup/explicit all-model check still
     // probes every remaining model instead of treating unknown rows as fresh.
@@ -99,6 +107,7 @@ export async function buildModelCatalog(
     cache.checked = true
     captureHealth(cache, value)
     await persistHealth(cache)
+    ctx.emit('api-session/model-catalog', value)
     return value
   } finally {
     if (cache.checkInflight === operation) cache.checkInflight = undefined
@@ -247,6 +256,17 @@ function persistedHealth(candidate: unknown): PersistedModelHealth | undefined {
 }
 
 async function persistHealth(cache: CatalogCache): Promise<void> {
+  const previous = cache.persistTail ?? Promise.resolve()
+  const operation = previous.catch(() => {}).then(() => persistHealthNow(cache))
+  cache.persistTail = operation
+  try {
+    await operation
+  } finally {
+    if (cache.persistTail === operation) delete cache.persistTail
+  }
+}
+
+async function persistHealthNow(cache: CatalogCache): Promise<void> {
   const path = modelHealthPath()
   if (path === undefined) return
   const temporary = `${path}.${randomUUID()}.tmp`

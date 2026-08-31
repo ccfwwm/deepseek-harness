@@ -133,6 +133,7 @@ export function apply(ctx: ClientContext): void {
       ctx.remote.$on('settings/document-updated', () => { refreshModels() }),
       ctx.remote.$on('credentials/reference-updated', refreshModels),
       ctx.remote.$on('llm/adapters-updated', refreshModels),
+      ctx.remote.$on('api-session/model-catalog', (value) => { controller.acceptModelCatalog(value) }),
       ctx.on('connection/reset', refreshModels),
     ]
     return () => {
