@@ -94,8 +94,8 @@ export function apply(ctx: Context): void {
   const browserFlowSource = flowSource('sidebar.workspaces.directoryFlow')
   const pickerFlowSource = flowSource('conversation.hero.workspace.directoryFlow')
   const browserInjected = (): WorkspaceBrowserInjected => ({
-    // Explicit group actions keep their target; unscoped New Session inherits
-    // the current Session Workspace before the recent-Workspace fallback.
+    // Explicit group actions keep their target; a top-level action creates an
+    // independent unscoped Session.
     startSession: (workspaceId) => { uiWorkspace.startSession(workspaceId) },
     open: (sessionId) => { sessions.open(sessionId) },
     searchSessions,

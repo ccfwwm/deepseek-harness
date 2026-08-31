@@ -93,7 +93,7 @@ describe('deriveGroups', () => {
     ])
   })
 
-  it('shows only the current blank session in its Workspace count and tree', () => {
+  it('shows only the current Workspace blank while retaining unscoped blanks in Ungrouped', () => {
     const currentBlank = { ...summary('current-blank', 5), blank: true }
     const staleBlank = { ...summary('stale-blank', 4), blank: true }
     const real = summary('shown', 3)
@@ -113,12 +113,13 @@ describe('deriveGroups', () => {
     expect(blankNode.blank).toBe(true)
     expect(groups[0]!.sessions.find(session => session.id === real.id)!.blank).toBe(false)
     expect(groups[0]!.sessionCount).toBe(2)
-    // A non-current blank stray never surfaces an Ungrouped bucket either.
+    // Unscoped New Session requests remain independently reachable.
     const strayGroups = deriveGroups(
       list({ ...summary('stray', 2), blank: true }),
-      [workspace('first', [])], noArchive, noAttention, view(),
+      [workspace('first', [])], noArchive, noAttention, view([UNGROUPED_KEY]),
     )
-    expect(strayGroups.map(group => group.key)).toEqual(['first'])
+    expect(strayGroups.map(group => group.key)).toEqual(['first', UNGROUPED_KEY])
+    expect(strayGroups[1]!.sessions.map(session => session.id)).toEqual([sid('stray')])
   })
 
   it('projects the completion reminder into session and search rows (absent = false)', () => {
@@ -275,7 +276,7 @@ describe('deriveFlat', () => {
     expect(deriveFlat(partial, noArchive, noAttention).map(row => row.id)).toEqual([sid('present')])
   })
 
-  it('shows only the current blank session and excludes blanks from search', () => {
+  it('shows all blank sessions in flat navigation and excludes them from search', () => {
     const currentBlank = { ...summary('current-blank', 9), blank: true }
     const staleBlank = { ...summary('stale-blank', 8), blank: true }
     const sessions = {
@@ -283,9 +284,9 @@ describe('deriveFlat', () => {
       current: currentBlank.id,
     }
     const rows = deriveFlat(sessions, noArchive, noAttention)
-    expect(rows.map(row => row.id)).toEqual([currentBlank.id, sid('real')])
-    expect(rows.map(row => row.title)).toEqual(['', 'real'])
-    expect(rows.map(row => row.blank)).toEqual([true, false])
+    expect(rows.map(row => row.id)).toEqual([currentBlank.id, staleBlank.id, sid('real')])
+    expect(rows.map(row => row.title)).toEqual(['', '', 'real'])
+    expect(rows.map(row => row.blank)).toEqual([true, true, false])
   })
 
   it('hides archived sessions in flat mode', () => {

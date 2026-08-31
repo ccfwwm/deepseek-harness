@@ -103,8 +103,8 @@ export type WorkspaceBrowserInjected = {
   }
   /**
    * Start a New Session in a Workspace: reuse-or-create its blank session and
-   * open it; without an explicit workspace, inherit the current Session
-   * Workspace, then the recent Workspace, or clear into the New Session view.
+   * open it. Without an explicit Workspace, create an independent unscoped
+   * Session that is immediately chat-ready.
    */
   startSession: (workspaceId?: WorkspaceId) => void
   /** Open a real Session. */
