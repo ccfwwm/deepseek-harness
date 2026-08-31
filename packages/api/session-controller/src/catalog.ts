@@ -247,7 +247,7 @@ async function immediateResolution(
   model: string,
 ): Promise<import('@deepseek-ai/dsh-llm').LlmResolvedModelInfo> {
   const resolution = ctx.llm.resolveModelInfo(provider, model)
-  const deferred = new Promise<undefined>(resolve => queueMicrotask(() => { resolve(undefined) }))
+  const deferred = new Promise<undefined>(resolve => setTimeout(() => { resolve(undefined) }, 0))
   const resolved = await Promise.race([resolution, deferred])
   if (resolved === undefined) throw new Error('metadata resolution deferred')
   return resolved
