@@ -173,7 +173,7 @@ async function modelEntry(
   // failures are ignored and never prevent the metadata catalog from loading.
   if (options.check !== true && model.reasoning === undefined) {
     try {
-      const resolved = await ctx.llm.resolveModelInfo(provider, model.id)
+      const resolved = await immediateResolution(ctx, provider, model.id)
       if (resolved.reasoning !== undefined) entry = { ...entry, reasoning: toModelReasoning(resolved.reasoning) }
     } catch { /* metadata-only catalog remains usable without enrichment */ }
     return entry
@@ -238,6 +238,19 @@ async function modelEntry(
     ...(visionMessage === undefined ? {} : { visionMessage }),
     lastCheckedAt: checkedAt,
   }
+}
+
+/** Accept only resolver results already available in the current microtask. */
+async function immediateResolution(
+  ctx: Context,
+  provider: string,
+  model: string,
+): Promise<import('@deepseek-ai/dsh-llm').LlmResolvedModelInfo> {
+  const resolution = ctx.llm.resolveModelInfo(provider, model)
+  const deferred = new Promise<undefined>(resolve => queueMicrotask(() => { resolve(undefined) }))
+  const resolved = await Promise.race([resolution, deferred])
+  if (resolved === undefined) throw new Error('metadata resolution deferred')
+  return resolved
 }
 
 function toModelReasoning(reasoning: NonNullable<import('@deepseek-ai/dsh-llm').LlmResolvedModelInfo['reasoning']>): ModelReasoning {
