@@ -127,7 +127,7 @@ export function ModelSelect(
     ], [reasoning, t])
   // A catalog probe is row-scoped. Only selection itself blocks the menu;
   // checking one model must never disable switching to another model.
-  const busy = state.status === 'selecting'
+  const busy = state.selectionInFlight === true
   const syncCatalog = sync ?? (() => Promise.resolve())
   const checkAllCatalog = checkAll ?? (() => Promise.resolve())
   const checkOneCatalog = checkModel ?? (() => Promise.resolve())
@@ -310,7 +310,7 @@ export function ModelSelect(
                 <button
                   type="button"
                   className={css.catalogAction}
-                  disabled={busy || catalogAction !== null}
+                  disabled={catalogAction === 'sync'}
                   aria-label={t('action.sync')}
                   title={t('action.sync')}
                   onClick={() => { runCatalogAction('sync', syncCatalog) }}
@@ -321,7 +321,7 @@ export function ModelSelect(
                 <button
                   type="button"
                   className={css.catalogActionPrimary}
-                  disabled={busy || catalogAction !== null}
+                  disabled={catalogAction === 'check-all'}
                   onClick={() => { runCatalogAction('check-all', checkAllCatalog) }}
                 >
                   <IconRefreshOutline16 />
@@ -362,7 +362,7 @@ export function ModelSelect(
                               data-status={model.status ?? 'unknown'}
                               data-vision={model.visionStatus ?? 'unknown'}
                               title={model.name}
-                              disabled={busy || catalogAction === `check:${group.id}:${model.id}`}
+                              disabled={busy}
                               onClick={() => { choose({ provider: group.id, model: model.id }) }}
                             >
                               <span className={css.optionCopy}>
@@ -388,7 +388,7 @@ export function ModelSelect(
                             <button
                               type="button"
                               className={css.modelCheck}
-                              disabled={busy || catalogAction === `check:${group.id}:${model.id}`}
+                              disabled={state.checkingModels?.has(`${group.id}:${model.id}`) === true}
                               aria-label={t('action.checkModel', { model: model.name })}
                               title={t('action.checkModel', { model: model.name })}
                               onClick={(event) => {

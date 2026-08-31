@@ -20,6 +20,8 @@ export class ModelCatalogDirectory {
   })
 
   private generation = 0
+  private requestVersion = 0
+  private readonly targetVersions = new Map<string, number>()
   private inflight: Promise<ModelCatalog> | undefined
 
   /** @param session - Session Remote namespace carrying the Host-generation catalog. */
@@ -81,8 +83,10 @@ export class ModelCatalogDirectory {
         await this.checkModel(target.provider, target.model)
       }
     }
-    await Promise.all(Array.from({ length: Math.min(3, Math.max(1, models.length)) }, () => worker()))
-    return this.store.getSnapshot().value ?? base
+    try {
+      await Promise.all(Array.from({ length: Math.min(8, Math.max(1, models.length)) }, () => worker()))
+      return this.store.getSnapshot().value ?? base
+    } finally { /* individual rows retain their own checking state */ }
   }
 
   /** Explicit user action: probe one exact provider/model route. */
@@ -98,6 +102,7 @@ export class ModelCatalogDirectory {
   }): Promise<ModelCatalog> {
     const targeted = request.provider !== undefined && request.model !== undefined
     const previous = this.store.getSnapshot()
+    const key = targeted ? `${request.provider}:${request.model}` : undefined
     // A targeted probe must not put the shared catalog into the global
     // loading state. The existing value remains authoritative for every
     // other row while the caller's action button tracks the in-flight probe.
@@ -119,9 +124,12 @@ export class ModelCatalogDirectory {
       }
     })
     const generation = this.generation
+    const version = ++this.requestVersion
+    if (key !== undefined) this.targetVersions.set(key, version)
     const operation = this.session.modelCatalog(request).then((response) => {
       if (!response.ok) throw new Error(`${response.error.code}: ${response.error.message}`)
-      if (generation === this.generation) {
+      const currentTarget = key === undefined || this.targetVersions.get(key) === version
+      if (generation === this.generation && currentTarget) {
         if (targeted && previous.value !== null) {
           const current = this.store.getSnapshot().value ?? previous.value
           const next = response.value
@@ -141,7 +149,7 @@ export class ModelCatalogDirectory {
       }
       return response.value
     }).catch((error: unknown) => {
-      if (generation === this.generation) {
+      if (generation === this.generation && (key === undefined || this.targetVersions.get(key) === version)) {
         this.store.update((draft) => {
           draft.status = targeted && previous.value !== null ? 'ready' : 'error'
           draft.error = error instanceof Error ? error.message : String(error)

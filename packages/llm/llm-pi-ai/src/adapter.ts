@@ -274,11 +274,13 @@ export class PiAiAdapter extends LlmAdapter {
     return Promise.resolve().then(() => {
       const snapshot = this.current()
       this.profileOf(snapshot, provider)
+      const profile = this.profileOf(snapshot, provider)
       return snapshot.models.getModels(provider).map(model => ({
         provider,
         id: model.id,
         name: model.name,
         inputModalities: [...model.input],
+        ...reasoningInfo(model, describableReasoningLevel(model, profile.reasoning)),
       }))
     })
   }
@@ -348,7 +350,8 @@ export class PiAiAdapter extends LlmAdapter {
     const attempts: import('@deepseek-ai/dsh-llm').LlmProbeAttempt[] = []
     let candidates = [...protocols]
     for (let index = 0; index < candidates.length; index += 1) {
-      const protocol = candidates[index]!
+      const protocol = candidates[index]
+      if (protocol === undefined) break
       if (signal?.aborted) break
       const controller = new AbortController()
       const abort = (): void => controller.abort()
@@ -386,10 +389,20 @@ export class PiAiAdapter extends LlmAdapter {
           return attempts
         }
         if (!attempts.some(attempt => attempt.protocol === protocol)) {
-          attempts.push({ protocol, ok: false, message: 'model produced no stream event', latencyMs: Date.now() - startedAt })
+          attempts.push({
+            protocol,
+            ok: false,
+            message: 'model produced no stream event',
+            latencyMs: Date.now() - startedAt,
+          })
         }
       } catch (error: unknown) {
-        attempts.push({ protocol, ok: false, message: error instanceof Error ? error.message : String(error), latencyMs: Date.now() - startedAt })
+        attempts.push({
+          protocol,
+          ok: false,
+          message: error instanceof Error ? error.message : String(error),
+          latencyMs: Date.now() - startedAt,
+        })
       } finally {
         signal?.removeEventListener('abort', abort)
       }
@@ -408,7 +421,8 @@ export class PiAiAdapter extends LlmAdapter {
     if (attachments === undefined) return { status: 'unknown' }
     const snapshot = this.current()
     const profile = this.profileOf(snapshot, provider)
-    const candidate = this.probeSnapshot(snapshot, provider, typeof profile.api === 'string' ? profile.api : supportedProtocols()[0]!)
+    const protocol = typeof profile.api === 'string' ? profile.api : (supportedProtocols()[0] ?? 'openai-chat')
+    const candidate = this.probeSnapshot(snapshot, provider, protocol)
     const image = await attachments.saveImage({
       mediaType: 'image/png',
       name: 'zerowall-vision-probe.png',
@@ -589,12 +603,15 @@ export class PiAiAdapter extends LlmAdapter {
 
 /** Only an explicit provider statement is durable evidence that image input is unsupported. */
 function explicitlyRejectsVision(message: string): boolean {
-  return /(?:image|vision|multimodal).{0,80}(?:not supported|unsupported|not allowed|text.?only)|(?:not supported|unsupported).{0,80}(?:image|vision|multimodal)/iu.test(message)
+  const forward = /(?:image|vision|multimodal).{0,80}(?:not supported|unsupported|not allowed|text.?only)/iu
+  const reverse = /(?:not supported|unsupported).{0,80}(?:image|vision|multimodal)/iu
+  return forward.test(message) || reverse.test(message)
 }
 
 /** Try compatibility protocols only when the endpoint rejects the declared wire format immediately. */
 function explicitlyRejectsProtocol(message: string): boolean {
-  return /(?:unsupported|unknown|invalid).{0,40}(?:protocol|endpoint|content.?type)|(?:404|405|415|not found|method not allowed)/iu.test(message)
+  return /(?:unsupported|unknown|invalid).{0,40}(?:protocol|endpoint|content.?type)|(?:404|405|415|not found|method not allowed)/iu
+    .test(message)
 }
 
 /** Normalize a gateway root for the selected protocol's path convention. */

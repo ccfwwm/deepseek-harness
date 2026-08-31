@@ -199,8 +199,15 @@ export class ConversationController extends Service implements IConversation {
    */
   async send(text: string): Promise<void> {
     const session = this.scopedSession('send')
-    const result = await session.prompt([{ type: 'text', text }], 'queue')
-    if (!result.ok) throw new Error(`conversation.send failed: ${result.error.code}: ${result.error.message}`)
+    const submission = session.beginSubmission({ text, images: [] })
+    try {
+      await nextPaint()
+      const result = await session.prompt([{ type: 'text', text }], 'queue')
+      if (!result.ok) throw new Error(`conversation.send failed: ${result.error.code}: ${result.error.message}`)
+    } catch (error) {
+      submission.abandon()
+      throw error
+    }
   }
 
   /**

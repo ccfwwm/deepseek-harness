@@ -313,6 +313,8 @@ export interface LlmModelInfo {
   description?: string
   /** Accepted request modalities; absent means unknown, while an explicit omission is negative capability. */
   inputModalities?: readonly ModelModality[]
+  /** Adapter-declared reasoning levels available without network resolution. */
+  reasoning?: LlmModelReasoningInfo
 }
 
 /** Provider-owned context capacity for one exact provider/model route. */
