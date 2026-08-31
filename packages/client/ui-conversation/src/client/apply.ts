@@ -286,7 +286,9 @@ export function apply(ctx: Context): void {
         },
         addFiles: async (files) => {
           try {
-            const documents = await conversation.createDraftFiles(files, sessionId)
+            // createDraftFiles registers pending descriptors synchronously;
+            // only its per-file preparation continues in the background.
+            const documents = conversation.createDraftFiles(files, sessionId)
             if (!shell.addImages(documents.map(file => file.id))) {
               conversation.releaseDraftImages(documents)
               return t('file.busy')
