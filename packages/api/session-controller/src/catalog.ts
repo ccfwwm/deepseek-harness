@@ -142,6 +142,10 @@ async function checkOneModel(ctx: Context, base: ModelCatalog, options: ModelCat
       name: model.name,
       ...(model.description === undefined ? {} : { description: model.description }),
       ...(model.inputModalities === undefined ? {} : { inputModalities: [...model.inputModalities] }),
+      ...(model.reasoning === undefined ? {} : { reasoning: {
+        efforts: model.reasoning.efforts.map(effort => ({ ...effort })),
+        ...(model.reasoning.defaultEffort === undefined ? {} : { defaultEffort: model.reasoning.defaultEffort }),
+      } }),
     }, { ...options, check: true })
     return { ...group, models: group.models.map(candidate => candidate.id === model.id ? entry : candidate) }
   }))
