@@ -16,6 +16,37 @@ function directory(models: () => Promise<unknown>): ModelCatalogDirectory {
 }
 
 describe('ModelCatalogDirectory', () => {
+  it('uses one Host check request and merges partial snapshots while it runs', async () => {
+    vi.useFakeTimers()
+    try {
+      const initial = catalog('one')
+      const partial: ModelCatalog = {
+        ...initial,
+        groups: [{ ...initial.groups[0]!, models: [{ id: 'one', name: 'one', status: 'available' }] }],
+      }
+      const completed = Promise.withResolvers<unknown>()
+      const models = vi.fn((request?: { check?: boolean }) => {
+        if (request?.check === true) return completed.promise
+        if (models.mock.calls.length === 1) return Promise.resolve({ ok: true, value: initial })
+        return Promise.resolve({ ok: true, value: partial })
+      })
+      const subject = directory(models)
+      await subject.load()
+
+      const check = subject.checkAll()
+      await Promise.resolve()
+      expect(models.mock.calls.filter(([request]) => request?.check === true)).toHaveLength(1)
+      expect(subject.store.getSnapshot().value?.groups[0]?.models[0]?.status).toBe('checking')
+
+      await vi.advanceTimersByTimeAsync(500)
+      expect(subject.store.getSnapshot().value).toEqual(partial)
+      completed.resolve({ ok: true, value: partial })
+      await expect(check).resolves.toEqual(partial)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('keeps the shared catalog ready while one model is being checked', async () => {
     const initial: ModelCatalog = {
       default: { provider: 'fixture', model: 'one' },

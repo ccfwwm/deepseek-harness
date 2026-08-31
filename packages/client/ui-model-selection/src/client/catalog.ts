@@ -74,24 +74,59 @@ export class ModelCatalogDirectory {
   /** Explicit user action: probe every model in the current Host generation. */
   async checkAll(): Promise<ModelCatalog> {
     const base = await this.load()
-    const models = base.groups.flatMap(group => group.models.map(model => ({ provider: group.id, model: model.id })))
-    let next = 0
-    const worker = async (): Promise<void> => {
-      while (next < models.length) {
-        const target = models[next++]
-        if (target === undefined) return
-        await this.checkModel(target.provider, target.model)
+    const generation = this.generation
+    this.publishChecking(base, generation)
+    let settled = false
+    const operation = this.session.modelCatalog({ check: true, refresh: true })
+    const poll = async (): Promise<void> => {
+      while (!settled && generation === this.generation) {
+        await delay(500)
+        if (settled || generation !== this.generation) return
+        try {
+          const snapshot = await this.session.modelCatalog()
+          if (snapshot.ok && generation === this.generation) {
+            this.store.set({ value: snapshot.value, status: 'ready', error: null })
+          }
+        } catch { /* the owning check request reports transport failure */ }
       }
     }
+    void poll()
     try {
-      await Promise.all(Array.from({ length: Math.min(8, Math.max(1, models.length)) }, () => worker()))
-      return this.store.getSnapshot().value ?? base
-    } finally { /* individual rows retain their own checking state */ }
+      const response = await operation
+      if (!response.ok) throw new Error(`${response.error.code}: ${response.error.message}`)
+      if (generation === this.generation) this.store.set({ value: response.value, status: 'ready', error: null })
+      return response.value
+    } catch (error) {
+      if (generation === this.generation) {
+        this.store.update((draft) => {
+          draft.status = draft.value === null ? 'error' : 'ready'
+          draft.error = error instanceof Error ? error.message : String(error)
+        })
+      }
+      throw error
+    } finally {
+      settled = true
+    }
   }
 
   /** Explicit user action: probe one exact provider/model route. */
   checkModel(provider: string, model: string): Promise<ModelCatalog> {
     return this.request({ check: true, refresh: true, provider, model })
+  }
+
+  private publishChecking(base: ModelCatalog, generation: number): void {
+    if (generation !== this.generation) return
+    this.store.set({
+      value: {
+        ...base,
+        groups: base.groups.map(group => ({
+          ...group,
+          models: group.models.map(model => ({ ...model, status: 'checking' as const })),
+        })),
+      },
+      status: 'ready',
+      error: null,
+    })
   }
 
   private request(request: {
@@ -182,4 +217,8 @@ export class ModelCatalogDirectory {
     this.invalidate(true)
     void this.load().catch(() => { /* the selector exposes the shared error */ })
   }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
 }

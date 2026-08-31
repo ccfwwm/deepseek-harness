@@ -84,10 +84,11 @@ export type PromptContentPart =
     readonly mediaType: string
     readonly bytes: number
     readonly sha256: string
-    readonly parser: string
-    readonly status: string
-    readonly textChars: number
-    readonly preview: string
+    readonly storageStatus: 'stored'
+    readonly parser?: string
+    readonly status?: string
+    readonly textChars?: number
+    readonly preview?: string
     readonly pageCount?: number
     readonly sheetCount?: number
     readonly warning?: string

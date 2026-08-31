@@ -83,10 +83,11 @@ export interface FileBlock {
     mediaType: string
     bytes: number
     sha256: string
-    parser: string
-    status: string
-    textChars: number
-    preview: string
+    storageStatus?: 'stored'
+    parser?: string
+    status?: string
+    textChars?: number
+    preview?: string
     pageCount?: number
     sheetCount?: number
     warning?: string

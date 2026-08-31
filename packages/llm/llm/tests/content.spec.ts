@@ -4,6 +4,7 @@ import type { AttachmentStore, ImageMediaType } from '@deepseek-ai/dsh-attachmen
 import {
   ToolCallId,
   createUserMessage,
+  fileAttachmentText,
   offloadedImageText,
   offloadedImagePrefixCount,
   offloadRequestImagesWithPolicy,
@@ -16,6 +17,19 @@ import type { ContentBlock, Message } from '../src/index.ts'
 const source = { kind: 'plugin' as const, plugin: 'test' }
 
 const OMITTED = '[omitted]'
+
+describe('file attachment text', () => {
+  it('keeps an unparsed original visible and routes extraction to file tools', () => {
+    expect(fileAttachmentText({
+      attachmentId: 'attachment-1',
+      name: 'paper.pdf',
+      mediaType: 'application/pdf',
+      bytes: 1024,
+      sha256: 'a'.repeat(64),
+      storageStatus: 'stored',
+    })).toContain('has not been extracted. Use read_uploaded_file or extract_uploaded_file')
+  })
+})
 
 function offloadBase64(messages: readonly Message[], maxBytes: number | undefined): readonly Message[] {
   return offloadRequestImagesWithPolicy(messages, {

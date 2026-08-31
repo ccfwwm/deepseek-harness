@@ -362,7 +362,7 @@ export function ModelSelect(
                               data-status={model.status ?? 'unknown'}
                               data-vision={model.visionStatus ?? 'unknown'}
                               title={model.name}
-                              disabled={busy}
+                              disabled={busy && state.selectingKey === `${group.id}:${model.id}`}
                               onClick={() => { choose({ provider: group.id, model: model.id }) }}
                             >
                               <span className={css.optionCopy}>
@@ -429,7 +429,6 @@ export function ModelSelect(
                     aria-checked={effectiveEffort === level.effort}
                     className={clsx(css.option, effectiveEffort === level.effort && css.selected)}
                     key={level.key}
-                    disabled={busy}
                     onClick={() => { chooseEffort(level.effort) }}
                   >
                     <span className={css.optionCopy}>
