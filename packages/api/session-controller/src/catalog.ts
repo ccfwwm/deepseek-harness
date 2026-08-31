@@ -136,17 +136,14 @@ async function checkOneModel(ctx: Context, base: ModelCatalog, options: ModelCat
     const model = group.models.find(candidate => candidate.id === options.model)
     if (model === undefined) return group
     found = true
-    const entry = await modelEntry(ctx, group.id, {
+    const checked = await modelEntry(ctx, group.id, {
       provider: group.id,
       id: model.id,
       name: model.name,
       ...(model.description === undefined ? {} : { description: model.description }),
       ...(model.inputModalities === undefined ? {} : { inputModalities: [...model.inputModalities] }),
-      ...(model.reasoning === undefined ? {} : { reasoning: {
-        efforts: model.reasoning.efforts.map(effort => ({ ...effort })),
-        ...(model.reasoning.defaultEffort === undefined ? {} : { defaultEffort: model.reasoning.defaultEffort }),
-      } }),
     }, { ...options, check: true })
+    const entry = model.reasoning === undefined ? checked : { ...checked, reasoning: model.reasoning }
     return { ...group, models: group.models.map(candidate => candidate.id === model.id ? entry : candidate) }
   }))
   return found ? { ...base, groups } : base
