@@ -139,6 +139,8 @@ async function checkAllModels(
     }, { ...options, check: true })
     const entry = target.model.reasoning === undefined ? checked : { ...checked, reasoning: target.model.reasoning }
     cache.value = replaceModel(cache.value ?? base, target.provider, target.model.id, entry)
+    // Stream each completed row so the UI never waits for the slowest model.
+    ctx.emit('api-session/model-catalog', cache.value)
   })
   return cache.value ?? base
 }
@@ -362,20 +364,25 @@ async function modelEntry(
     } catch { /* metadata-only catalog remains usable without enrichment */ }
     return entry
   }
-  try {
-    const resolved = await ctx.llm.resolveModelInfo(provider, model.id)
-    const reasoning: ModelReasoning | undefined = resolved.reasoning === undefined ? undefined : toModelReasoning(resolved.reasoning)
-    entry = {
-      ...entry,
-      ...(model.description ?? resolved.description) === undefined
-        ? {}
-        : { description: model.description ?? resolved.description },
-      ...(resolved.inputModalities === undefined ? {} : { inputModalities: [...resolved.inputModalities] }),
-      ...(reasoning === undefined ? {} : { reasoning }),
+  // A health check only needs the already declared route. Re-resolving model
+  // metadata here serializes every probe behind provider discovery and can
+  // make a healthy model appear hung; metadata is refreshed in a separate
+  // catalog operation.
+  if (options.check !== true) {
+    try {
+      const resolved = await ctx.llm.resolveModelInfo(provider, model.id)
+      const reasoning: ModelReasoning | undefined = resolved.reasoning === undefined ? undefined : toModelReasoning(resolved.reasoning)
+      entry = {
+        ...entry,
+        ...(model.description ?? resolved.description) === undefined
+          ? {}
+          : { description: model.description ?? resolved.description },
+        ...(resolved.inputModalities === undefined ? {} : { inputModalities: [...resolved.inputModalities] }),
+        ...(reasoning === undefined ? {} : { reasoning }),
+      }
+    } catch {
+      // A broken metadata lookup must not hide every other model in the group.
     }
-  } catch (error) {
-    // A broken metadata lookup must not hide every other model in the group.
-    if (options.check === true) entry = { ...entry, status: availabilityOfError(error), statusMessage: redact(safeMessage(error)) }
   }
   const checkedAt = Date.now()
   let status: ModelAvailability = 'unavailable'

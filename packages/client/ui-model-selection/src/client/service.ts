@@ -55,10 +55,12 @@ export class ModelDirectoryResolver extends Service {
     // reach the Host first.
     void this.catalog.load()
       .then(() => { this.scheduleBackgroundCheck() })
-      .catch(() => { /* selectors expose the shared error */ })
+      .catch(() => { this.retryStartupLoad() })
     ctx.on('connection/reset', () => {
+      // Keep the last known catalog/status across reconnects. Metadata is
+      // refreshed in the background and health probes are started separately.
       this.catalog.resetGeneration()
-      void this.catalog.load().then(() => { this.scheduleBackgroundCheck() }).catch(() => { /* selector exposes error */ })
+      void this.catalog.load().then(() => { this.scheduleBackgroundCheck() }).catch(() => { this.retryStartupLoad() })
       for (const directory of this.live.directories.values()) directory.resetConnected()
     })
     ctx.remote.$on('llm/adapters-updated', () => { this.refreshInBackground() })
@@ -73,6 +75,14 @@ export class ModelDirectoryResolver extends Service {
     })
     ctx.remote.$on('credentials/reference-updated', () => { this.refreshInBackground() })
     ctx.effect(() => () => { this.cancelScheduledCheck?.() }, 'ui-model-selection: background model probe')
+  }
+
+  private retryStartupLoad(): void {
+    this.cancelScheduledCheck?.()
+    const timer = setTimeout(() => {
+      void this.catalog.load().then(() => { this.scheduleBackgroundCheck() }).catch(() => { /* retry on next connection/reset */ })
+    }, 1000)
+    this.cancelScheduledCheck = () => clearTimeout(timer)
   }
 
   private refreshInBackground(): void {
@@ -141,16 +151,8 @@ export class ModelDirectoryResolver extends Service {
   }
 }
 
-/** Schedule outside the plugin activation turn, using Chromium background priority when available. */
+/** Schedule outside the plugin activation turn without Chromium scheduler starvation. */
 function postBackgroundTask(task: () => void): () => void {
-  const scheduler = (globalThis as { scheduler?: {
-    postTask(callback: () => void, options: { priority: 'background'; signal: AbortSignal }): Promise<unknown>
-  } }).scheduler
-  if (scheduler !== undefined) {
-    const controller = new AbortController()
-    void scheduler.postTask(task, { priority: 'background', signal: controller.signal }).catch(() => {})
-    return () => { controller.abort() }
-  }
   const timer = setTimeout(task, 0)
   return () => { clearTimeout(timer) }
 }
