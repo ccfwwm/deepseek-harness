@@ -315,8 +315,10 @@ export class ConversationController extends Service implements IConversation {
           sha256: '',
           parser: 'pending',
           status: 'pending',
-          parseStatus: 'queued',
-          parseProgress: 0,
+          // The durable file service performs the built-in local extraction
+          // first. MinerU is an optional, separately reported background
+          // action; optimistic `queued` here made every upload look remote.
+          parseStatus: 'idle',
           textChars: 0,
           preview: '',
         },
