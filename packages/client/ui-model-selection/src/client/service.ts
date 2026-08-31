@@ -60,7 +60,14 @@ export class ModelDirectoryResolver extends Service {
       for (const directory of this.live.directories.values()) directory.resetConnected()
     })
     ctx.remote.$on('llm/adapters-updated', () => { this.catalog.refresh(true) })
-    ctx.remote.$on('settings/document-updated', () => { this.catalog.refresh(true) })
+    ctx.remote.$on('settings/document-updated', (namespace) => {
+      const key = String(namespace)
+      // selectModel persists the accepted default through this namespace. It
+      // changes only the selection, not provider health, so probing every model
+      // here would gray the menu and delay the close after every selection.
+      if (key === 'agent-default-model') this.catalog.refresh(false)
+      else if (key.startsWith('llm-')) this.catalog.refresh(true)
+    })
     ctx.remote.$on('credentials/reference-updated', () => { this.catalog.refresh(true) })
   }
 

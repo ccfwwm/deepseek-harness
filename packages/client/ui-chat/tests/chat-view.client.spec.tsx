@@ -791,7 +791,7 @@ describe('ChatView', () => {
     fireEvent.click(within(pendingBubble as HTMLElement).getByRole('button', { name: '复制' }))
     expect(writeText).toHaveBeenCalledWith('interrupt now')
     expect(within(pendingBubble as HTMLElement).queryByRole('button', { name: '在新对话中分支' })).toBeNull()
-    expect(view.getByRole('status').compareDocumentPosition(view.getByText('interrupt now'))
+    expect(view.getByText('interrupt now').compareDocumentPosition(view.getByRole('status'))
       & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
 
     act(() => {
@@ -860,7 +860,11 @@ describe('ChatView', () => {
       },
     )
     const view = render(<h.ChatView {...h.props} />)
-    expect(view.getByText('即发即显').closest('[data-submission-echo]')).not.toBeNull()
+    const echo = view.getByText('即发即显').closest('[data-submission-echo]')
+    expect(echo).not.toBeNull()
+    const admissionStatus = view.getByRole('status')
+    expect(admissionStatus.textContent).toBe('深度求索中...')
+    expect(echo!.compareDocumentPosition(admissionStatus) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
 
     // The durable node arrives while the echo is STILL in the session
     // snapshot: the render-time rpcId dedupe keeps exactly one bubble.
@@ -882,6 +886,7 @@ describe('ChatView', () => {
     // The delayed snapshot retirement changes nothing visible.
     act(() => { h.setSession({ pendingSubmissions: [] }) })
     expect(view.getAllByText('即发即显')).toHaveLength(1)
+    expect(view.queryByRole('status')).toBeNull()
   })
 
   it('hides an echo once its queue occurrence carries the rpcId (running-turn submission)', () => {

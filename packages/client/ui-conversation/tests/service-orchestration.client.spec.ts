@@ -232,6 +232,56 @@ describe('sendSession submission echo', () => {
     await b.runtime.dispose()
   })
 
+  it('starts auto extraction after storage without delaying attachment send', async () => {
+    const b = await echoBench()
+    let finishExtraction: ((value: unknown) => void) | undefined
+    const extract = vi.fn(() => new Promise((resolve) => { finishExtraction = resolve }))
+    const prepare = vi.fn(() => Promise.resolve({
+      ok: true as const,
+      value: {
+        attachmentId: 'att-document',
+        name: 'paper.pdf',
+        mediaType: 'application/pdf',
+        bytes: 4,
+        sha256: 'abcd',
+        storageStatus: 'stored' as const,
+      },
+    }))
+    b.runtime.ctx.provide('remote.zerowallFiles')
+    b.runtime.ctx.set('remote.zerowallFiles', { prepare, inspect: vi.fn(), extract })
+    class InstantReader {
+      result: string | ArrayBuffer | null = 'data:application/pdf;base64,JVBERg=='
+      error: DOMException | null = null
+      onload: (() => void) | null = null
+      onerror: (() => void) | null = null
+      readAsDataURL(): void { queueMicrotask(() => { this.onload?.() }) }
+    }
+    vi.stubGlobal('FileReader', InstantReader)
+    try {
+      const [attachment] = b.root.createDraftFiles([
+        new File([Uint8Array.of(0x25, 0x50, 0x44, 0x46)], 'paper.pdf', { type: 'application/pdf' }),
+      ], b.runtime.sessions.binding('s1')!.sessionId)
+      await vi.waitFor(() => {
+        expect(extract).toHaveBeenCalledWith({
+          sessionId: 's1', attachmentId: 'att-document', mode: 'auto',
+        })
+      })
+      expect(attachment?.kind === 'file' && attachment.prepared.storageStatus).toBe('stored')
+
+      const session = b.runtime.sessions.binding('s1')!.session
+      const sending = b.root.sendSession(session, '总结附件', [attachment!.id], 'queue')
+      await vi.waitFor(() => { expect(b.prompt).toHaveBeenCalledOnce() })
+      expect(finishExtraction).toBeTypeOf('function')
+      b.retire.onRetire?.({ reason: 'observed', attachments: [] })
+      await expect(sending).resolves.toEqual({ kind: 'success' })
+      finishExtraction?.({ ok: true, value: { state: 'done' } })
+    } finally {
+      vi.unstubAllGlobals()
+      b.restore()
+    }
+    await b.runtime.dispose()
+  })
+
   it('hands the preview URL to the image cache on observed retirement instead of revoking it', async () => {
     const b = await echoBench()
     try {

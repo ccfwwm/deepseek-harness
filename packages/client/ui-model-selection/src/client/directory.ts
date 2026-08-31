@@ -55,6 +55,8 @@ export class ModelDirectory {
   private generation = 0
   private disposed = false
   private resolved = false
+  /** Selection shown immediately while the durable projection catches up. */
+  private optimisticSelection: ModelSelection | null = null
   private readonly unsubscribeCatalog: () => void
   private readonly unsubscribeSelection: () => void
 
@@ -122,8 +124,11 @@ export class ModelDirectory {
     this.assertAvailable()
     const generation = ++this.generation
     const selectingKey = `${selection.provider}:${selection.model}`
+    const previous = this.store.getSnapshot().current
+    this.optimisticSelection = selection
     this.store.update((s) => {
-      s.status = 'selecting'
+      s.current = selection
+      s.status = 'ready'
       s.selectionInFlight = true
       s.selectingKey = selectingKey
       s.error = null
@@ -141,8 +146,10 @@ export class ModelDirectory {
       return
     }
     if (!result.ok) {
+      this.optimisticSelection = null
       this.store.update((s) => {
-        s.status = 'error'
+        s.current = previous
+        s.status = 'ready'
         s.selectionInFlight = false
         s.selectingKey = undefined
         s.error = `${result.error.code}: ${result.error.message}`
@@ -155,6 +162,9 @@ export class ModelDirectory {
       s.selectingKey = undefined
       s.error = null
     })
+    // The projection normally publishes before this RPC settles. Keep the
+    // optimistic value until that publication is observed so a slower
+    // projection cannot make the trigger flash back to the old model.
     this.syncInputs()
   }
 
@@ -164,6 +174,7 @@ export class ModelDirectory {
   resetConnected(): void {
     if (this.disposed) return
     ++this.generation
+    this.optimisticSelection = null
     this.store.update((state) => {
       if (state.status === 'selecting') state.status = 'idle'
       state.selectionInFlight = false
@@ -191,13 +202,18 @@ export class ModelDirectory {
     const catalog = this.catalog.store.getSnapshot()
     const projected = modelSelectionProjection(this.projected.getSnapshot())
     const projectedCurrent = projected?.next ?? projected?.lastUsed
+    if (
+      this.optimisticSelection !== null
+      && sameSelection(projectedCurrent, this.optimisticSelection)
+    ) this.optimisticSelection = null
     // A catalog transport failure must not erase the model that the Session
     // already selected. Keep it directly selectable while the catalog can be
     // retried, instead of leaving the composer with an empty model menu.
     if (catalog.status === 'error' && projectedCurrent !== null && projectedCurrent !== undefined) {
+      const current = this.optimisticSelection ?? projectedCurrent
       this.resolved = true
       this.store.set({
-        current: projectedCurrent,
+        current,
         routable: true,
         groups: [],
         failures: [],
@@ -234,16 +250,14 @@ export class ModelDirectory {
       })
       return
     }
-    const current = projected.next ?? catalog.value.default
+    const current = this.optimisticSelection ?? projected.next ?? catalog.value.default
     this.resolved = true
     this.store.set({
       current,
       routable: catalog.value.routableProviders.includes(current.provider),
       groups: catalog.value.groups,
       failures: catalog.value.failures,
-      status: this.store.getSnapshot().status === 'selecting'
-        ? 'selecting'
-        : 'ready',
+      status: 'ready',
       error: null,
       checkingModels: modelsChecking(catalog.value),
       checkingAll: false,
@@ -263,4 +277,11 @@ function modelsChecking(value: import('@deepseek-ai/dsh-api-remotes/client').Mod
 
 function modelSelectionProjection(value: unknown): ModelSelectionProjection | undefined {
   return value === undefined ? undefined : value as ModelSelectionProjection
+}
+
+function sameSelection(left: ModelSelection | null | undefined, right: ModelSelection): boolean {
+  return left !== null && left !== undefined
+    && left.provider === right.provider
+    && left.model === right.model
+    && left.reasoningEffort === right.reasoningEffort
 }

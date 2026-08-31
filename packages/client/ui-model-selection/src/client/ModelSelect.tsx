@@ -125,9 +125,6 @@ export function ModelSelect(
         label: effort.name,
       })),
     ], [reasoning, t])
-  // A catalog probe is row-scoped. Only selection itself blocks the menu;
-  // checking one model must never disable switching to another model.
-  const busy = state.selectionInFlight === true
   const syncCatalog = sync ?? (() => Promise.resolve())
   const checkAllCatalog = checkAll ?? (() => Promise.resolve())
   const checkOneCatalog = checkModel ?? (() => Promise.resolve())
@@ -199,10 +196,7 @@ export function ModelSelect(
   }
 
   const settleSelection = (accepted: boolean): void => {
-    if (accepted) {
-      if (rootRef.current !== null) close(true)
-      return
-    }
+    if (accepted) return
     const message = directory.getSnapshot().error
     if (message !== null) {
       toastSeq.current += 1
@@ -216,6 +210,7 @@ export function ModelSelect(
       return
     }
     lastActionRef.current = 'select'
+    close(true)
     void select(selection).then(settleSelection)
   }
 
@@ -231,6 +226,7 @@ export function ModelSelect(
       ...effort === undefined ? {} : { reasoningEffort: effort },
     }
     lastActionRef.current = 'select'
+    close(true)
     void select(selection).then(settleSelection)
   }
 
@@ -285,7 +281,7 @@ export function ModelSelect(
           className={css.menu}
           role="menu"
           aria-label={t('menu.aria')}
-          aria-busy={state.status === 'loading' || busy}
+          aria-busy={state.status === 'loading'}
         >
           {pane === 'root' && (
             <>
@@ -362,7 +358,6 @@ export function ModelSelect(
                               data-status={model.status ?? 'unknown'}
                               data-vision={model.visionStatus ?? 'unknown'}
                               title={model.name}
-                              disabled={busy && state.selectingKey === `${group.id}:${model.id}`}
                               onClick={() => { choose({ provider: group.id, model: model.id }) }}
                             >
                               <span className={css.optionCopy}>

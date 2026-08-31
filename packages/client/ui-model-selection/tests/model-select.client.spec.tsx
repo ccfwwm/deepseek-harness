@@ -201,6 +201,41 @@ describe('ModelSelect reasoning effort', () => {
     expect(screen.queryByRole('button', { name: '重试' })).toBeNull()
   })
 
+  it('closes immediately and keeps the trigger active while selection settles', () => {
+    const groups = [{
+      id: 'deepseek-official',
+      name: 'DeepSeek',
+      models: [
+        { id: 'deepseek-v4-flash', name: 'DeepSeek-V4-Flash', reasoning },
+        { id: 'deepseek-v4-pro', name: 'DeepSeek-V4-Pro' },
+      ],
+    }]
+    const directory = createSnapshotStore<ModelDirectoryState>(state({ groups }))
+    let finish: ((accepted: boolean) => void) | undefined
+    const select = vi.fn((selection: ModelSelection) => {
+      directory.set(state({ groups, current: selection, selectionInFlight: true }))
+      return new Promise<boolean>((resolve) => { finish = resolve })
+    })
+    render(<ModelSelect
+      locked={false}
+      available
+      directory={directory}
+      load={vi.fn()}
+      select={select}
+      t={t}
+    />)
+
+    fireEvent.click(screen.getByRole('button', { name: /选择模型，当前 DeepSeek-V4-Flash/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /模型/ }))
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /DeepSeek-V4-Pro/ }))
+
+    expect(screen.queryByRole('menu')).toBeNull()
+    const trigger = screen.getByRole('button', { name: '选择模型，当前 DeepSeek-V4-Pro' })
+    expect(trigger.hasAttribute('disabled')).toBe(false)
+    expect(finish).toBeTypeOf('function')
+    finish?.(true)
+  })
+
   it('renders no Agent-bound control for an addressed subagent session', () => {
     const load = vi.fn()
     render(<ModelSelect
