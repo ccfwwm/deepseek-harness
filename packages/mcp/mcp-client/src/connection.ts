@@ -24,6 +24,13 @@ import { syncTools } from './tools.ts'
 import type { ToolBridgeOptions, ToolDisposers } from './tools.ts'
 import type { Config } from './index.ts'
 
+declare module '@deepseek-ai/cordis' {
+  interface Events {
+    /** Live connection state after transport and tool synchronization. */
+    'mcp-client/status'(serverName: string, state: 'starting' | 'active' | 'error', error?: string): void
+  }
+}
+
 /** Automatic reconnect policy for one MCP server connection. */
 export interface ReconnectConfig {
   /** Reconnect automatically after a lost connection (default true). */
@@ -149,6 +156,15 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
   /** The real error from the first connection attempt, for startup-await diagnostics. */
   let firstAttemptError: unknown
 
+  // Publish on both the owning context and the application root. Consumers
+  // may be scoped to the MCP fiber or may aggregate all MCP clients at root;
+  // keeping both paths in sync avoids lifecycle state being lost at a scope
+  // boundary.
+  function emitStatus(state: 'starting' | 'active' | 'error', error?: string): void {
+    ctx.emit('mcp-client/status', config.serverName, state, error)
+    if (ctx.root !== ctx) ctx.root.emit('mcp-client/status', config.serverName, state, error)
+  }
+
   /** A generation may act only while it is the current one on a live plugin. */
   const isCurrent = (generation: Client): boolean => !disposed && client === generation
 
@@ -174,6 +190,7 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
     if (!isCurrent(generation)) return
     client = undefined
     clientClosed = undefined
+    emitStatus('starting')
     scheduleReconnect()
   }
 
@@ -211,6 +228,7 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
         disposers = new Map()
       })
       ctx.logger.error(`${label}: giving up after ${policy.maxAttempts} consecutive failed reconnect attempts — tools unregistered; reload the plugin or restart the Host to reconnect`)
+      emitStatus('error', `Connection failed after ${policy.maxAttempts} attempts.`)
       return
     }
     const delayMs = Math.min(policy.maxDelayMs, policy.initialDelayMs * 2 ** (failedAttempts - 1))
@@ -261,6 +279,7 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
         ctx.logger.info(`${label}: tool list changed, re-syncing`)
         try {
           await enqueueSync(generation)
+          emitStatus('active')
         } catch (error) {
           // Fetch-phase failure: the previous generation is still registered
           // and `disposers` still owns it — keep serving the last good list.
@@ -301,6 +320,7 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
     }
     if (!isCurrent(generation)) return
     connectedAt = Date.now()
+    emitStatus('active')
     if (failedAttempts > 0) ctx.logger.info(`${label}: reconnected and re-synced tools (attempt ${failedAttempts}/${policy.maxAttempts})`)
   }
 

@@ -572,6 +572,8 @@ declare module '@deepseek-ai/cordis' {
      * @param message - user-safe failure chain.
      */
     'api-session/error'(sessionId: SessionId, message: string): void
+    /** A model probe completed and published the latest shared catalog snapshot. */
+    'api-session/model-catalog'(catalog: ModelCatalog): void
   }
 }
 

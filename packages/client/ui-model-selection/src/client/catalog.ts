@@ -24,6 +24,7 @@ export class ModelCatalogDirectory {
   private readonly targetVersions = new Map<string, number>()
   private inflight: Promise<ModelCatalog> | undefined
   private checkInflight: Promise<ModelCatalog> | undefined
+  private backgroundInflight: Promise<ModelCatalog> | undefined
 
   /** @param session - Session Remote namespace carrying the Host-generation catalog. */
   constructor(private readonly session: Pick<ClientRemote['session'], 'modelCatalog'>) {}
@@ -74,40 +75,48 @@ export class ModelCatalogDirectory {
 
   /** Explicit user action: probe every model in the current Host generation. */
   checkAll(background = false): Promise<ModelCatalog> {
-    if (this.checkInflight !== undefined) return this.checkInflight
-    const operation = this.runCheckAll(background).finally(() => {
-      if (this.checkInflight === operation) this.checkInflight = undefined
+    const resident = background ? this.backgroundInflight : this.checkInflight
+    if (resident !== undefined) return resident
+    const operation = this.runIncrementalCheck(background).finally(() => {
+      if (background) {
+        if (this.backgroundInflight === operation) this.backgroundInflight = undefined
+      } else if (this.checkInflight === operation) this.checkInflight = undefined
     })
-    this.checkInflight = operation
+    if (background) this.backgroundInflight = operation
+    else this.checkInflight = operation
     return operation
   }
 
-  private async runCheckAll(background: boolean): Promise<ModelCatalog> {
-    await this.load()
+  private async runIncrementalCheck(background: boolean): Promise<ModelCatalog> {
+    const catalog = await this.load()
     const generation = this.generation
-    const operation = this.session.modelCatalog({
-      check: true,
-      ...(background ? { background: true } : { refresh: true }),
-    })
-    try {
-      const response = await operation
-      if (!response.ok) throw new Error(`${response.error.code}: ${response.error.message}`)
-      if (generation === this.generation) this.store.set({ value: response.value, status: 'ready', error: null })
-      return response.value
-    } catch (error) {
-      if (generation === this.generation) {
-        this.store.update((draft) => {
-          draft.status = draft.value === null ? 'error' : 'ready'
-          draft.error = error instanceof Error ? error.message : String(error)
-        })
+    const targets = catalog.groups.flatMap(group => group.models.map(model => ({ provider: group.id, model: model.id })))
+    const failures: unknown[] = []
+    await mapWithConcurrency(targets, 8, async ({ provider, model }) => {
+      try {
+        await this.probeModel(provider, model, false)
+      } catch (error) {
+        failures.push(error)
       }
-      throw error
-    }
+    })
+    if (generation !== this.generation) return catalog
+    const value = this.store.getSnapshot().value ?? catalog
+    if (!background && failures.length === targets.length && failures[0] !== undefined) throw failures[0]
+    return value
   }
 
   /** Explicit user action: probe one exact provider/model route. */
   checkModel(provider: string, model: string): Promise<ModelCatalog> {
-    return this.request({ check: true, refresh: true, provider, model })
+    return this.probeModel(provider, model, true)
+  }
+
+  /** Merge a Host-pushed incremental probe result into every selector. */
+  accept(value: ModelCatalog): void {
+    this.store.set({ value, status: 'ready', error: null })
+  }
+
+  private probeModel(provider: string, model: string, markChecking: boolean): Promise<ModelCatalog> {
+    return this.request({ check: true, refresh: true, provider, model }, markChecking)
   }
 
   private request(request: {
@@ -115,7 +124,7 @@ export class ModelCatalogDirectory {
     refresh?: boolean
     provider?: string
     model?: string
-  }): Promise<ModelCatalog> {
+  }, markChecking = true): Promise<ModelCatalog> {
     const targeted = request.provider !== undefined && request.model !== undefined
     const previous = this.store.getSnapshot()
     const key = targeted ? `${request.provider}:${request.model}` : undefined
@@ -125,7 +134,7 @@ export class ModelCatalogDirectory {
     this.store.update((draft) => {
       draft.status = targeted && previous.value !== null ? 'ready' : 'loading'
       draft.error = null
-      if (targeted && draft.value !== null) {
+      if (targeted && markChecking && draft.value !== null) {
         draft.value = {
           ...draft.value,
           groups: draft.value.groups.map(group => group.id !== request.provider
@@ -184,6 +193,7 @@ export class ModelCatalogDirectory {
     this.generation += 1
     this.inflight = undefined
     this.checkInflight = undefined
+    this.backgroundInflight = undefined
     const value = clear ? null : this.store.getSnapshot().value
     this.store.set({ value, status: 'idle', error: null })
   }
@@ -201,4 +211,18 @@ export class ModelCatalogDirectory {
     this.invalidate(true)
     void this.load().catch(() => { /* the selector exposes the shared error */ })
   }
+}
+
+async function mapWithConcurrency<T>(values: readonly T[], concurrency: number, task: (value: T) => Promise<void>): Promise<void> {
+  let next = 0
+  const workers = Array.from({ length: Math.min(concurrency, values.length) }, async () => {
+    for (;;) {
+      const index = next++
+      if (index >= values.length) return
+      const value = values[index]
+      if (value === undefined) return
+      await task(value)
+    }
+  })
+  await Promise.all(workers)
 }
