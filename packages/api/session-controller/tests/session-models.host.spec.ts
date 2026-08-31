@@ -6,6 +6,9 @@
  */
 
 import { describe, expect, it, vi } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { agentEvents } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -442,6 +445,46 @@ describe('Web session model selection', () => {
     await ctx.fiber.dispose()
   })
 
+  it('restores the last health snapshot on the next Host before background probes run', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-model-health-'))
+    const previousHome = process.env.DSH_HOME
+    process.env.DSH_HOME = root
+    try {
+      const first = await harness()
+      first.ctx.llm.registerAdapter(['persisted'], new class extends CatalogAdapter {
+        override probeModel(): Promise<readonly { protocol: string; ok: boolean }[]> {
+          return Promise.resolve([{ protocol: 'native', ok: true }])
+        }
+
+        override probeVision(): Promise<{ status: 'supported' }> {
+          return Promise.resolve({ status: 'supported' })
+        }
+      }('Persisted', [{ provider: 'persisted', id: 'one', name: 'One' }]))
+      const selection = { provider: 'deepseek-official', model: 'deepseek-chat' }
+      const checked = await buildModelCatalog(first.ctx, selection, { check: true })
+      expect(checked.groups.find(group => group.id === 'persisted')?.models[0]).toMatchObject({
+        status: 'available', visionStatus: 'supported', lastCheckedAt: expect.any(Number),
+      })
+      await first.ctx.fiber.dispose()
+
+      const probe = vi.fn(() => Promise.resolve([{ protocol: 'native', ok: true }] as const))
+      const second = await harness()
+      second.ctx.llm.registerAdapter(['persisted'], new class extends CatalogAdapter {
+        override probeModel(): Promise<readonly { protocol: string; ok: boolean }[]> { return probe() }
+      }('Persisted', [{ provider: 'persisted', id: 'one', name: 'One' }]))
+      const restored = await buildModelCatalog(second.ctx, selection)
+      expect(restored.groups.find(group => group.id === 'persisted')?.models[0]).toMatchObject({
+        status: 'available', visionStatus: 'supported', lastCheckedAt: expect.any(Number),
+      })
+      expect(probe).not.toHaveBeenCalled()
+      await second.ctx.fiber.dispose()
+    } finally {
+      if (previousHome === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = previousHome
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('publishes partial catalog snapshots while capping Host probe concurrency', async () => {
     const { ctx } = await harness()
     const gates: Array<ReturnType<typeof Promise.withResolvers<undefined>>> = []
@@ -471,7 +514,7 @@ describe('Web session model selection', () => {
     await vi.waitFor(() => { expect(active).toBe(8) })
     const checking = await buildModelCatalog(ctx, selection)
     expect(checking.groups.find(group => group.id === 'slow-check')?.models
-      .every(model => model.status === 'checking')).toBe(true)
+      .every(model => model.status !== 'checking')).toBe(true)
     expect(maximum).toBe(8)
 
     for (const gate of gates.slice(0, 8)) gate.resolve(undefined)
@@ -479,7 +522,7 @@ describe('Web session model selection', () => {
     const partial = await buildModelCatalog(ctx, selection)
     const statuses = partial.groups.find(group => group.id === 'slow-check')?.models.map(model => model.status)
     expect(statuses).toContain('available')
-    expect(statuses).toContain('checking')
+    expect(statuses).not.toContain('checking')
     for (const gate of gates.slice(8)) gate.resolve(undefined)
     await expect(complete).resolves.toBeDefined()
     expect(maximum).toBe(8)
@@ -518,7 +561,7 @@ describe('Web session model selection', () => {
     await vi.waitFor(() => { expect(active).toBe(2) })
     const metadata = expectValue(await remote.modelCatalog())
     expect(metadata.groups.find(group => group.id === 'background-check')?.models
-      .every(model => model.status === 'checking')).toBe(true)
+      .every(model => model.status !== 'checking')).toBe(true)
     expect(maximum).toBe(2)
 
     gate.resolve(undefined)

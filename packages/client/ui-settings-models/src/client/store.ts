@@ -229,8 +229,6 @@ export class ModelsSettingsStore {
 
   /** Latest load wins; an older response never overwrites a newer one. */
   private generation = 0
-  /** The initial text+vision probe is a startup action, not a poll. */
-  private startupProbeStarted = false
   /** A connection can still be opening when the settings plugin mounts. */
   private startupRetryTimer: ReturnType<typeof setTimeout> | undefined
   private startupRetryCount = 0
@@ -287,10 +285,6 @@ export class ModelsSettingsStore {
       s.catalogStatus = 'checking'
       s.catalogCheckingKey = null
       s.catalogError = null
-      s.catalogGroups = (s.catalogGroups ?? []).map(group => ({
-        ...group,
-        models: group.models.map(model => ({ ...model, status: 'checking' as const })),
-      }))
     })
     try {
       const response = await modelCatalog({
@@ -455,31 +449,10 @@ export class ModelsSettingsStore {
       clearTimeout(this.startupRetryTimer)
       this.startupRetryTimer = undefined
     }
-    // Startup performs one shared text + vision probe. Subsequent settings
-    // refreshes consume the Host-generation cache and never probe again.
-    // The Session face can be attached a moment after the settings face during
-    // connection startup. Leave the flag unset until the probe endpoint exists
-    // so a later successful load performs the automatic initial check.
-    if (!this.startupProbeStarted && this.api.session?.modelCatalog !== undefined) {
-      this.startupProbeStarted = true
-      // Always bypass the Host-generation cache on first launch. A metadata
-      // catalog may have been populated just before this store mounted, and
-      // without refresh the UI can remain at "未检测" for the whole session.
-      this.startupRetryTimer = setTimeout(() => {
-        this.startupRetryTimer = undefined
-        void this.syncModels(true, false, true).then(() => {
-          const snapshot = this.store.getSnapshot()
-          if (snapshot.catalogStatus === 'error' && this.startupRetryCount < 3) {
-            this.startupRetryCount += 1
-            this.startupProbeStarted = false
-            this.startupRetryTimer = setTimeout(() => {
-              this.startupRetryTimer = undefined
-              void this.load()
-            }, 1500)
-          }
-        })
-      }, 0)
-    }
+    // Model health is owned by ui-model-selection. This page only reads the
+    // shared Host snapshot, otherwise opening Settings starts a second probe
+    // fan-out and can overwrite stable results with "checking"/"unknown".
+    if (this.api.session?.modelCatalog !== undefined) void this.syncModels(false, false)
   }
 }
 

@@ -127,7 +127,7 @@ export function apply(ctx: ClientContext): void {
       // Provider invalidations are already health-checked by the shared model
       // directory. This surface refreshes metadata only and consumes that
       // Host-generation cache instead of starting a second probe fan-out.
-      void controller.load().then(() => controller.syncModels(false, true))
+      void controller.load()
     }
     const disposers = [
       ctx.remote.$on('settings/document-updated', () => { refreshModels() }),

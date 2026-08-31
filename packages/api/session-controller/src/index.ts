@@ -140,7 +140,10 @@ export class SessionController extends TypertRemoteService {
     // Host-generation catalog. The next explicit read performs the new
     // startup-style check; opening a selector never probes by itself.
     ctx.on('llm/adapters-updated', () => { invalidateModelCatalog(ctx) })
-    ctx.on('settings/document-updated', () => { invalidateModelCatalog(ctx) })
+    ctx.on('settings/document-updated', (namespace) => {
+      const key = String(namespace)
+      if (key.startsWith('llm-')) invalidateModelCatalog(ctx)
+    })
     ctx.on('session/disposed', (session) => {
       ctx.emit('api-session/removed', session.id)
     })
