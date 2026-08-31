@@ -54,7 +54,22 @@ export class ModelDirectoryResolver extends Service {
     this.blockReason = config.blockReason
     this.catalog = new ModelCatalogDirectory(ctx.remote.session)
     let connection: ConnectionHandle | undefined
-    try { connection = ctx.get('connection') as ConnectionHandle } catch { connection = undefined }
+    let generationDisposer: (() => void) | undefined
+    let connectionRetry: ReturnType<typeof setTimeout> | undefined
+    const attachConnection = (): void => {
+      if (generationDisposer !== undefined) return
+      try { connection = ctx.get('connection') as ConnectionHandle } catch { connection = undefined }
+      if (connection === undefined) {
+        connectionRetry = setTimeout(() => {
+          connectionRetry = undefined
+          attachConnection()
+        }, 250)
+        return
+      }
+      const generationApi = connection.generation
+      if (typeof generationApi.subscribe === 'function') generationDisposer = generationApi.subscribe(startGeneration)
+      startGeneration()
+    }
     // A service can be constructed before the transport handshake. Subscribe
     // to the connection generation so startup is retried when the Host really
     // becomes ready instead of relying on a one-shot reset event.
@@ -82,9 +97,9 @@ export class ModelDirectoryResolver extends Service {
       this.startupAttempted = true
       loadForGeneration(generation)
     }
-    const generationApi = connection?.generation
-    const hasGenerationApi = generationApi !== undefined && typeof generationApi.subscribe === 'function'
-    const stopGeneration = hasGenerationApi ? generationApi.subscribe(startGeneration) : (() => {})
+    // Connection may be provided after this service is constructed. Bind it
+    // lazily so embedded fixtures without a transport still mount normally.
+    attachConnection()
     // Always issue one eager metadata request. On a real browser transport it
     // may race the handshake and be retried by the generation callback; in
     // fixtures and embedded clients it is the complete startup path.
@@ -92,14 +107,11 @@ export class ModelDirectoryResolver extends Service {
       this.startupAttempted = true
       void this.catalog.load().then(() => { this.scheduleBackgroundCheck() }).catch(() => { this.retryStartupLoad() })
     }
-    if (!hasGenerationApi) {
-      ctx.on('connection/reset', () => { loadForGeneration() })
-    } else {
-      startGeneration()
-      // The API gateway emits this compatibility event on reconnect. It is
-      // harmless when the generation callback already handled the same turn.
-      ctx.on('connection/reset', startGeneration)
-    }
+    ctx.on('connection/reset', () => {
+      attachConnection()
+      if (connection === undefined) loadForGeneration()
+      else startGeneration()
+    })
     ctx.remote.$on('llm/adapters-updated', () => { this.refreshInBackground() })
     ctx.remote.$on('api-session/model-catalog', (value) => { this.catalog.accept(value) })
     ctx.remote.$on('settings/document-updated', (namespace) => {
@@ -112,7 +124,8 @@ export class ModelDirectoryResolver extends Service {
     })
     ctx.remote.$on('credentials/reference-updated', () => { this.refreshInBackground() })
     ctx.effect(() => () => {
-      stopGeneration()
+      generationDisposer?.()
+      if (connectionRetry !== undefined) clearTimeout(connectionRetry)
       this.cancelScheduledCheck?.()
     }, 'ui-model-selection: background model probe')
   }
