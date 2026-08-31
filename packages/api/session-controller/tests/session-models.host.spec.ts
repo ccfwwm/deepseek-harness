@@ -534,6 +534,48 @@ describe('Web session model selection', () => {
     await ctx.fiber.dispose()
   })
 
+  it('coalesces startup checks and limits background probes to two without blocking catalog reads', async () => {
+    const { ctx } = await harness()
+    const gate = Promise.withResolvers<undefined>()
+    let active = 0
+    let maximum = 0
+    let calls = 0
+    ctx.llm.registerAdapter(['background-check'], new class extends CatalogAdapter {
+      override async probeModel(): Promise<readonly { protocol: string; ok: boolean }[]> {
+        calls += 1
+        active += 1
+        maximum = Math.max(maximum, active)
+        await gate.promise
+        active -= 1
+        return [{ protocol: 'native', ok: true }]
+      }
+
+      override probeVision(): Promise<{ status: 'unknown' }> {
+        return Promise.resolve({ status: 'unknown' })
+      }
+    }('Background Check', Array.from({ length: 6 }, (_, index) => ({
+      provider: 'background-check', id: `model-${String(index)}`, name: `Model ${String(index)}`,
+    }))))
+    const remote = createSessionTestRemote(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+      cwd: '/tmp',
+    })
+
+    const first = remote.modelCatalog({ check: true, refresh: true, background: true })
+    const second = remote.modelCatalog({ check: true, refresh: true, background: true })
+    await vi.waitFor(() => { expect(active).toBe(2) })
+    const metadata = expectValue(await remote.modelCatalog())
+    expect(metadata.groups.find(group => group.id === 'background-check')?.models
+      .every(model => model.status === 'checking')).toBe(true)
+    expect(maximum).toBe(2)
+
+    gate.resolve(undefined)
+    await expect(Promise.all([first, second])).resolves.toHaveLength(2)
+    expect(calls).toBe(6)
+    expect(maximum).toBe(2)
+    await ctx.fiber.dispose()
+  })
+
   it('keeps other model health results unchanged after a targeted check', async () => {
     const { ctx } = await harness()
     ctx.llm.registerAdapter(['targeted'], new class extends CatalogAdapter {

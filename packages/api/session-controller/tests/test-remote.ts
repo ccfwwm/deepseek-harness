@@ -58,7 +58,13 @@ export interface TestSessionRemote {
   search(request: SessionSearchRequest, signal?: AbortSignal): Promise<RemoteResult<SessionSearchValue>>
   create(request: SessionCreateRequest): Promise<RemoteResult<SessionCreateValue>>
   selectModel(request: SessionSelectModelRequest): Promise<RemoteResult<SessionSelectModelValue>>
-  modelCatalog(request?: { readonly check?: boolean }): Promise<RemoteResult<ModelCatalog>>
+  modelCatalog(request?: {
+    readonly check?: boolean
+    readonly refresh?: boolean
+    readonly background?: boolean
+    readonly provider?: string
+    readonly model?: string
+  }): Promise<RemoteResult<ModelCatalog>>
   rename(request: SessionRenameRequest): Promise<RemoteResult<SessionRenameValue>>
   fork(request: SessionForkRequest): Promise<RemoteResult<SessionForkValue>>
   prompt(request: SessionPromptRequest, signal?: AbortSignal): Promise<RemoteResult<SessionPromptValue>>

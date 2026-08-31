@@ -38,13 +38,34 @@ describe('ModelCatalogDirectory', () => {
       expect(models.mock.calls.filter(([request]) => request?.check === true)).toHaveLength(1)
       expect(subject.store.getSnapshot().value?.groups[0]?.models[0]?.status).toBe('checking')
 
-      await vi.advanceTimersByTimeAsync(500)
+      await vi.advanceTimersByTimeAsync(750)
       expect(subject.store.getSnapshot().value).toEqual(partial)
       completed.resolve({ ok: true, value: partial })
       await expect(check).resolves.toEqual(partial)
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('coalesces concurrent checks and marks startup probes as background work', async () => {
+    const initial = catalog('one')
+    const completed = Promise.withResolvers<unknown>()
+    const models = vi.fn((request?: { check?: boolean; background?: boolean }) => request?.check === true
+      ? completed.promise
+      : Promise.resolve({ ok: true, value: initial }))
+    const subject = directory(models)
+    await subject.load()
+
+    const first = subject.checkAll(true)
+    const second = subject.checkAll(true)
+    expect(second).toBe(first)
+    await Promise.resolve()
+    expect(models.mock.calls.filter(([request]) => request?.check === true)).toEqual([[
+      { check: true, refresh: true, background: true },
+    ]])
+
+    completed.resolve({ ok: true, value: initial })
+    await expect(first).resolves.toEqual(initial)
   })
 
   it('keeps the shared catalog ready while one model is being checked', async () => {

@@ -23,6 +23,7 @@ export class ModelCatalogDirectory {
   private requestVersion = 0
   private readonly targetVersions = new Map<string, number>()
   private inflight: Promise<ModelCatalog> | undefined
+  private checkInflight: Promise<ModelCatalog> | undefined
 
   /** @param session - Session Remote namespace carrying the Host-generation catalog. */
   constructor(private readonly session: Pick<ClientRemote['session'], 'modelCatalog'>) {}
@@ -72,15 +73,29 @@ export class ModelCatalogDirectory {
   }
 
   /** Explicit user action: probe every model in the current Host generation. */
-  async checkAll(): Promise<ModelCatalog> {
+  checkAll(background = false): Promise<ModelCatalog> {
+    if (this.checkInflight !== undefined) return this.checkInflight
+    const operation = this.runCheckAll(background).finally(() => {
+      if (this.checkInflight === operation) this.checkInflight = undefined
+    })
+    this.checkInflight = operation
+    return operation
+  }
+
+  private async runCheckAll(background: boolean): Promise<ModelCatalog> {
     const base = await this.load()
     const generation = this.generation
     this.publishChecking(base, generation)
     let settled = false
-    const operation = this.session.modelCatalog({ check: true, refresh: true })
+    const operation = this.session.modelCatalog({
+      check: true,
+      refresh: true,
+      ...(background ? { background: true } : {}),
+    })
     const poll = async (): Promise<void> => {
+      let intervalMs = background ? 2_000 : 750
       while (!settled && generation === this.generation) {
-        await delay(500)
+        await delay(intervalMs)
         if (settled || generation !== this.generation) return
         try {
           const snapshot = await this.session.modelCatalog()
@@ -88,6 +103,7 @@ export class ModelCatalogDirectory {
             this.store.set({ value: snapshot.value, status: 'ready', error: null })
           }
         } catch { /* the owning check request reports transport failure */ }
+        intervalMs = Math.min(5_000, Math.round(intervalMs * 1.6))
       }
     }
     void poll()
@@ -202,14 +218,17 @@ export class ModelCatalogDirectory {
   private invalidate(clear = false): void {
     this.generation += 1
     this.inflight = undefined
+    this.checkInflight = undefined
     const value = clear ? null : this.store.getSnapshot().value
     this.store.set({ value, status: 'idle', error: null })
   }
 
   /** Invalidate and reload the catalog after a Host-side model input changes. */
-  refresh(check = false): void {
+  refresh(check = false): Promise<ModelCatalog> {
     this.invalidate()
-    void (check ? this.checkAll() : this.sync()).catch(() => { /* the selector exposes the shared error */ })
+    const operation = check ? this.checkAll() : this.sync()
+    void operation.catch(() => { /* the selector exposes the shared error */ })
+    return operation
   }
 
   /** Clear Host-specific values and load the replacement Host generation. */

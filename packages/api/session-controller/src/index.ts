@@ -18,7 +18,7 @@ import { SessionControlController } from './control.ts'
 import { SessionHistoryController } from './history.ts'
 import { SessionFileReferences } from './file-references.ts'
 import { ApiSessionList, DEFAULT_COLD_BLANK_PROBE_MAX_BYTES } from './list.ts'
-import { buildModelCatalog, invalidateModelCatalog } from './catalog.ts'
+import { BACKGROUND_PROBE_CONCURRENCY, buildModelCatalog, invalidateModelCatalog } from './catalog.ts'
 import { installModelSelectionProjection } from './model-selection-projection.ts'
 import { SessionSkillCatalog } from './skill-catalog.ts'
 import type {
@@ -260,10 +260,17 @@ export class SessionController extends TypertRemoteService {
   modelCatalog(request?: {
     readonly check?: boolean
     readonly refresh?: boolean
+    /** Low-resource startup probe; explicit user checks omit this flag. */
+    readonly background?: boolean
     readonly provider?: string
     readonly model?: string
   }): Promise<ModelCatalog> {
-    return buildModelCatalog(this.ctx, undefined, request)
+    if (request?.background !== true) return buildModelCatalog(this.ctx, undefined, request)
+    const { background: _background, ...options } = request
+    return buildModelCatalog(this.ctx, undefined, {
+      ...options,
+      concurrency: BACKGROUND_PROBE_CONCURRENCY,
+    })
   }
 
   /**

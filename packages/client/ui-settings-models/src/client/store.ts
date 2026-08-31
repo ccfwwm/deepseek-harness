@@ -115,6 +115,7 @@ export interface ModelsWire {
 type ModelCatalogCall = (input?: {
   check?: boolean
   refresh?: boolean
+  background?: boolean
   provider?: string
   model?: string
 }) => Promise<{ ok: boolean; value?: RuntimeModelCatalog; error?: { message?: string } }>
@@ -245,14 +246,14 @@ export class ModelsSettingsStore {
   ) {}
 
   /** Refresh or run real provider probes for the host-owned model catalog. */
-  async syncModels(check = false, refresh = false): Promise<void> {
+  async syncModels(check = false, refresh = false, background = false): Promise<void> {
     const modelCatalog = this.api.session?.modelCatalog as unknown as ModelCatalogCall | undefined
     if (modelCatalog === undefined) return
     // Metadata and health are separate phases. The metadata phase publishes
     // selectable rows immediately; health then probes each exact route.
     if (check) {
       await this.syncModels(false, refresh)
-      await this.checkAllModels()
+      await this.checkAllModels(refresh, background)
       return
     }
     this.store.update((s) => {
@@ -279,18 +280,39 @@ export class ModelsSettingsStore {
     }
   }
 
-  private async checkAllModels(): Promise<void> {
-    const snapshot = this.store.getSnapshot()
-    const targets = (snapshot.catalogGroups ?? []).flatMap(group => group.models.map(model => ({ provider: group.id, model: model.id })))
-    let next = 0
-    const worker = async (): Promise<void> => {
-      while (next < targets.length) {
-        const target = targets[next++]
-        if (target === undefined) return
-        await this.checkModel(target.provider, target.model)
-      }
+  private async checkAllModels(refresh: boolean, background: boolean): Promise<void> {
+    const modelCatalog = this.api.session?.modelCatalog as unknown as ModelCatalogCall | undefined
+    if (modelCatalog === undefined) return
+    this.store.update((s) => {
+      s.catalogStatus = 'checking'
+      s.catalogCheckingKey = null
+      s.catalogError = null
+      s.catalogGroups = (s.catalogGroups ?? []).map(group => ({
+        ...group,
+        models: group.models.map(model => ({ ...model, status: 'checking' as const })),
+      }))
+    })
+    try {
+      const response = await modelCatalog({
+        check: true,
+        ...(refresh ? { refresh: true } : {}),
+        ...(background ? { background: true } : {}),
+      })
+      if (!response.ok || response.value === undefined) throw new Error(response.error?.message ?? 'model check failed')
+      const value = response.value
+      this.store.update((s) => {
+        s.catalogGroups = value.groups
+        s.catalogFailures = value.failures
+        s.catalogStatus = 'ready'
+        s.catalogError = null
+        s.catalogUpdatedAt = Date.now()
+      })
+    } catch (error) {
+      this.store.update((s) => {
+        s.catalogStatus = (s.catalogGroups ?? []).length === 0 ? 'error' : 'ready'
+        s.catalogError = messageOf(error)
+      })
     }
-    await Promise.all(Array.from({ length: Math.min(3, Math.max(1, targets.length)) }, () => worker()))
   }
 
   /** Probe one exact provider/model route without rechecking the catalog. */
@@ -443,17 +465,20 @@ export class ModelsSettingsStore {
       // Always bypass the Host-generation cache on first launch. A metadata
       // catalog may have been populated just before this store mounted, and
       // without refresh the UI can remain at "未检测" for the whole session.
-      void this.syncModels(false, true).then(() => this.checkAllModels()).then(() => {
-        const snapshot = this.store.getSnapshot()
-        if (snapshot.catalogStatus === 'error' && this.startupRetryCount < 3) {
-          this.startupRetryCount += 1
-          this.startupProbeStarted = false
-          this.startupRetryTimer = setTimeout(() => {
-            this.startupRetryTimer = undefined
-            void this.load()
-          }, 1500)
-        }
-      })
+      this.startupRetryTimer = setTimeout(() => {
+        this.startupRetryTimer = undefined
+        void this.syncModels(true, false, true).then(() => {
+          const snapshot = this.store.getSnapshot()
+          if (snapshot.catalogStatus === 'error' && this.startupRetryCount < 3) {
+            this.startupRetryCount += 1
+            this.startupProbeStarted = false
+            this.startupRetryTimer = setTimeout(() => {
+              this.startupRetryTimer = undefined
+              void this.load()
+            }, 1500)
+          }
+        })
+      }, 0)
     }
   }
 }
