@@ -215,7 +215,10 @@ export class ModelCatalogDirectory {
 
   /** Clear Host-specific values and load the replacement Host generation. */
   resetGeneration(): void {
-    this.invalidate(true)
+    // Preserve the last good directory while the replacement Host generation
+    // is handshaking. Selectors remain usable during reconnect and receive the
+    // new metadata atomically once it is available.
+    this.invalidate(false)
     void this.load().catch(() => { /* the selector exposes the shared error */ })
   }
 }
