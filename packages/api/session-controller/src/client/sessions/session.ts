@@ -94,6 +94,7 @@ export class Session implements SessionFace {
    * engaging edge of the phase machine (see ComposerPhase).
    */
   private promptAttempted = false
+  private nextSubmissionRequestId: SessionRequestId | undefined
   /** A first accepted prompt stays in the engaging phase until its turn is observable. */
   private firstPromptPendingTurn = false
   /** Empty-log mirror (see ConversationSnapshot.blank); unknown bare sessions begin conservatively blank. */
@@ -194,6 +195,7 @@ export class Session implements SessionFace {
       images: input.images,
     }]
     this.submissionSettlements.set(requestId, { onRetire: input.onRetire, retiring: false })
+    this.nextSubmissionRequestId = requestId
     // The blank → engaging edge flips here, ahead of prompt(): the composer
     // docks and the echo renders on the click's own frame.
     this.promptAttempted = true
@@ -215,6 +217,7 @@ export class Session implements SessionFace {
     signal?: AbortSignal,
     requestId?: SessionRequestId,
   ): Promise<ClientResult<{ accepted: true }>> {
+    const effectiveRequestId = requestId ?? this.nextSubmissionRequestId
     this.promptError = null
     this.lastAgentError = null
     // Synchronous, before the first await: the blank → engaging edge must be
@@ -228,7 +231,7 @@ export class Session implements SessionFace {
       if (this.address === undefined) {
         const clientTimeZone = resolvedClientTimeZone()
         result = toSessionResult(await this.remote.session.prompt({
-          requestId: requestId ?? randomUUID() as SessionRequestId,
+          requestId: effectiveRequestId ?? randomUUID() as SessionRequestId,
           sessionId: this.sessionId,
           mode,
           content,
@@ -267,11 +270,12 @@ export class Session implements SessionFace {
           result = routed.ok ? { ok: true, value: { accepted: true } } : routed
         }
       }
+      this.nextSubmissionRequestId = undefined
     } catch (error) {
       result = transportResult(error)
     }
     if (!result.ok) {
-      if (requestId !== undefined) this.retireFailedSubmission(requestId)
+      if (effectiveRequestId !== undefined) this.retireFailedSubmission(effectiveRequestId)
       this.promptError = { op: 'send', error: result.error }
       this.notifier.markDirty()
       return result

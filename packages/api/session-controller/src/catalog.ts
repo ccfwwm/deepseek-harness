@@ -28,14 +28,15 @@ export interface ModelCatalogOptions {
 // Gateways behind Sub2API can spend several seconds on cold routing and
 // authentication. Eight seconds made healthy models appear unavailable; the
 // explicit check remains bounded while matching the account client's 20s cap.
-const DEFAULT_PROBE_TIMEOUT_MS = 20_000
-const DEFAULT_PROBE_CONCURRENCY = 3
+const DEFAULT_PROBE_TIMEOUT_MS = 120_000
+const DEFAULT_PROBE_CONCURRENCY = 8
 
 interface CatalogCache {
   value?: ModelCatalog
   checked: boolean
   metadataInflight?: Promise<ModelCatalog> | undefined
   checkInflight?: Promise<ModelCatalog> | undefined
+  visionSupported: Set<string>
 }
 
 const catalogCaches = new WeakMap<object, CatalogCache>()
@@ -94,7 +95,7 @@ function catalogCacheFor(ctx: Context): CatalogCache {
   const key = ctx as object
   const existing = catalogCaches.get(key)
   if (existing !== undefined) return existing
-  const created: CatalogCache = { checked: false }
+  const created: CatalogCache = { checked: false, visionSupported: new Set() }
   catalogCaches.set(key, created)
   return created
 }
@@ -158,23 +159,28 @@ async function modelEntry(
     name: model.name,
     ...(model.description === undefined ? {} : { description: model.description }),
     ...(model.inputModalities === undefined ? {} : { inputModalities: [...model.inputModalities] }),
+    ...(model.reasoning === undefined ? {} : { reasoning: {
+      efforts: model.reasoning.efforts.map(effort => ({
+        id: effort.id,
+        name: effort.name,
+        ...(effort.description === undefined ? {} : { description: effort.description }),
+      })),
+      ...(model.reasoning.defaultEffort === undefined ? {} : { defaultEffort: model.reasoning.defaultEffort }),
+    } }),
   }
-  // Metadata catalog construction must remain local and fast. Resolving a
-  // provider route can perform network/auth work, so defer it to the explicit
-  // health-check path instead of blocking the first model list.
-  if (options.check !== true) return entry
+  // Adapters now expose local reasoning declarations from listModels(). Keep a
+  // compatibility fallback for older adapters whose resolver is synchronous;
+  // failures are ignored and never prevent the metadata catalog from loading.
+  if (options.check !== true && model.reasoning === undefined) {
+    try {
+      const resolved = await ctx.llm.resolveModelInfo(provider, model.id)
+      if (resolved.reasoning !== undefined) entry = { ...entry, reasoning: toModelReasoning(resolved.reasoning) }
+    } catch { /* metadata-only catalog remains usable without enrichment */ }
+    return entry
+  }
   try {
     const resolved = await ctx.llm.resolveModelInfo(provider, model.id)
-    const reasoning: ModelReasoning | undefined = resolved.reasoning === undefined
-      ? undefined
-      : {
-        efforts: resolved.reasoning.efforts.map(effort => ({
-          id: effort.id,
-          name: effort.name,
-          ...(effort.description === undefined ? {} : { description: effort.description }),
-        })),
-        ...(resolved.reasoning.defaultEffort === undefined ? {} : { defaultEffort: resolved.reasoning.defaultEffort }),
-      }
+    const reasoning: ModelReasoning | undefined = resolved.reasoning === undefined ? undefined : toModelReasoning(resolved.reasoning)
     entry = {
       ...entry,
       ...(model.description ?? resolved.description) === undefined
@@ -204,11 +210,22 @@ async function modelEntry(
     status = availabilityOfError(error)
   }
 
-  let visionStatus: ModelVisionStatus = 'unknown'
+  const visionKey = `${provider}:${model.id}`
+  let visionStatus: ModelVisionStatus = catalogCacheFor(ctx).visionSupported.has(visionKey) ? 'supported' : 'unknown'
   let visionMessage: string | undefined
   try {
+    if (visionStatus === 'supported') {
+      return {
+        ...entry,
+        status,
+        ...(statusMessage === undefined ? {} : { statusMessage }),
+        visionStatus,
+        lastCheckedAt: checkedAt,
+      }
+    }
     const vision = await probeVisionWithTimeout(signal => ctx.llm.probeVision(provider, model.id, signal), options.timeoutMs)
     visionStatus = vision.status
+    if (visionStatus === 'supported') catalogCacheFor(ctx).visionSupported.add(visionKey)
     visionMessage = vision.message === undefined ? undefined : redact(vision.message)
   } catch (error) {
     visionMessage = redact(safeMessage(error))
@@ -220,6 +237,17 @@ async function modelEntry(
     visionStatus,
     ...(visionMessage === undefined ? {} : { visionMessage }),
     lastCheckedAt: checkedAt,
+  }
+}
+
+function toModelReasoning(reasoning: NonNullable<import('@deepseek-ai/dsh-llm').LlmResolvedModelInfo['reasoning']>): ModelReasoning {
+  return {
+    efforts: reasoning.efforts.map(effort => ({
+      id: effort.id,
+      name: effort.name,
+      ...(effort.description === undefined ? {} : { description: effort.description }),
+    })),
+    ...(reasoning.defaultEffort === undefined ? {} : { defaultEffort: reasoning.defaultEffort }),
   }
 }
 

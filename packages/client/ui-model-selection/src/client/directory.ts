@@ -33,6 +33,12 @@ export interface ModelDirectoryState {
   status: 'idle' | 'loading' | 'ready' | 'selecting' | 'error'
   /** Whole-request or selection failure text; null when none. */
   error: string | null
+  /** Exact routes currently being probed. */
+  checkingModels?: ReadonlySet<string>
+  /** Whether a full catalog probe is in progress. */
+  checkingAll?: boolean
+  /** Whether a selectModel request is in flight. */
+  selectionInFlight?: boolean
 }
 
 /** One session's shared directory controller; disposed with the session scope. */
@@ -40,6 +46,7 @@ export class ModelDirectory {
   /** The shared snapshot both entries render from (uSES-safe store). */
   readonly store: SnapshotStore<ModelDirectoryState> = createSnapshotStore<ModelDirectoryState>({
     current: null, routable: null, groups: [], failures: [], status: 'idle', error: null,
+    checkingModels: new Set(), checkingAll: false, selectionInFlight: false,
   })
 
   /** Latest selection operation wins; an older response never overwrites a newer one. */
@@ -112,7 +119,7 @@ export class ModelDirectory {
   async select(selection: ModelSelection): Promise<void> {
     this.assertAvailable()
     const generation = ++this.generation
-    this.store.update((s) => { s.status = 'selecting'; s.error = null })
+    this.store.update((s) => { s.status = 'selecting'; s.selectionInFlight = true; s.error = null })
     const result = await this.sessions.selectModel({
       sessionId: this.sessionId,
       provider: selection.provider,
@@ -126,10 +133,10 @@ export class ModelDirectory {
       return
     }
     if (!result.ok) {
-      this.store.update((s) => { s.status = 'error'; s.error = `${result.error.code}: ${result.error.message}` })
+      this.store.update((s) => { s.status = 'error'; s.selectionInFlight = false; s.error = `${result.error.code}: ${result.error.message}` })
       throw new Error(`session.selectModel failed: ${result.error.code}: ${result.error.message}`)
     }
-    this.store.update((s) => { s.status = 'ready'; s.error = null })
+    this.store.update((s) => { s.status = 'ready'; s.selectionInFlight = false; s.error = null })
     this.syncInputs()
   }
 
@@ -141,6 +148,7 @@ export class ModelDirectory {
     ++this.generation
     this.store.update((state) => {
       if (state.status === 'selecting') state.status = 'idle'
+      state.selectionInFlight = false
       state.error = null
     })
     this.syncInputs()
@@ -176,6 +184,9 @@ export class ModelDirectory {
         failures: [],
         status: 'ready',
         error: catalog.error,
+        checkingModels: modelsChecking(catalog.value),
+        checkingAll: false,
+        selectionInFlight: this.store.getSnapshot().selectionInFlight === true,
       })
       return
     }
@@ -196,6 +207,9 @@ export class ModelDirectory {
         failures: [],
         status: catalog.status === 'error' ? 'error' : 'loading',
         error: catalog.error,
+        checkingModels: modelsChecking(catalog.value),
+        checkingAll: false,
+        selectionInFlight: this.store.getSnapshot().selectionInFlight === true,
       })
       return
     }
@@ -210,8 +224,19 @@ export class ModelDirectory {
         ? 'selecting'
         : 'ready',
       error: null,
+      checkingModels: modelsChecking(catalog.value),
+      checkingAll: false,
+      selectionInFlight: this.store.getSnapshot().selectionInFlight === true,
     })
   }
+}
+
+function modelsChecking(value: import('@deepseek-ai/dsh-api-remotes/client').ModelCatalog | null): ReadonlySet<string> {
+  const keys = new Set<string>()
+  for (const group of value?.groups ?? []) {
+    for (const model of group.models) if (model.status === 'checking') keys.add(`${group.id}:${model.id}`)
+  }
+  return keys
 }
 
 function modelSelectionProjection(value: unknown): ModelSelectionProjection | undefined {
