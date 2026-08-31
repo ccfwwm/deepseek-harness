@@ -331,7 +331,8 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
   const catalogTime = state.catalogUpdatedAt === undefined || state.catalogUpdatedAt === null
     ? null
     : new Date(state.catalogUpdatedAt).toLocaleString()
-  const catalogBusy = catalogStatus === 'loading' || catalogStatus === 'checking'
+  const catalogBusy = catalogStatus === 'loading'
+  const catalogChecking = catalogStatus === 'checking'
 
   return (
     <div className={styles['section']}>
@@ -347,8 +348,8 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
             <button type="button" className={styles['secondaryButton']} disabled={catalogBusy} onClick={() => { void controller.syncModels(false, true) }}>
               {catalogBusy && catalogStatus === 'loading' ? t('syncingModels') : t('syncModels')}
             </button>
-            <button type="button" className={styles['primaryButton']} disabled={catalogBusy} onClick={() => { void controller.syncModels(true, true) }}>
-              {catalogBusy && catalogStatus === 'checking' ? t('checkingModels') : t('checkAllModels')}
+            <button type="button" className={styles['primaryButton']} disabled={catalogChecking} onClick={() => { void controller.syncModels(true, true) }}>
+              {catalogChecking ? t('checkingModels') : t('checkAllModels')}
             </button>
           </div>
         </div>
@@ -368,7 +369,7 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
                     <button
                       type="button"
                       className={styles['runtimeModelCheck']}
-                      disabled={catalogBusy || catalogCheckingKey === `${group.id}:${model.id}`}
+                      disabled={catalogCheckingKey === `${group.id}:${model.id}`}
                       aria-label={t('checkModel').replace('{model}', model.name)}
                       title={t('checkModel').replace('{model}', model.name)}
                       onClick={() => { void controller.checkModel(group.id, model.id) }}

@@ -42,7 +42,7 @@ describe('ModelCatalogDirectory', () => {
     expect(subject.store.getSnapshot().value).toEqual(completedCatalog)
   })
 
-  it('coalesces concurrent startup checks into one incremental route probe', async () => {
+  it('coalesces concurrent startup checks into one detached host probe', async () => {
     const initial = catalog('one')
     const completed = Promise.withResolvers<unknown>()
     const models = vi.fn((request?: { check?: boolean; background?: boolean }) => request?.check === true
@@ -56,7 +56,7 @@ describe('ModelCatalogDirectory', () => {
     expect(second).toBe(first)
     await Promise.resolve()
     expect(models.mock.calls.filter(([request]) => request?.check === true)).toEqual([[
-      { check: true, refresh: true, provider: 'fixture', model: 'one' },
+      { check: true, refresh: true, background: true },
     ]])
 
     completed.resolve({ ok: true, value: initial })

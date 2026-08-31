@@ -88,6 +88,13 @@ export class ModelCatalogDirectory {
   }
 
   private async runIncrementalCheck(background: boolean): Promise<ModelCatalog> {
+    if (background) {
+      const generation = this.generation
+      const response = await this.session.modelCatalog({ check: true, refresh: true, background: true })
+      if (!response.ok) throw new Error(`${response.error.code}: ${response.error.message}`)
+      if (generation === this.generation) this.accept(response.value)
+      return response.value
+    }
     const catalog = await this.load()
     const generation = this.generation
     const targets = catalog.groups.flatMap(group => group.models.map(model => ({ provider: group.id, model: model.id })))

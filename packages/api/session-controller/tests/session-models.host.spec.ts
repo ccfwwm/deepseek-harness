@@ -606,6 +606,9 @@ describe('Web session model selection', () => {
 
     const first = remote.modelCatalog({ check: true, refresh: true, background: true })
     const second = remote.modelCatalog({ check: true, refresh: true, background: true })
+    // Background calls return metadata immediately; the health batch continues
+    // in the Host and publishes incremental catalog events.
+    await expect(Promise.all([first, second])).resolves.toHaveLength(2)
     await vi.waitFor(() => { expect(active).toBe(2) })
     const metadata = expectValue(await remote.modelCatalog())
     expect(metadata.groups.find(group => group.id === 'background-check')?.models
@@ -613,7 +616,7 @@ describe('Web session model selection', () => {
     expect(maximum).toBe(2)
 
     gate.resolve(undefined)
-    await expect(Promise.all([first, second])).resolves.toHaveLength(2)
+    await vi.waitFor(() => { expect(calls).toBe(6) })
     expect(calls).toBe(6)
     expect(maximum).toBe(2)
     await ctx.fiber.dispose()
