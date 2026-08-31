@@ -1,5 +1,5 @@
 /** Page-store join: directory × namespaces × credentials, with last-good rows on failure. */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { RpcResponse } from '@deepseek-ai/dsh-api-remotes/client'
 import { SettingsDescribeMirror } from '@deepseek-ai/dsh-client-ui-settings/src/client/settings-mirror.ts'
 import { settingsSchema } from './settings-schema.client.ts'
@@ -107,6 +107,30 @@ function api(overrides: {
 }
 
 describe('ModelsSettingsStore', () => {
+  it('uses one background Host batch instead of probing every model from the settings page', async () => {
+    const { face, mirror } = api()
+    const catalog = {
+      default: { provider: 'fixture', model: 'one' },
+      routableProviders: ['fixture'],
+      groups: [{ id: 'fixture', name: 'Fixture', models: [
+        { id: 'one', name: 'One' },
+        { id: 'two', name: 'Two' },
+      ] }],
+      failures: [],
+    }
+    const modelCatalog = vi.fn(() => Promise.resolve(remoteOk(catalog)))
+    ;(face as unknown as { session: { modelCatalog: typeof modelCatalog } }).session = { modelCatalog }
+    const store = new ModelsSettingsStore(face, settingsSchema, mirror)
+
+    await store.syncModels(true, false, true)
+
+    expect(modelCatalog.mock.calls).toEqual([
+      [{}],
+      [{ check: true, background: true }],
+    ])
+    expect(store.store.getSnapshot()).toMatchObject({ catalogStatus: 'ready', catalogGroups: catalog.groups })
+  })
+
   it('joins rows with configured, removable, and credential state', async () => {
     const { face, mirror, seenRefs } = api()
     const store = new ModelsSettingsStore(face, settingsSchema, mirror)

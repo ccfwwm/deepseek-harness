@@ -30,6 +30,8 @@ export interface ModelCatalogOptions {
 // explicit check remains bounded while matching the account client's 20s cap.
 const DEFAULT_PROBE_TIMEOUT_MS = 120_000
 const DEFAULT_PROBE_CONCURRENCY = 8
+/** Startup probes yield network capacity to conversations, Skills, MCP, and file work. */
+export const BACKGROUND_PROBE_CONCURRENCY = 2
 
 interface CatalogCache {
   value?: ModelCatalog

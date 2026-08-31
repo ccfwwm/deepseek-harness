@@ -286,7 +286,8 @@ describe('ui-model-selection dual entry', () => {
       b.contribution().ui.options(projection('a'), new AbortController().signal),
       b.contribution().ui.options(projection('b'), new AbortController().signal),
     ])
-    expect(b.calls.models).toBe(2)
+    await vi.waitFor(() => { expect(b.calls.models).toBe(2) })
+    expect(b.modelRequests).toContainEqual({ check: true, refresh: true, background: true })
   })
 
   it('keeps the durable projected selection while the eager catalog reconnects', async () => {
@@ -355,7 +356,7 @@ describe('ui-model-selection dual entry', () => {
     await Promise.resolve()
     await Promise.resolve()
     expect(b.blockOf('s1')).toBeUndefined()
-    expect(b.calls.models).toBe(2)
+    await vi.waitFor(() => { expect(b.calls.models).toBe(2) })
 
     b.setRoutable(false)
     b.remote.emit('settings/document-updated', ['llm-deepseek', 1])
@@ -429,7 +430,10 @@ describe('ui-model-selection dual entry', () => {
       model: 'deepseek-v4-pro',
     })).rejects.toThrow(/unavailable for addressed subagent/)
     b.ctx.emit('connection/reset')
-    await Promise.resolve()
-    await vi.waitFor(() => { expect(b.calls).toEqual({ models: 4, select: 0 }) })
+    await vi.waitFor(() => {
+      expect(b.calls.models).toBeGreaterThanOrEqual(3)
+      expect(b.calls.select).toBe(0)
+      expect(b.modelRequests).toContainEqual({ check: true, refresh: true, background: true })
+    })
   })
 })

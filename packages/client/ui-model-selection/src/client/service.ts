@@ -40,6 +40,7 @@ export class ModelDirectoryResolver extends Service {
 
   /** Localized composer-block copy; this plugin owns the string it raises. */
   private readonly blockReason: () => string
+  private cancelScheduledCheck: (() => void) | undefined
 
   /**
    * @param ctx - owning root context (the service registers itself as `models`).
@@ -49,26 +50,43 @@ export class ModelDirectoryResolver extends Service {
     super(ctx, 'modelDirectories')
     this.blockReason = config.blockReason
     this.catalog = new ModelCatalogDirectory(ctx.remote.session)
-    // Publish metadata immediately, then probe each model independently in the
-    // background. This keeps the selector usable while health checks run.
+    // Publish metadata immediately. The health batch is posted at browser
+    // background priority so plugin mounting and the first interactive work
+    // reach the Host first.
     void this.catalog.load()
-      .then(() => this.catalog.checkAll())
+      .then(() => { this.scheduleBackgroundCheck() })
       .catch(() => { /* selectors expose the shared error */ })
     ctx.on('connection/reset', () => {
       this.catalog.resetGeneration()
-      void this.catalog.load().then(() => this.catalog.checkAll()).catch(() => { /* selector exposes error */ })
+      void this.catalog.load().then(() => { this.scheduleBackgroundCheck() }).catch(() => { /* selector exposes error */ })
       for (const directory of this.live.directories.values()) directory.resetConnected()
     })
-    ctx.remote.$on('llm/adapters-updated', () => { this.catalog.refresh(true) })
+    ctx.remote.$on('llm/adapters-updated', () => { this.refreshInBackground() })
     ctx.remote.$on('settings/document-updated', (namespace) => {
       const key = String(namespace)
       // selectModel persists the accepted default through this namespace. It
       // changes only the selection, not provider health, so probing every model
       // here would gray the menu and delay the close after every selection.
-      if (key === 'agent-default-model') this.catalog.refresh(false)
-      else if (key.startsWith('llm-')) this.catalog.refresh(true)
+      if (key === 'agent-default-model') void this.catalog.refresh(false)
+      else if (key.startsWith('llm-')) this.refreshInBackground()
     })
-    ctx.remote.$on('credentials/reference-updated', () => { this.catalog.refresh(true) })
+    ctx.remote.$on('credentials/reference-updated', () => { this.refreshInBackground() })
+    ctx.effect(() => () => { this.cancelScheduledCheck?.() }, 'ui-model-selection: background model probe')
+  }
+
+  private refreshInBackground(): void {
+    this.cancelScheduledCheck?.()
+    void this.catalog.refresh(false)
+      .then(() => { this.scheduleBackgroundCheck() })
+      .catch(() => { /* selectors expose the shared error */ })
+  }
+
+  private scheduleBackgroundCheck(): void {
+    this.cancelScheduledCheck?.()
+    this.cancelScheduledCheck = postBackgroundTask(() => {
+      this.cancelScheduledCheck = undefined
+      void this.catalog.checkAll(true).catch(() => { /* selectors expose the shared error */ })
+    })
   }
 
   /**
@@ -121,4 +139,18 @@ export class ModelDirectoryResolver extends Service {
     }, 'ui-model-selection: session directory')
     return directory
   }
+}
+
+/** Schedule outside the plugin activation turn, using Chromium background priority when available. */
+function postBackgroundTask(task: () => void): () => void {
+  const scheduler = (globalThis as { scheduler?: {
+    postTask(callback: () => void, options: { priority: 'background'; signal: AbortSignal }): Promise<unknown>
+  } }).scheduler
+  if (scheduler !== undefined) {
+    const controller = new AbortController()
+    void scheduler.postTask(task, { priority: 'background', signal: controller.signal }).catch(() => {})
+    return () => { controller.abort() }
+  }
+  const timer = setTimeout(task, 0)
+  return () => { clearTimeout(timer) }
 }
