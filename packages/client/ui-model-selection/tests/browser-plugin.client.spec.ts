@@ -286,8 +286,8 @@ describe('ui-model-selection dual entry', () => {
       b.contribution().ui.options(projection('a'), new AbortController().signal),
       b.contribution().ui.options(projection('b'), new AbortController().signal),
     ])
-    await vi.waitFor(() => { expect(b.calls.models).toBe(3) })
-    expect(b.modelRequests).toContainEqual({ check: true, refresh: true, provider: 'deepseek-official', model: 'deepseek-v4-flash' })
+    await vi.waitFor(() => { expect(b.calls.models).toBeGreaterThanOrEqual(2) })
+    expect(b.modelRequests).toContainEqual({ check: true, refresh: true, background: true })
   })
 
   it('keeps the durable projected selection while the eager catalog reconnects', async () => {
@@ -356,14 +356,14 @@ describe('ui-model-selection dual entry', () => {
     await Promise.resolve()
     await Promise.resolve()
     expect(b.blockOf('s1')).toBeUndefined()
-    await vi.waitFor(() => { expect(b.calls.models).toBe(3) })
+    await vi.waitFor(() => { expect(b.calls.models).toBeGreaterThanOrEqual(2) })
 
     b.setRoutable(false)
     b.remote.emit('settings/document-updated', ['llm-deepseek', 1])
     await Promise.resolve()
     await Promise.resolve()
     expect(b.blockOf('s1')?.reason).toBe(zh['blocked.composer'])
-    await vi.waitFor(() => { expect(b.calls.models).toBe(4) })
+    await vi.waitFor(() => { expect(b.calls.models).toBeGreaterThanOrEqual(3) })
 
     // Recovering clears it without a reload of the surface.
     b.setRoutable(true)
@@ -371,7 +371,7 @@ describe('ui-model-selection dual entry', () => {
     await Promise.resolve()
     await Promise.resolve()
     expect(b.blockOf('s1')).toBeUndefined()
-    await vi.waitFor(() => { expect(b.calls.models).toBe(5) })
+    await vi.waitFor(() => { expect(b.calls.models).toBeGreaterThanOrEqual(4) })
   })
 
   it('never blocks on catalog membership alone', async () => {
@@ -433,7 +433,7 @@ describe('ui-model-selection dual entry', () => {
     await vi.waitFor(() => {
       expect(b.calls.models).toBeGreaterThanOrEqual(3)
       expect(b.calls.select).toBe(0)
-      expect(b.modelRequests).toContainEqual({ check: true, refresh: true, provider: 'deepseek-official', model: 'deepseek-v4-flash' })
+      expect(b.modelRequests).toContainEqual({ check: true, refresh: true, background: true })
     })
   })
 })

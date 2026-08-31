@@ -16,6 +16,7 @@ import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import { ModelCatalogDirectory } from './catalog.ts'
 import { ModelDirectory } from './directory.ts'
 
@@ -41,6 +42,8 @@ export class ModelDirectoryResolver extends Service {
   /** Localized composer-block copy; this plugin owns the string it raises. */
   private readonly blockReason: () => string
   private cancelScheduledCheck: (() => void) | undefined
+  private startupGeneration: number | undefined
+  private startupAttempted = false
 
   /**
    * @param ctx - owning root context (the service registers itself as `models`).
@@ -50,19 +53,53 @@ export class ModelDirectoryResolver extends Service {
     super(ctx, 'modelDirectories')
     this.blockReason = config.blockReason
     this.catalog = new ModelCatalogDirectory(ctx.remote.session)
-    // Publish metadata immediately. The health batch is posted at browser
-    // background priority so plugin mounting and the first interactive work
-    // reach the Host first.
-    void this.catalog.load()
-      .then(() => { this.scheduleBackgroundCheck() })
-      .catch(() => { this.retryStartupLoad() })
-    ctx.on('connection/reset', () => {
-      // Keep the last known catalog/status across reconnects. Metadata is
-      // refreshed in the background and health probes are started separately.
+    let connection: ConnectionHandle | undefined
+    try { connection = ctx.get('connection') as ConnectionHandle } catch { connection = undefined }
+    // A service can be constructed before the transport handshake. Subscribe
+    // to the connection generation so startup is retried when the Host really
+    // becomes ready instead of relying on a one-shot reset event.
+    const loadForGeneration = (generation?: number): void => {
+      if (generation !== undefined) this.startupGeneration = generation
       this.catalog.resetGeneration()
-      void this.catalog.load().then(() => { this.scheduleBackgroundCheck() }).catch(() => { this.retryStartupLoad() })
+      void this.catalog.load()
+        .then(() => { this.scheduleBackgroundCheck() })
+        .catch(() => {
+          this.startupGeneration = undefined
+          this.retryStartupLoad()
+        })
       for (const directory of this.live.directories.values()) directory.resetConnected()
-    })
+    }
+    const startGeneration = (): void => {
+      const generation = connection?.generation.getSnapshot()?.id
+      if (generation === undefined || generation === this.startupGeneration) {
+        if (generation === undefined && !this.startupAttempted) {
+          this.startupAttempted = true
+          void this.catalog.load().then(() => { this.scheduleBackgroundCheck() }).catch(() => { this.retryStartupLoad() })
+        }
+        return
+      }
+      this.startupGeneration = generation
+      this.startupAttempted = true
+      loadForGeneration(generation)
+    }
+    const generationApi = connection?.generation
+    const hasGenerationApi = generationApi !== undefined && typeof generationApi.subscribe === 'function'
+    const stopGeneration = hasGenerationApi ? generationApi.subscribe(startGeneration) : (() => {})
+    // Always issue one eager metadata request. On a real browser transport it
+    // may race the handshake and be retried by the generation callback; in
+    // fixtures and embedded clients it is the complete startup path.
+    if (!this.startupAttempted) {
+      this.startupAttempted = true
+      void this.catalog.load().then(() => { this.scheduleBackgroundCheck() }).catch(() => { this.retryStartupLoad() })
+    }
+    if (!hasGenerationApi) {
+      ctx.on('connection/reset', () => { loadForGeneration() })
+    } else {
+      startGeneration()
+      // The API gateway emits this compatibility event on reconnect. It is
+      // harmless when the generation callback already handled the same turn.
+      ctx.on('connection/reset', startGeneration)
+    }
     ctx.remote.$on('llm/adapters-updated', () => { this.refreshInBackground() })
     ctx.remote.$on('api-session/model-catalog', (value) => { this.catalog.accept(value) })
     ctx.remote.$on('settings/document-updated', (namespace) => {
@@ -74,13 +111,32 @@ export class ModelDirectoryResolver extends Service {
       else if (key.startsWith('llm-')) this.refreshInBackground()
     })
     ctx.remote.$on('credentials/reference-updated', () => { this.refreshInBackground() })
-    ctx.effect(() => () => { this.cancelScheduledCheck?.() }, 'ui-model-selection: background model probe')
+    ctx.effect(() => () => {
+      stopGeneration()
+      this.cancelScheduledCheck?.()
+    }, 'ui-model-selection: background model probe')
   }
 
   private retryStartupLoad(): void {
-    this.cancelScheduledCheck?.()
+    if (this.cancelScheduledCheck !== undefined) return
     const timer = setTimeout(() => {
-      void this.catalog.load().then(() => { this.scheduleBackgroundCheck() }).catch(() => { /* retry on next connection/reset */ })
+      this.cancelScheduledCheck = undefined
+      let connection: ConnectionHandle | undefined
+      try { connection = this.ctx.get('connection') as ConnectionHandle } catch { connection = undefined }
+      const generation = connection?.generation.getSnapshot()?.id
+      if (generation === undefined) {
+        this.retryStartupLoad()
+        return
+      }
+      if (this.startupGeneration !== generation) {
+        this.startupGeneration = generation
+        void this.catalog.load()
+          .then(() => { this.scheduleBackgroundCheck() })
+          .catch(() => {
+            this.startupGeneration = undefined
+            this.retryStartupLoad()
+          })
+      }
     }, 1000)
     this.cancelScheduledCheck = () => clearTimeout(timer)
   }

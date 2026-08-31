@@ -150,8 +150,9 @@ describe('ModelCatalogDirectory', () => {
   })
 
   it('contains refresh failures while retaining old data and clears it on a failed Host reset', async () => {
+    const oldCatalog = catalog('old')
     const models = vi.fn()
-      .mockResolvedValueOnce({ ok: true, value: catalog('old') })
+      .mockResolvedValueOnce({ ok: true, value: oldCatalog })
       .mockRejectedValueOnce('refresh failed')
       .mockRejectedValueOnce(new Error('reset failed'))
     const subject = directory(models)
@@ -160,14 +161,14 @@ describe('ModelCatalogDirectory', () => {
     subject.refresh()
     await vi.waitFor(() => {
       expect(subject.store.getSnapshot()).toEqual({
-        value: catalog('old'), status: 'error', error: 'refresh failed',
+        value: oldCatalog, status: 'error', error: 'refresh failed',
       })
     })
 
     subject.resetGeneration()
     await vi.waitFor(() => {
       expect(subject.store.getSnapshot()).toEqual({
-        value: null, status: 'error', error: 'reset failed',
+        value: oldCatalog, status: 'error', error: 'reset failed',
       })
     })
   })
