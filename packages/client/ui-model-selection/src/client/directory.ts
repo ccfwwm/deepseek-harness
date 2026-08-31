@@ -39,6 +39,8 @@ export interface ModelDirectoryState {
   checkingAll?: boolean
   /** Whether a selectModel request is in flight. */
   selectionInFlight?: boolean
+  /** Exact provider/model currently being submitted. */
+  selectingKey: string | undefined
 }
 
 /** One session's shared directory controller; disposed with the session scope. */
@@ -46,7 +48,7 @@ export class ModelDirectory {
   /** The shared snapshot both entries render from (uSES-safe store). */
   readonly store: SnapshotStore<ModelDirectoryState> = createSnapshotStore<ModelDirectoryState>({
     current: null, routable: null, groups: [], failures: [], status: 'idle', error: null,
-    checkingModels: new Set(), checkingAll: false, selectionInFlight: false,
+    checkingModels: new Set(), checkingAll: false, selectionInFlight: false, selectingKey: undefined,
   })
 
   /** Latest selection operation wins; an older response never overwrites a newer one. */
@@ -119,7 +121,13 @@ export class ModelDirectory {
   async select(selection: ModelSelection): Promise<void> {
     this.assertAvailable()
     const generation = ++this.generation
-    this.store.update((s) => { s.status = 'selecting'; s.selectionInFlight = true; s.error = null })
+    const selectingKey = `${selection.provider}:${selection.model}`
+    this.store.update((s) => {
+      s.status = 'selecting'
+      s.selectionInFlight = true
+      s.selectingKey = selectingKey
+      s.error = null
+    })
     const result = await this.sessions.selectModel({
       sessionId: this.sessionId,
       provider: selection.provider,
@@ -133,10 +141,20 @@ export class ModelDirectory {
       return
     }
     if (!result.ok) {
-      this.store.update((s) => { s.status = 'error'; s.selectionInFlight = false; s.error = `${result.error.code}: ${result.error.message}` })
+      this.store.update((s) => {
+        s.status = 'error'
+        s.selectionInFlight = false
+        s.selectingKey = undefined
+        s.error = `${result.error.code}: ${result.error.message}`
+      })
       throw new Error(`session.selectModel failed: ${result.error.code}: ${result.error.message}`)
     }
-    this.store.update((s) => { s.status = 'ready'; s.selectionInFlight = false; s.error = null })
+    this.store.update((s) => {
+      s.status = 'ready'
+      s.selectionInFlight = false
+      s.selectingKey = undefined
+      s.error = null
+    })
     this.syncInputs()
   }
 
@@ -149,6 +167,7 @@ export class ModelDirectory {
     this.store.update((state) => {
       if (state.status === 'selecting') state.status = 'idle'
       state.selectionInFlight = false
+      state.selectingKey = undefined
       state.error = null
     })
     this.syncInputs()
@@ -187,6 +206,7 @@ export class ModelDirectory {
         checkingModels: modelsChecking(catalog.value),
         checkingAll: false,
         selectionInFlight: this.store.getSnapshot().selectionInFlight === true,
+        selectingKey: this.store.getSnapshot().selectingKey,
       })
       return
     }
@@ -210,6 +230,7 @@ export class ModelDirectory {
         checkingModels: modelsChecking(catalog.value),
         checkingAll: false,
         selectionInFlight: this.store.getSnapshot().selectionInFlight === true,
+        selectingKey: this.store.getSnapshot().selectingKey,
       })
       return
     }
@@ -227,6 +248,7 @@ export class ModelDirectory {
       checkingModels: modelsChecking(catalog.value),
       checkingAll: false,
       selectionInFlight: this.store.getSnapshot().selectionInFlight === true,
+      selectingKey: this.store.getSnapshot().selectingKey,
     })
   }
 }

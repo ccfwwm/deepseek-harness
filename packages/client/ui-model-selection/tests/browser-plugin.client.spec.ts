@@ -242,7 +242,7 @@ describe('ui-model-selection dual entry', () => {
       b.contribution().ui.options(projection('a'), new AbortController().signal),
       b.contribution().ui.options(projection('b'), new AbortController().signal),
     ])
-    expect(b.calls.models).toBe(1)
+    expect(b.calls.models).toBe(2)
   })
 
   it('keeps the durable projected selection while the eager catalog reconnects', async () => {
@@ -311,14 +311,14 @@ describe('ui-model-selection dual entry', () => {
     await Promise.resolve()
     await Promise.resolve()
     expect(b.blockOf('s1')).toBeUndefined()
-    expect(b.calls.models).toBe(1)
+    expect(b.calls.models).toBe(2)
 
     b.setRoutable(false)
     b.remote.emit('settings/document-updated', ['llm-deepseek', 1])
     await Promise.resolve()
     await Promise.resolve()
     expect(b.blockOf('s1')?.reason).toBe(zh['blocked.composer'])
-    expect(b.calls.models).toBe(2)
+    await vi.waitFor(() => { expect(b.calls.models).toBe(4) })
 
     // Recovering clears it without a reload of the surface.
     b.setRoutable(true)
@@ -326,7 +326,7 @@ describe('ui-model-selection dual entry', () => {
     await Promise.resolve()
     await Promise.resolve()
     expect(b.blockOf('s1')).toBeUndefined()
-    expect(b.calls.models).toBe(3)
+    await vi.waitFor(() => { expect(b.calls.models).toBe(6) })
   })
 
   it('never blocks on catalog membership alone', async () => {
@@ -386,6 +386,6 @@ describe('ui-model-selection dual entry', () => {
     })).rejects.toThrow(/unavailable for addressed subagent/)
     b.ctx.emit('connection/reset')
     await Promise.resolve()
-    expect(b.calls).toEqual({ models: 2, select: 0 })
+    await vi.waitFor(() => { expect(b.calls).toEqual({ models: 4, select: 0 }) })
   })
 })

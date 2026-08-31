@@ -12,8 +12,11 @@ import { assertNever } from './never.ts'
  * available when the model needs more content.
  */
 export function fileAttachmentText(attachment: Extract<ContentBlock, { type: 'file' }>['attachment']): string {
-  const preview = attachment.preview.trim()
+  const preview = attachment.preview?.trim() ?? ''
   const header = `[Untrusted attachment content: ${attachment.name}]`
+  if (attachment.parser === undefined || attachment.status === undefined || attachment.textChars === undefined) {
+    return `${header}\nThe original file is stored as attachment ${attachment.attachmentId}; its content has not been extracted. Use read_uploaded_file or extract_uploaded_file when the task requires its contents.\n[End untrusted attachment content]`
+  }
   const details = `Parser: ${attachment.parser}; status: ${attachment.status}; extracted characters: ${String(attachment.textChars)}.`
   if (preview === '') {
     return `${header}\n${details}\nNo inline text was extracted. Use read_uploaded_file with attachment id ${attachment.attachmentId} when appropriate.\n[End untrusted attachment content]`

@@ -51,7 +51,6 @@ export async function buildModelCatalog(
   const targeted = options.provider !== undefined || options.model !== undefined
   if (options.check !== true) {
     if (cache.value !== undefined) return cache.value
-    if (cache.checkInflight !== undefined) return cache.checkInflight
     if (cache.metadataInflight !== undefined) return cache.metadataInflight
     const operation = buildModelCatalogUncached(ctx, defaultSelection, {})
     cache.metadataInflight = operation
@@ -64,7 +63,7 @@ export async function buildModelCatalog(
     }
   }
   if (!targeted && options.refresh !== true && cache.checked && cache.value !== undefined) return cache.value
-  if (!targeted && options.refresh !== true && cache.checkInflight !== undefined) return cache.checkInflight
+  if (!targeted && cache.checkInflight !== undefined) return cache.checkInflight
   if (targeted) {
     const base = cache.value ?? await buildModelCatalog(ctx, defaultSelection, {})
     const value = await checkOneModel(ctx, base, options)
@@ -74,8 +73,8 @@ export async function buildModelCatalog(
     // probes every remaining model instead of treating unknown rows as fresh.
     return value
   }
-  const operation = buildModelCatalogUncached(ctx, defaultSelection, options)
-  if (options.refresh !== true) cache.checkInflight = operation
+  const operation = checkAllModels(ctx, defaultSelection, options)
+  cache.checkInflight = operation
   try {
     const value = await operation
     cache.value = value
@@ -83,6 +82,53 @@ export async function buildModelCatalog(
     return value
   } finally {
     if (cache.checkInflight === operation) cache.checkInflight = undefined
+  }
+}
+
+async function checkAllModels(
+  ctx: Context,
+  defaultSelection: ModelSelection,
+  options: ModelCatalogOptions,
+): Promise<ModelCatalog> {
+  const cache = catalogCacheFor(ctx)
+  const base = cache.value ?? await buildModelCatalogUncached(ctx, defaultSelection, {})
+  const checking: ModelCatalog = {
+    ...base,
+    groups: base.groups.map(group => ({
+      ...group,
+      models: group.models.map(model => ({ ...model, status: 'checking' as const })),
+    })),
+  }
+  cache.value = checking
+  const targets = checking.groups.flatMap(group => group.models.map(model => ({
+    provider: group.id,
+    model,
+  })))
+  await mapWithConcurrency(targets, options.concurrency ?? DEFAULT_PROBE_CONCURRENCY, async (target) => {
+    const checked = await modelEntry(ctx, target.provider, {
+      provider: target.provider,
+      id: target.model.id,
+      name: target.model.name,
+      ...(target.model.description === undefined ? {} : { description: target.model.description }),
+      ...(target.model.inputModalities === undefined ? {} : { inputModalities: [...target.model.inputModalities] }),
+    }, { ...options, check: true })
+    const entry = target.model.reasoning === undefined ? checked : { ...checked, reasoning: target.model.reasoning }
+    cache.value = replaceModel(cache.value ?? checking, target.provider, target.model.id, entry)
+  })
+  return cache.value ?? checking
+}
+
+function replaceModel(
+  catalog: ModelCatalog,
+  provider: string,
+  model: string,
+  entry: ModelCatalogModel,
+): ModelCatalog {
+  return {
+    ...catalog,
+    groups: catalog.groups.map(group => group.id !== provider
+      ? group
+      : { ...group, models: group.models.map(candidate => candidate.id === model ? entry : candidate) }),
   }
 }
 

@@ -379,7 +379,6 @@ describe('Web session model selection', () => {
     }))
     ctx.llm.registerAdapter(['string-failure'], new class extends CatalogAdapter {
       override listModels(): Promise<readonly LlmModelInfo[]> {
-        // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- non-Error provider normalization is the scenario.
         return Promise.reject('string catalog failure')
       }
     }('String Failure', []))
@@ -440,6 +439,50 @@ describe('Web session model selection', () => {
         lastCheckedAt: expect.any(Number),
       }],
     }]))
+    await ctx.fiber.dispose()
+  })
+
+  it('publishes partial catalog snapshots while capping Host probe concurrency', async () => {
+    const { ctx } = await harness()
+    const gates: Array<ReturnType<typeof Promise.withResolvers<undefined>>> = []
+    let active = 0
+    let maximum = 0
+    ctx.llm.registerAdapter(['slow-check'], new class extends CatalogAdapter {
+      override async probeModel(): Promise<readonly { protocol: string; ok: boolean }[]> {
+        active += 1
+        maximum = Math.max(maximum, active)
+        const gate = Promise.withResolvers<undefined>()
+        gates.push(gate)
+        await gate.promise
+        active -= 1
+        return [{ protocol: 'native', ok: true }]
+      }
+
+      override probeVision(): Promise<{ status: 'unknown' }> {
+        return Promise.resolve({ status: 'unknown' })
+      }
+    }('Slow Check', Array.from({ length: 10 }, (_, index) => ({
+      provider: 'slow-check', id: `model-${String(index)}`, name: `Model ${String(index)}`,
+    }))))
+    const selection = { provider: 'deepseek-official', model: 'deepseek-chat' }
+    await buildModelCatalog(ctx, selection)
+
+    const complete = buildModelCatalog(ctx, selection, { check: true, refresh: true })
+    await vi.waitFor(() => { expect(active).toBe(8) })
+    const checking = await buildModelCatalog(ctx, selection)
+    expect(checking.groups.find(group => group.id === 'slow-check')?.models
+      .every(model => model.status === 'checking')).toBe(true)
+    expect(maximum).toBe(8)
+
+    for (const gate of gates.slice(0, 8)) gate.resolve(undefined)
+    await vi.waitFor(() => { expect(gates).toHaveLength(10) })
+    const partial = await buildModelCatalog(ctx, selection)
+    const statuses = partial.groups.find(group => group.id === 'slow-check')?.models.map(model => model.status)
+    expect(statuses).toContain('available')
+    expect(statuses).toContain('checking')
+    for (const gate of gates.slice(8)) gate.resolve(undefined)
+    await expect(complete).resolves.toBeDefined()
+    expect(maximum).toBe(8)
     await ctx.fiber.dispose()
   })
 
@@ -691,7 +734,6 @@ describe('Web session model selection', () => {
     }('Image Capable', []))
     ctx.llm.registerAdapter(['string-error'], new class extends CatalogAdapter {
       override resolveModel(): Promise<LlmResolvedModelInfo> {
-        // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- non-Error provider normalization is the scenario.
         return Promise.reject('string selection failure')
       }
     }('String Error', []))

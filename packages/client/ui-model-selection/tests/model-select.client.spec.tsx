@@ -46,6 +46,7 @@ function state(overrides: Partial<ModelDirectoryState> = {}): ModelDirectoryStat
     failures: [],
     status: 'ready',
     error: null,
+    selectingKey: undefined,
     ...overrides,
   }
 }
