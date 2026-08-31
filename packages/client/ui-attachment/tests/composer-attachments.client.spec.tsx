@@ -158,7 +158,7 @@ describe('ComposerAttachments', () => {
     expect(view.getByAltText('原图')).toBeTruthy()
   })
 
-  it('keeps local file preparation separate from optional MinerU parsing', () => {
+  it('shows only the original file icon and name while storage is pending', () => {
     const pending: ComposerAttachment = {
       kind: 'file',
       id: 'pending-file' as ComposerAttachment['id'],
@@ -169,24 +169,13 @@ describe('ComposerAttachments', () => {
         mediaType: 'application/pdf',
         bytes: 5,
         sha256: '',
-        parser: 'pending',
-        status: 'pending',
-        parseStatus: 'idle',
-        textChars: 0,
-        preview: '',
+        storageStatus: 'pending',
       },
     }
     const view = render(<ComposerAttachments {...props({ attachments: [pending] })} />)
 
-    expect(view.getByText('本地解析中')).toBeTruthy()
-    expect(view.queryByText('MinerU 排队中')).toBeNull()
-
-    const queued: ComposerAttachment = {
-      ...pending,
-      prepared: { ...pending.prepared, status: 'parsed', parser: 'pdfjs', parseStatus: 'queued' },
-    }
-    view.rerender(<ComposerAttachments {...props({ attachments: [queued] })} />)
+    expect(view.getByText('paper.pdf')).toBeTruthy()
     expect(view.queryByText('本地解析中')).toBeNull()
-    expect(view.getByText('MinerU 排队中')).toBeTruthy()
+    expect(view.queryByText('MinerU 排队中')).toBeNull()
   })
 })

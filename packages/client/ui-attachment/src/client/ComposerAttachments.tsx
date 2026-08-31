@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   ComposerAttachment, ComposerAttachmentsProps,
 } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import { IconDataOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { AttachmentRail } from '../AttachmentRail.tsx'
 import type { AttachmentRailItem } from '../AttachmentRail.tsx'
 import { DropOverlay } from '../DropOverlay.tsx'
@@ -15,10 +16,6 @@ interface ComposerRailItem extends AttachmentRailItem {
 }
 
 type ComposerFileAttachment = Extract<ComposerAttachment, { kind: 'file' }>
-type MineruPreparedFile = ComposerFileAttachment['prepared'] & {
-  parseStatus?: 'idle' | 'queued' | 'running' | 'done' | 'failed'
-  parseProgress?: number
-}
 
 /** Draft-image rail, document drop target, and original-image preview slot entry. */
 export function ComposerAttachments({
@@ -138,12 +135,8 @@ export function ComposerAttachments({
           />}
           {fileAttachments.length > 0 && <div className={css.files} role="list" aria-label={t('file.pending')}>
             {fileAttachments.map(file => <div className={css.file} role="listitem" key={file.id}>
+              <span className={css.fileIcon} aria-hidden><IconDataOutline16 /></span>
               <span className={css.fileName} title={file.file.name}>{file.file.name || t('file.unnamed')}</span>
-              {file.prepared.status === 'pending' && <span className={css.fileStatus}>本地解析中</span>}
-              {(file.prepared as MineruPreparedFile).parseStatus === 'queued' && <span className={css.fileStatus}>MinerU 排队中</span>}
-              {(file.prepared as MineruPreparedFile).parseStatus === 'running' && <span className={css.fileStatus}>MinerU 解析中 {(file.prepared as MineruPreparedFile).parseProgress ?? 0}%</span>}
-              {(file.prepared as MineruPreparedFile).parseStatus === 'done' && <span className={css.fileStatus}>MinerU 已完成</span>}
-              {(file.prepared as MineruPreparedFile).parseStatus === 'failed' && <span className={css.fileStatus}>MinerU 失败，已保留原文件</span>}
               <button type="button" className={css.fileRemove} aria-label={t('file.remove', { name: file.file.name })} onClick={() => { onRemoveImage(file.id) }}>×</button>
             </div>)}
           </div>}

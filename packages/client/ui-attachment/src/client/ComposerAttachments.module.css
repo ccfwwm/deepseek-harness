@@ -27,10 +27,11 @@
   white-space: nowrap;
 }
 
-.fileStatus {
+.fileIcon {
+  display: grid;
   flex: 0 0 auto;
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 11px;
+  place-items: center;
+  color: var(--dsw-alias-label-secondary);
 }
 
 .fileRemove {
