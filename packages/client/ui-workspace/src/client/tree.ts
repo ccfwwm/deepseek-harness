@@ -1,7 +1,7 @@
 /**
  * Derives the workspace browser tree from Host Workspace order and membership.
- * Unassigned Sessions trail under Ungrouped; only the selected blank Session
- * remains visible.
+ * Unassigned Sessions trail under Ungrouped. Unscoped blank Sessions remain
+ * visible so each top-level New Session action stays independently reachable.
  */
 import {
   type SessionListState, type SessionSearchResultItem, type SessionSummary,
@@ -123,15 +123,21 @@ function byRecency(a: SessionSummary, b: SessionSummary): number {
 }
 
 /**
- * Ordinary sessions are visible; among blank sessions, only the current one
- * is visible. Subagent children use their parent header catalog; archived
- * sessions are visible nowhere, while their accounting slots remain so
- * unarchiving restores position.
+ * Ordinary sessions are visible. Workspace-owned blank sessions expose only
+ * the current reusable placeholder; Ungrouped and flat views may retain all
+ * independently created blanks. Subagent children use their parent header
+ * catalog; archived sessions are visible nowhere, while their accounting
+ * slots remain so unarchiving restores position.
  */
-function sessionVisible(session: SessionSummary, current: SessionId | undefined, archived: ReadonlySet<SessionId>): boolean {
+function sessionVisible(
+  session: SessionSummary,
+  current: SessionId | undefined,
+  archived: ReadonlySet<SessionId>,
+  includeInactiveBlanks = false,
+): boolean {
   return session.origin !== 'subagent'
     && !archived.has(session.id)
-    && (!session.blank || session.id === current)
+    && (!session.blank || includeInactiveBlanks || session.id === current)
 }
 
 /**
@@ -214,7 +220,7 @@ function groupByWorkspace(
   const stray = list.ids
     .map(id => list.byId[id])
     .filter((s): s is SessionSummary =>
-      s !== undefined && !accounted.has(s.id) && sessionVisible(s, list.current, archived))
+      s !== undefined && !accounted.has(s.id) && sessionVisible(s, list.current, archived, true))
   if (stray.length > 0) {
     groups.push(buildGroup(
       UNGROUPED_KEY,
@@ -264,8 +270,9 @@ function sessionNode(
  * Derive the workspace browser groups with every session as a top-level row.
  *
  * Every group shows; sessions populate under expanded groups in the selected
- * local order. Blank sessions are excluded except for the selected
- * provisional New Session row; archived sessions are excluded everywhere.
+ * local order. Workspace blank sessions are excluded except for the selected
+ * provisional New Session row. Ungrouped blank sessions remain visible;
+ * archived sessions are excluded everywhere.
  * Content search lives outside this derivation
  * (see {@link deriveSearchResults}).
  * @param list - sessions list snapshot (`current` feeds containsCurrent).
@@ -317,19 +324,23 @@ export function deriveGroups(
  * @param list - sessions list snapshot.
  * @param archivedSessionIds - registry-global archive set.
  * @param pendingInteractions - pending UI interactions by Session.
+ * @param workspaces - membership used to hide reusable inactive Workspace blanks.
  * @returns flat rows in render order.
  */
 export function deriveFlat(
   list: SessionListState,
   archivedSessionIds: readonly SessionId[],
   pendingInteractions: SessionPendingInteractions,
+  workspaces: readonly WorkspaceView[] = [],
 ): SessionNode[] {
   const archived = new Set(archivedSessionIds)
+  const accounted = new Set(workspaces.flatMap(workspace => workspace.sessionIds))
   const descendants = indexSubagentDescendants(list.byId)
   const rows: SessionSummary[] = []
   for (const id of list.ids) {
     const s = list.byId[id]
-    if (s === undefined || !sessionVisible(s, list.current, archived)) continue
+    if (s === undefined
+      || !sessionVisible(s, list.current, archived, !accounted.has(s.id))) continue
     rows.push(s)
   }
   rows.sort(byRecency)

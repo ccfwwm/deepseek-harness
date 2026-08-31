@@ -512,7 +512,7 @@ describe('WorkspaceBrowser', () => {
     expect(screen.queryByText('b')).toBeNull()
   })
 
-  it('shows only the current blank session as the localized New Session, excluded from search', () => {
+  it('shows only the current Workspace blank as the localized New Session, excluded from search', () => {
     const currentBlank = summary('alpha-blank', 9, { blank: true })
     const staleBlank = summary('beta-blank', 8, { blank: true })
     const sessions = sessionState(
@@ -540,6 +540,20 @@ describe('WorkspaceBrowser', () => {
     expect(screen.queryByText('新会话')).toBeNull()
     fireEvent.change(screen.getByPlaceholderText('搜索会话…'), { target: { value: '新会话' } })
     expect(screen.queryByText('新会话')).toBeNull()
+  })
+
+  it('keeps multiple unscoped blank Sessions reachable in grouped and flat navigation', () => {
+    const first = summary('unscoped-first', 9, { blank: true })
+    const second = summary('unscoped-second', 8, { blank: true })
+    const b = mount({
+      useSessions: hook(sessionState([first, second], { current: second.id })),
+      useWorkspaces: hook(workspaceState([])),
+    })
+
+    expect(screen.getAllByText('新会话')).toHaveLength(2)
+    b.store.actions.setGroupBy('flat')
+    rerender(b, {})
+    expect(screen.getAllByText('新会话')).toHaveLength(2)
   })
 
   it('promotes the blank selected by New Session in its grouped and flat orders', async () => {

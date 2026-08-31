@@ -1,13 +1,11 @@
 /** Workspace archive and directory UI capability. */
 
 import { Service, type Context } from '@deepseek-ai/cordis'
-import type { ClientRemote, DirectoryListing, RemoteFailure } from '@deepseek-ai/dsh-api-remotes/client'
+import type { ClientRemote, DirectoryListing } from '@deepseek-ai/dsh-api-remotes/client'
+import type { RemoteFailure } from '@deepseek-ai/dsh-typert-protocol'
+import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
 import type {
-  ISessions,
-  SessionListState,
-} from '@deepseek-ai/dsh-api-session-controller/client'
-import type {
-  IWorkspaces, WorkspaceId, WorkspaceView,
+  IWorkspaces, WorkspaceId,
 } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 
@@ -21,7 +19,7 @@ export interface UiWorkspace {
   connectWorkspace(workspaceId: WorkspaceId): Promise<SessionId>
   /**
    * Start a New Session flow and navigate to its Session.
-   * @param workspaceId - explicit target; absent inherits the current or most recent Workspace.
+   * @param workspaceId - explicit Workspace target; absent creates an independent unscoped Session.
    */
   startSession(workspaceId?: WorkspaceId): void
   /**
@@ -70,6 +68,7 @@ export class DirectoryBrowseError extends Error {
 /** Implements Workspace archive and directory UI operations. */
 class UiWorkspaceService extends Service implements UiWorkspace {
   private readonly connecting = new Map<WorkspaceId, Promise<SessionId>>()
+  private navigationGeneration = 0
 
   /**
    * @param ctx - Client root Context.
@@ -112,28 +111,14 @@ class UiWorkspaceService extends Service implements UiWorkspace {
   }
 
   startSession(workspaceId?: WorkspaceId): void {
-    const workspace = this.workspaces.list.getSnapshot()
-    const sessions = this.sessions.list.getSnapshot()
-    const current = sessions.current
-    const currentWorkspaceId = current === undefined
-      ? undefined
-      : workspace.items.find(item => item.sessionIds.includes(current))?.workspaceId
-    const recent = workspace.phase === 'ready' && sessions.phase === 'ready'
-      ? recentWorkspace(workspace.items, sessions.byId)
-      : undefined
-    const target = workspaceId ?? currentWorkspaceId ?? recent
-    if (target === undefined) {
-      // A blank Session is still a fully runnable conversation.  It uses the
-      // Host default cwd without registering a Workspace, so model selection,
-      // attachments, and tools receive a real session scope immediately.
-      void this.sessions.create().then(
-        (sessionId) => { this.sessions.open(sessionId) },
-        (reason: unknown) => { console.warn('new unscoped session failed:', reason) },
-      )
-      return
-    }
-    void this.connectWorkspace(target).then(
-      (sessionId) => { this.sessions.open(sessionId) },
+    const generation = ++this.navigationGeneration
+    const attempt = workspaceId === undefined
+      ? this.sessions.create()
+      : this.connectWorkspace(workspaceId)
+    void attempt.then(
+      (sessionId) => {
+        if (generation === this.navigationGeneration) this.sessions.open(sessionId)
+      },
       (reason: unknown) => { console.warn('new session failed:', reason) },
     )
   }
@@ -174,42 +159,22 @@ class UiWorkspaceService extends Service implements UiWorkspace {
         initial = 'done'
         return
       }
-      const target = recentWorkspace(workspace.items, sessions.byId)
-      if (target === undefined) {
-        // A deployment can have no registered Workspace on first launch.
-        // Create a normal unscoped Session so the conversation composer is
-        // immediately usable; this Session uses the Host's default cwd and
-        // is deliberately not added to the Workspace roster.
-        initial = 'connecting'
-        void this.sessions.create().then(
-          (sessionId) => {
-            if (disposed) return
-            if (this.sessions.list.getSnapshot().current === undefined) {
-              this.sessions.open(sessionId)
-            }
-            initial = 'done'
-          },
-          (reason: unknown) => {
-            if (disposed) return
-            initial = 'waiting'
-            console.warn('initial unscoped session creation failed:', reason)
-          },
-        )
-        return
-      }
       initial = 'connecting'
-      void this.connectWorkspace(target).then(
+      const generation = ++this.navigationGeneration
+      void this.sessions.create().then(
         (sessionId) => {
           if (disposed) return
-          if (this.sessions.list.getSnapshot().current === undefined) {
+          if (generation === this.navigationGeneration
+            && this.sessions.list.getSnapshot().current === undefined) {
             this.sessions.open(sessionId)
           }
           initial = 'done'
         },
         (reason: unknown) => {
           if (disposed) return
+          if (generation !== this.navigationGeneration) return
           initial = 'waiting'
-          console.warn('initial workspace selection failed:', reason)
+          console.warn('initial unscoped session creation failed:', reason)
         },
       )
     }
@@ -232,28 +197,6 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     return true
   }
 
-}
-
-/** Stable tie-breaking follows Host Workspace order. */
-function recentWorkspace(
-  workspaces: readonly WorkspaceView[],
-  sessions: SessionListState['byId'],
-): WorkspaceId | undefined {
-  let selected: WorkspaceId | undefined
-  let selectedTime = Number.NEGATIVE_INFINITY
-  for (const workspace of workspaces) {
-    let latest = Number.NEGATIVE_INFINITY
-    for (const sessionId of workspace.sessionIds) {
-      const session = sessions[sessionId]
-      if (session !== undefined) latest = Math.max(latest, session.updatedAt)
-    }
-    if (latest === Number.NEGATIVE_INFINITY) latest = Date.parse(workspace.createdAt)
-    if (selected === undefined || latest > selectedTime) {
-      selected = workspace.workspaceId
-      selectedTime = latest
-    }
-  }
-  return selected
 }
 
 export { UiWorkspaceService }

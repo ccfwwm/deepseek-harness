@@ -46,11 +46,11 @@ Session 自己持有首条输入并驱动一条内部流水线：必要时以预
 
 ### 用户动线
 
-应用首次进入时等待 Workspace 与 Session 两份基线 ready。仍有效的真实 Session selection 被恢复；否则进入 New Session，并固定选择一次最近 Workspace。最近 Workspace 取其成员 Session 的最大 `updatedAt`，空 Workspace 回退到 `createdAt`；该派生只决定默认目标，不改变 Host Workspace 顺序，也不会在后续 hydration 时二次改选。
+应用首次进入时等待 Workspace 与 Session 两份基线 ready。仍有效的真实 Session selection 被恢复；否则创建并打开一个未归入 Workspace 的 Host Session。初始导航不会隐式选择 Workspace，因此 Workspace 的最近使用顺序不再决定 composer 是否可用。
 
-完全没有 Workspace 时，页面创建默认名为 `workspace` 的前端 Workspace 对象和指向它的前端 Session。两者不写 Host，composer 始终可输入；首次发送才依次 materialize Workspace、attach Session、发送消息。
+对话不要求 Workspace。未归入 Workspace 的 Session 使用 Host 默认 cwd 作为 agent scope，但不会加入任何 Workspace 记账；composer 可立即输入。选择或创建 Workspace 仍是显式操作，不再阻塞首次提示词。
 
-顶部 New Session、Workspace 行内加号和 Workspace picker 最终都调用同一 New Session 动作：显式 Workspace id 直接成为目标，未指定时先使用当前 Session 所属 Workspace，再使用最近 Workspace；没有真实 Workspace 时进入空白 New Session 页面。Workspace picker 的单一 Add workspace 动作（见[单一路径 Note](../simplification/2026-07-31-one-route-to-add-a-workspace.zh.md)；本决策做出时是 Use an existing folder 与按名称创建两个动作）会在用户确认目录时立即创建真实 Workspace，再将前端 Session 的目标改为该 Workspace；即使用户不发送消息，显式创建的空 Workspace 也保留。
+顶部 New Session 始终创建一个独立、未归入 Workspace 的 Session，即使当前 Session 已属于某个 Workspace。快速连续请求都会各自创建 Session，但导航 generation 只允许最后一次请求进入前台。Workspace 行内加号保留显式 Workspace 目标，并可复用该 Workspace 现有的空白成员。Workspace picker 的单一 Add workspace 动作（见[单一路径 Note](../simplification/2026-07-31-one-route-to-add-a-workspace.zh.md)；本决策做出时是 Use an existing folder 与按名称创建两个动作）会在用户确认目录时立即创建真实 Workspace，再将前端 Session 的目标改为该 Workspace；即使用户不发送消息，显式创建的空 Workspace 也保留。
 
 新建 Workspace 的显示名取自其所在目录。不同 canonical path 可以拥有相同的 basename 派生显示名（见[身份决策](../bug-fix/2026-07-31-same-basename-workspace-adoption.zh.md)）；显式的重命名操作仍保留显示名重名检查。跨 Workspace 移动 Session、从 Ungrouped 手动收编以及分别输入显示名和目录名仍不在此动线范围内。
 
@@ -72,7 +72,7 @@ Workspace 组使用 Host 返回的持久顺序。Bootstrap 一次性确定历史
 
 Host 记账保持手动的 `Workspace.sessionIds` 顺序：新 attach 的 Session 放在首位，活动不会改动该顺序。分组浏览器可以改选浏览器本地的最近更新视图；当 Session 的 `updatedAt` 增大时该视图会把它移到首位，同时仍允许手动调整。每个打开的 Workspace 默认显示五条 Session，用户可临时展开其余条目。持久 Workspace 重排序和浏览器本地 Session 顺序见 [Workspace 侧边栏顺序与折叠](2026-08-11-workspace-sidebar-order-and-folding.zh.md)。
 
-当前空白 Session 会显示为一条「New session」行，但不显示数量、时间标签或行菜单；其他空白 Session 保持隐藏，并可由对应 Workspace 复用。搜索会排除空白行。
+当前 Workspace 所属的空白 Session 会显示为一条「New session」行，但不显示数量、时间标签或行菜单；该 Workspace 的其他空白 Session 保持隐藏并可复用。未分组的空白 Session 全部保持可见，使每次顶部 New Session 创建的对话都可重新打开。搜索会排除全部空白行。
 
 无法归入任何 Workspace 的真实 Session 进入 Ungrouped。Host `session-added` 与 `workspace-changed` 可以任意顺序到达，列表合并不依赖 frame 顺序。
 
@@ -102,12 +102,12 @@ Sidebar 与 conversation empty hero 通过 slot 获得标准化动作：`startSe
 
 ## Verification
 
-- 完全无 Workspace 的零态不写 Host 且允许输入；显式 Create Workspace 立即创建并显示空 Workspace。
+- 完全无 Workspace 的零态会创建一个未分组 Host Session，无需选择 Workspace 即可输入；显式 Create Workspace 立即创建并显示空 Workspace。
 - 前端 Session 与 Workspace 在 materialize 前后保持对象身份，输入、错误、焦点和 sidebar 投影始终来自对象层。
 - 首发按 Workspace、Session、提示词顺序推进，各成功阶段不回滚，输入在提示词被接受前不丢失，创建重试使用同一 SessionId。
 - Workspace list 只读取 header 完成一次可重入 bootstrap；已初始化的空注册表重启不重复初始化，成员读取同时校验索引与 canonical cwd。
-- 初始默认目标只在两份基线 ready 后确定一次；Workspace 组不因 hydration 或 Session 活跃重排，显式 Workspace 拖拽顺序在重连后仍然保持。
-- 当前空白 Session 可显示为唯一的 New Session 行，同时不暴露其他可复用空白会话，也不显示 Session 数量。
+- 两份基线 ready 后，初始导航创建一个未分组 Session；Workspace 组不因 hydration 或 Session 活跃重排，显式 Workspace 拖拽顺序在重连后仍然保持。
+- Workspace 所属的可复用空白会话只暴露当前 New Session 行；未分组空白会话在 Ungrouped 与单列表导航中保持可见。
 - UI 与 Host 会将 canonical path 不同但 basename 相同的目录接纳为独立 Workspace，而显式的重命名操作会拒绝重复显示名；cwd-only Session、无效历史 cwd 和未 attach Session 保持 Ungrouped。
 - 经确认的 Workspace 删除只移除注册记录，保留当前 Session、目录、文件和会话日志，并在刷新后保持该状态；包级测试固定一元响应／帧／基线竞态和失败回滚行为。
 - keyless runnable 快照覆盖零态、显式创建和首次发送；包级测试覆盖 bootstrap、成员校验、排序、幂等、失败恢复及任意 frame 顺序。

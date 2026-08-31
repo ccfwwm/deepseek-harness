@@ -248,7 +248,7 @@ describe('UiWorkspaceService', () => {
       .rejects.toThrow('uiWorkspace.connectWorkspace: unknown workspace ghost')
   })
 
-  it('targets an explicit, current-session, then recent Workspace and reports failed starts', async () => {
+  it('targets only an explicit Workspace and otherwise creates independent unscoped Sessions', async () => {
     const current = summary('current', { cwd: '/w/current-home', updatedAt: 1 })
     const recent = summary('recent', { cwd: '/w/recent-home', updatedAt: 2 })
     const b = bench({
@@ -258,7 +258,10 @@ describe('UiWorkspaceService', () => {
         workspace('recent-home', [recent.id]),
       ]),
     })
-    b.sessions.create.mockImplementation(async options => sid(`opened-${String(options?.workspaceId)}`))
+    let unscoped = 0
+    b.sessions.create.mockImplementation(async options => options?.workspaceId === undefined
+      ? sid(`unscoped-${++unscoped}`)
+      : sid(`opened-${String(options.workspaceId)}`))
 
     b.uiWorkspace.startSession(wid('recent-home'))
     await vi.waitFor(() => {
@@ -268,14 +271,15 @@ describe('UiWorkspaceService', () => {
     b.sessions.open(current.id)
     b.uiWorkspace.startSession()
     await vi.waitFor(() => {
-      expect(b.sessions.open).toHaveBeenLastCalledWith(sid('opened-current-home'))
+      expect(b.sessions.open).toHaveBeenLastCalledWith(sid('unscoped-1'))
     })
 
     b.sessions.clear()
     b.uiWorkspace.startSession()
     await vi.waitFor(() => {
-      expect(b.sessions.open).toHaveBeenLastCalledWith(sid('opened-recent-home'))
+      expect(b.sessions.open).toHaveBeenLastCalledWith(sid('unscoped-2'))
     })
+    expect(b.sessions.create.mock.calls.slice(-2)).toEqual([[], []])
 
     const empty = bench()
     empty.sessions.create.mockResolvedValue(sid('unscoped'))
@@ -293,7 +297,7 @@ describe('UiWorkspaceService', () => {
     })
   })
 
-  it('opens the recent Workspace after both baselines arrive', async () => {
+  it('creates an unscoped Session after both baselines arrive even when Workspaces exist', async () => {
     const b = bench()
     b.sessions.create.mockResolvedValue(sid('initial'))
 
@@ -306,7 +310,7 @@ describe('UiWorkspaceService', () => {
     await vi.waitFor(() => {
       expect(b.sessions.open).toHaveBeenCalledWith(sid('initial'))
     })
-    expect(b.sessions.create).toHaveBeenCalledWith({ workspaceId: wid('recent') })
+    expect(b.sessions.create.mock.calls[0]).toEqual([])
     expect(b.workspaces.list.getSnapshot().items.map(item => item.workspaceId)).toEqual([
       wid('stable-first'), wid('recent'),
     ])
@@ -326,7 +330,7 @@ describe('UiWorkspaceService', () => {
     expect(b.sessions.create.mock.calls[0]).toEqual([])
   })
 
-  it('uses Workspace creation time when members are absent and preserves Host tie order', async () => {
+  it('does not use Workspace creation time to choose the initial Session scope', async () => {
     const b = bench()
     b.sessions.create.mockResolvedValue(sid('initial'))
 
@@ -340,7 +344,31 @@ describe('UiWorkspaceService', () => {
     await vi.waitFor(() => {
       expect(b.sessions.open).toHaveBeenCalledWith(sid('initial'))
     })
-    expect(b.sessions.create).toHaveBeenCalledWith({ workspaceId: wid('newest') })
+    expect(b.sessions.create.mock.calls[0]).toEqual([])
+  })
+
+  it('creates every rapidly requested unscoped Session but opens only the latest request', async () => {
+    const current = summary('current')
+    const b = bench({
+      sessions: sessionState([current], current.id),
+      workspaces: workspaceState([workspace('current', [current.id])]),
+    })
+    const first = Promise.withResolvers<SessionId>()
+    const second = Promise.withResolvers<SessionId>()
+    b.sessions.create
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => second.promise)
+
+    b.uiWorkspace.startSession()
+    b.uiWorkspace.startSession()
+    expect(b.sessions.create.mock.calls).toEqual([[], []])
+
+    first.resolve(sid('first'))
+    await flush()
+    expect(b.sessions.open).not.toHaveBeenCalledWith(sid('first'))
+    second.resolve(sid('second'))
+    await flush()
+    expect(b.sessions.open).toHaveBeenLastCalledWith(sid('second'))
   })
 
   it('retries failed initial selection and never overwrites a later selection', async () => {
@@ -353,7 +381,7 @@ describe('UiWorkspaceService', () => {
     b.workspaces.list.set(workspaceState([workspace('recent')]))
     b.sessions.list.set(sessionState())
     await vi.waitFor(() => {
-      expect(warning).toHaveBeenCalledWith('initial workspace selection failed:', expect.any(Error))
+      expect(warning).toHaveBeenCalledWith('initial unscoped session creation failed:', expect.any(Error))
     })
     b.workspaces.list.update(state => ({ ...state, items: [...state.items] }))
     await vi.waitFor(() => {
@@ -372,6 +400,27 @@ describe('UiWorkspaceService', () => {
     await flush()
     expect(changed.sessions.open).toHaveBeenCalledTimes(1)
     expect(changed.sessions.open).toHaveBeenCalledWith(sid('manual'))
+  })
+
+  it('does not let initial creation override a later top-level New Session request', async () => {
+    const b = bench()
+    const automatic = Promise.withResolvers<SessionId>()
+    const requested = Promise.withResolvers<SessionId>()
+    b.sessions.create
+      .mockImplementationOnce(() => automatic.promise)
+      .mockImplementationOnce(() => requested.promise)
+    b.workspaces.list.set(workspaceState([workspace('recent')]))
+    b.sessions.list.set(sessionState())
+    await vi.waitFor(() => { expect(b.sessions.create).toHaveBeenCalledOnce() })
+
+    b.uiWorkspace.startSession()
+    requested.resolve(sid('requested'))
+    await flush()
+    expect(b.sessions.open).toHaveBeenLastCalledWith(sid('requested'))
+
+    automatic.resolve(sid('automatic'))
+    await flush()
+    expect(b.sessions.open).toHaveBeenCalledTimes(1)
   })
 
   it('stops initial navigation when its Cordis lifetime is disposed', async () => {

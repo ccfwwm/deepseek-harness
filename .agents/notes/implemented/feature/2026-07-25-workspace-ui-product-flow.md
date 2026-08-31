@@ -46,11 +46,11 @@ The Session owns the first input and drives one internal pipeline: when necessar
 
 ### User flow
 
-On initial entry, the application waits until both the Workspace and Session baselines are ready. It restores a real Session selection that remains valid; otherwise, it enters New Session and selects the most recent Workspace exactly once. The most recent Workspace is determined by the maximum `updatedAt` of its member Sessions, falling back to `createdAt` for an empty Workspace. This derived value chooses only the default target: it does not alter the Host Workspace order or trigger another selection after later hydration.
+On initial entry, the application waits until both the Workspace and Session baselines are ready. It restores a real Session selection that remains valid; otherwise, it creates and opens one unscoped Host Session. Initial navigation never selects a Workspace implicitly, so Workspace recency does not control whether the composer is available.
 
-When no Workspace exists, the page creates a frontend Workspace object named `workspace` and a frontend Session that targets it. Neither writes to the Host, and the composer always accepts input; the first send materializes the Workspace, attaches the Session, and sends the message in that order.
+A Workspace is optional for conversation. An unscoped Session uses the Host default cwd for its agent scope without joining any Workspace account, and the composer accepts input immediately. Selecting or creating a Workspace remains an explicit action and does not gate the first prompt.
 
-Top-level New Session, the plus button on a Workspace row, and the Workspace picker all invoke the same New Session action. An explicit Workspace id becomes the target directly; when none is specified, the action uses the current Session's Workspace, then the most recent Workspace, and enters the blank New Session page when no real Workspace exists. The Workspace picker's one Add workspace action ([one-route Note](../simplification/2026-07-31-one-route-to-add-a-workspace.md); it was a pair of Use-an-existing-folder and create-by-name actions when this was decided) immediately creates a real Workspace when the user confirms a directory, then retargets the frontend Session to it; an explicitly created empty Workspace remains even if the user sends no message.
+Top-level New Session always creates a distinct unscoped Session, even when the current Session belongs to a Workspace. Rapid requests all create their own Session; a navigation generation lets only the latest request take the foreground. The plus button on a Workspace row retains the explicit Workspace target and may reuse that Workspace's existing blank member. The Workspace picker's one Add workspace action ([one-route Note](../simplification/2026-07-31-one-route-to-add-a-workspace.md); it was a pair of Use-an-existing-folder and create-by-name actions when this was decided) immediately creates a real Workspace when the user confirms a directory, then retargets the frontend Session to it; an explicitly created empty Workspace remains even if the user sends no message.
 
 A new Workspace takes its display name from the directory it was created in. Distinct canonical paths may share the same basename-derived title ([identity decision](../bug-fix/2026-07-31-same-basename-workspace-adoption.md)); the explicit rename operation retains its duplicate-title check. Moving Sessions across Workspaces, manual adoption from Ungrouped, and separate display-name and directory-name inputs remain outside this flow.
 
@@ -72,7 +72,7 @@ Workspace groups follow the persistent order returned by the Host. Bootstrap det
 
 The Host account remains the manual `Workspace.sessionIds` order: a newly attached Session is placed first and activity does not mutate it. The grouped browser can instead select a browser-local recent-update view that promotes a Session when its `updatedAt` advances and remains manually editable. Five Sessions are visible per open Workspace until the user transiently expands the remainder. The durable Workspace reorder and browser-local Session order are defined in [Workspace Sidebar Order and Folding](2026-08-11-workspace-sidebar-order-and-folding.md).
 
-The current blank Session appears as a “New session” row without a count, time label, or row menu; other blank Sessions remain hidden and eligible for per-Workspace reuse. Search excludes blank rows.
+The current Workspace-owned blank Session appears as a “New session” row without a count, time label, or row menu; other blanks owned by that Workspace remain hidden and eligible for reuse. Ungrouped blank Sessions remain visible so every top-level New Session request stays reachable. Search excludes all blank rows.
 
 Real Sessions that cannot be assigned to any Workspace appear under Ungrouped. Host `session-added` and `workspace-changed` events may arrive in either order; list merging does not depend on frame order.
 
@@ -102,12 +102,12 @@ The Sidebar and conversation empty hero receive standardized actions through slo
 
 ## Verification
 
-- The zero state with no Workspace writes nothing to the Host and accepts input; explicit Create Workspace immediately creates and displays an empty Workspace.
+- The zero state creates one unscoped Host Session and accepts input without selecting a Workspace; explicit Create Workspace immediately creates and displays an empty Workspace.
 - Frontend Sessions and Workspaces preserve object identity across materialization; input, errors, focus, and sidebar projections always originate from the object layer.
 - The first send advances through Workspace, Session, and prompt in order; successful stages are not rolled back, input is not lost before the prompt is accepted, and creation retries use the same SessionId.
 - Workspace list performs one reentrant bootstrap using only headers; an initialized empty registry does not initialize again after restart, and membership reads validate both the index and canonical cwd.
-- The initial default target is determined exactly once after both baselines are ready; Workspace groups are not reordered by hydration or Session activity, and explicit Workspace drag order survives reconnect.
-- The current blank Session can appear as a single New Session row without exposing other reusable blanks or a Session count.
+- Initial navigation creates one unscoped Session after both baselines are ready; Workspace groups are not reordered by hydration or Session activity, and explicit Workspace drag order survives reconnect.
+- Workspace-owned reusable blanks expose only the current New Session row; unscoped blanks remain visible in Ungrouped and flat navigation.
 - The UI and Host admit distinct same-basename directories as separate Workspaces, while the explicit rename operation rejects duplicate titles; cwd-only Sessions, Sessions with invalid historical cwd values, and unattached Sessions remain Ungrouped.
 - Confirmed Workspace deletion removes only the registration, retains the current Session, directory, files, and session log, and survives reload; package tests pin unary/frame/baseline races and failure rollback.
 - Keyless runnable snapshots cover the zero state, explicit creation, and the first send; package-level tests cover bootstrap, membership validation, ordering, idempotency, failure recovery, and arbitrary frame order.
