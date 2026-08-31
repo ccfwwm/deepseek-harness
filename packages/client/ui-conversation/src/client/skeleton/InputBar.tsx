@@ -234,8 +234,16 @@ export function InputBar({
         (failure) => { if (failure !== null) showToast(failure) },
         (error: unknown) => { showToast(error instanceof Error ? error.message : String(error)) },
       )
-    } else if (documents.length > 0 && addImages === undefined) {
-      showToast(t('file.unavailable'))
+    } else if (documents.length > 0) {
+      // Older hosts expose only addImages. Preserve their authoritative
+      // format validation so unsupported mixed drops still announce a reason.
+      if (addImages !== undefined) {
+        const failure = addImages(files)
+        if (failure !== null) showToast(failure)
+      } else {
+        showToast(t('file.unavailable'))
+      }
+      return
     }
     if (images.length === 0 || addImages === undefined) return
     const rejected = ((): string | null => {

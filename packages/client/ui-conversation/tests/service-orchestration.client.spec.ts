@@ -232,7 +232,7 @@ describe('sendSession submission echo', () => {
     await b.runtime.dispose()
   })
 
-  it('starts auto extraction after storage without delaying attachment send', async () => {
+  it('starts auto extraction on drop, echoes immediately, and sends parsed attachment context', async () => {
     const b = await echoBench()
     let finishExtraction: ((value: unknown) => void) | undefined
     const extract = vi.fn(() => new Promise((resolve) => { finishExtraction = resolve }))
@@ -247,8 +247,23 @@ describe('sendSession submission echo', () => {
         storageStatus: 'stored' as const,
       },
     }))
+    const inspect = vi.fn(() => Promise.resolve({
+      ok: true as const,
+      value: {
+        attachmentId: 'att-document',
+        name: 'paper.pdf',
+        mediaType: 'application/pdf',
+        bytes: 4,
+        sha256: 'abcd',
+        storageStatus: 'stored' as const,
+        parser: 'pdfjs',
+        status: 'parsed',
+        textChars: 24,
+        preview: 'PDF upload extraction works',
+      },
+    }))
     b.runtime.ctx.provide('remote.zerowallFiles')
-    b.runtime.ctx.set('remote.zerowallFiles', { prepare, inspect: vi.fn(), extract })
+    b.runtime.ctx.set('remote.zerowallFiles', { prepare, inspect, extract })
     class InstantReader {
       result: string | ArrayBuffer | null = 'data:application/pdf;base64,JVBERg=='
       error: DOMException | null = null
@@ -270,11 +285,32 @@ describe('sendSession submission echo', () => {
 
       const session = b.runtime.sessions.binding('s1')!.session
       const sending = b.root.sendSession(session, '总结附件', [attachment!.id], 'queue')
-      await vi.waitFor(() => { expect(b.prompt).toHaveBeenCalledOnce() })
+      expect(b.beginSubmission).toHaveBeenCalledWith(expect.objectContaining({
+        text: '总结附件',
+        files: [{ name: 'paper.pdf', mediaType: 'application/pdf' }],
+      }))
+      expect(b.prompt).not.toHaveBeenCalled()
       expect(finishExtraction).toBeTypeOf('function')
+      finishExtraction?.({
+        ok: true,
+        value: {
+          kind: 'local', state: 'done', parser: 'pdfjs', textChars: 24,
+          artifactPath: 'C:/attachments/paper.txt', createdAt: new Date().toISOString(),
+        },
+      })
+      await vi.waitFor(() => { expect(b.prompt).toHaveBeenCalledOnce() })
+      expect(inspect).toHaveBeenCalledWith({
+        sessionId: 's1', attachmentId: 'att-document', view: 'parsed', kind: 'local',
+      })
+      expect(b.prompt).toHaveBeenCalledWith([
+        expect.objectContaining({
+          type: 'file', attachmentId: 'att-document', parser: 'pdfjs', status: 'parsed',
+          preview: 'PDF upload extraction works',
+        }),
+        { type: 'text', text: '总结附件' },
+      ], 'queue', undefined, 'req-echo')
       b.retire.onRetire?.({ reason: 'observed', attachments: [] })
       await expect(sending).resolves.toEqual({ kind: 'success' })
-      finishExtraction?.({ ok: true, value: { state: 'done' } })
     } finally {
       vi.unstubAllGlobals()
       b.restore()
