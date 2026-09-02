@@ -66,8 +66,12 @@ export interface ComposerAttachmentsOwnerProps {
   canAcceptDrop: boolean
   /** Add one dropped batch through the composer's validation path. */
   onAddImages: (files: readonly File[]) => void
+  /** Add ordinary files through the ZeroWall file service. */
+  onAddFiles?: (files: readonly File[]) => void
   /** Remove one draft image through the Conversation service. */
   onRemoveImage: (id: DraftAttachmentId) => void
+  /** Remove any draft attachment; falls back to onRemoveImage for compatibility. */
+  onRemoveAttachment?: (id: DraftAttachmentId) => void
   /** Display-ready limits for the drop invitation. */
   dropLimits?: { readonly count: number; readonly size: string } | undefined
 }

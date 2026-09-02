@@ -17,7 +17,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, KeyboardEvent, MouseEvent, ReactNode } from 'react'
 import clsx from 'clsx'
 import {
-  IconPlusOutline16, IconWarningOutline16, Toast, Tooltip,
+  IconPaperclipOutline16, IconPlusOutline16, IconWarningOutline16, Toast, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 // Type-only: the `plan` projection key merge (the TodoDock posture — the
 // composer reads a host-computed value; the domain owns the key).
@@ -40,7 +40,7 @@ import css from './InputBar.module.css'
 export type InputBarProps = ComposerBarProps
 
 export const InputBar = memo(function InputBar({
-  useSession, useInput, inputActions, keyboard, addImages, removeImage, draftImages,
+  useSession, useInput, inputActions, keyboard, addImages, addFiles, removeImage, draftImages,
   resolveSubmitMode, toggleCommandMenu, stop, command, t,
   renderSlot, useNotices, useLexicon, useMenuLauncher,
   useProjection, sessionId, variant, disabled: inert = false, blocked,
@@ -68,6 +68,10 @@ export const InputBar = memo(function InputBar({
   const attachments = useMemo(
     () => input === undefined || draftImages === undefined ? [] : draftImages(input.imageIds),
     [draftImages, input?.imageIds],
+  )
+  const imageAttachments = useMemo(
+    () => attachments.filter(attachment => attachment.kind === 'image'),
+    [attachments],
   )
   const empty = draft.trim() === '' && attachments.length === 0
   // Transient error banner (machine notices, image-intake rejections, and
@@ -111,6 +115,7 @@ export const InputBar = memo(function InputBar({
   }, [notice, showToast])
   const cardRef = useRef<HTMLDivElement | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   // The Access seat's data: the host-computed permissions projection
   // (undefined = capability absent → the chip renders nothing).
@@ -138,7 +143,7 @@ export const InputBar = memo(function InputBar({
   // and keyboard users can reach the recovery action.
   const workspaceTrigger = inert && !removed && onRequestWorkspace !== undefined
   const editorDisabled = removed || (locked && !workspaceTrigger)
-  const editable = live && !locked && !machineBusy
+  const editable = live && (!locked || workspaceTrigger) && !machineBusy
   const canSteerQueue = !locked && !machineBusy && !commandMenuOpen && empty && running && subagent === null
     && input.queue.some(row => row.placement === 'queued')
 
@@ -225,34 +230,56 @@ export const InputBar = memo(function InputBar({
   // never enters the rail — no more submit-time failure rolling the rail
   // back. The host enforces the same limits at submit for callers that bypass
   // this composer.
+  const intakeFiles = useCallback((files: readonly File[]): void => {
+    if (files.length === 0) return
+    if (addFiles === undefined) {
+      // Older attachment slot occupants only expose the image callback. Keep
+      // that contract alive while newer compositions use the file service.
+      if (addImages !== undefined) {
+        const failure = addImages(files)
+        if (failure !== null) showToast(failure)
+      } else showToast(t('file.unavailable'))
+      return
+    }
+    void addFiles(files).then((failure) => {
+      if (failure !== null) showToast(failure)
+    }).catch((error: unknown) => {
+      showToast(error instanceof Error ? error.message : String(error))
+    })
+  }, [addFiles, showToast])
+
   const intakeImages = useCallback((files: readonly File[]): void => {
-    if (addImages === undefined || files.length === 0) return
+    if (files.length === 0) return
+    const imageTypes = imageLimits?.mediaTypes ?? ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+    const images = files.filter(file => (imageTypes as readonly string[]).includes(file.type))
+    const documents = files.filter(file => !(imageTypes as readonly string[]).includes(file.type))
+    if (documents.length > 0) {
+      intakeFiles(documents)
+    }
+    if (images.length === 0 || addImages === undefined) return
     const rejected = ((): string | null => {
       if (imageLimits !== undefined) {
         // Format precedes limits: a batch with
         // a non-image must announce the format problem, not a count or size
         // it could never pass anyway — addImages rejects it authoritatively.
-        if (files.some(file => !(imageLimits.mediaTypes as readonly string[]).includes(file.type))) {
-          return addImages(files)
-        }
-        if (attachments.length + files.length > imageLimits.maxImagesPerMessage) {
+        if (imageAttachments.length + images.length > imageLimits.maxImagesPerMessage) {
           return t('image.tooMany', { count: imageLimits.maxImagesPerMessage })
         }
-        if (files.some(file => file.size > imageLimits.maxImageBytes)) {
+        if (images.some(file => file.size > imageLimits.maxImageBytes)) {
           return t('image.fileTooLarge', { size: imageSizeText(imageLimits.maxImageBytes) })
         }
-        const total = attachments.reduce((sum, attachment) => sum + attachment.file.size, 0)
-          + files.reduce((sum, file) => sum + file.size, 0)
+        const total = imageAttachments.reduce((sum, attachment) => sum + attachment.file.size, 0)
+          + images.reduce((sum, file) => sum + file.size, 0)
         if (total > imageLimits.maxMessageImageBytes) {
           return t('image.totalTooLarge', { size: imageSizeText(imageLimits.maxMessageImageBytes) })
         }
       }
-      return addImages(files)
+      return addImages(images)
     })()
     if (rejected !== null) showToast(rejected)
-  }, [addImages, attachments, imageLimits, showToast, t])
+  }, [addFiles, addImages, imageAttachments, imageLimits, intakeFiles, showToast, t])
 
-  const canAcceptDrop = !locked && !machineBusy && addImages !== undefined
+  const canAcceptDrop = !locked && !machineBusy && (addImages !== undefined || addFiles !== undefined)
 
   // The keymap handlers read live bar state through this ref so the editor
   // registration survives re-renders without re-arming per keystroke.
@@ -407,7 +434,9 @@ export const InputBar = memo(function InputBar({
           attachments,
           canAcceptDrop,
           onAddImages: intakeImages,
+          onAddFiles: intakeFiles,
           onRemoveImage: (id) => { removeImage?.(id) },
+          onRemoveAttachment: (id) => { removeImage?.(id) },
           dropLimits: imageLimits === undefined ? undefined : {
             count: imageLimits.maxImagesPerMessage,
             size: imageSizeText(imageLimits.maxImageBytes),
@@ -446,6 +475,28 @@ export const InputBar = memo(function InputBar({
         </div>
         <div className={css.row}>
           <div className={css.tools}>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              hidden
+              onChange={(event) => {
+                intakeImages(Array.from(event.currentTarget.files ?? []))
+                event.currentTarget.value = ''
+              }}
+            />
+            <Tooltip label={t('input.attachments')} side="top" delayMs={500}>
+              <button
+                type="button"
+                className={css.add}
+                aria-label={t('input.attachments')}
+                disabled={locked || machineBusy || (addImages === undefined && addFiles === undefined)}
+                onMouseDown={keepFocus}
+                onClick={() => { fileInputRef.current?.click() }}
+              >
+                <IconPaperclipOutline16 size={14} />
+              </button>
+            </Tooltip>
             <Tooltip label={t('input.commands')} side="top" delayMs={500}>
               <button
                 type="button"

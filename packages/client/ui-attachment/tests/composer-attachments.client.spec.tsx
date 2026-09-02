@@ -31,6 +31,8 @@ const t = ((key: string, params?: Readonly<Record<string, unknown>>): string => 
     'image.scrollRight': '向右滚动图片',
     'image.dropBlocked': '当前无法添加附件',
     'image.dropTitle': '附件拖动到此处即可添加',
+    'file.pending': '待发送文件',
+    'file.unnamed': '未命名文件',
   }
   if (key === 'image.remove') {
     const name = params?.name
@@ -177,5 +179,17 @@ describe('ComposerAttachments', () => {
     expect(view.getByText('paper.pdf')).toBeTruthy()
     expect(view.queryByText('本地解析中')).toBeNull()
     expect(view.queryByText('MinerU 排队中')).toBeNull()
+  })
+
+  it('splits dropped images and ordinary files into their respective callbacks', () => {
+    const onAddImages = vi.fn()
+    const onAddFiles = vi.fn()
+    render(<ComposerAttachments {...props({ onAddImages, onAddFiles })} />)
+    const image = attachment('mixed-image').file
+    const pdf = new File(['paper'], 'paper.pdf', { type: 'application/pdf' })
+    const dataTransfer = { types: ['Files'], files: [image, pdf], dropEffect: 'none' }
+    fireEvent.drop(document.body, { dataTransfer })
+    expect(onAddImages).toHaveBeenCalledWith([image])
+    expect(onAddFiles).toHaveBeenCalledWith([pdf])
   })
 })

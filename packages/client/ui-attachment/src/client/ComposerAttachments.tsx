@@ -19,8 +19,9 @@ type ComposerFileAttachment = Extract<ComposerAttachment, { kind: 'file' }>
 
 /** Draft-image rail, document drop target, and original-image preview slot entry. */
 export function ComposerAttachments({
-  attachments, canAcceptDrop, onAddImages, onRemoveImage, dropLimits, t,
+  attachments, canAcceptDrop, onAddImages, onAddFiles, onRemoveImage, onRemoveAttachment, dropLimits, t,
 }: ComposerAttachmentsProps) {
+  const removeAttachment = onRemoveAttachment ?? onRemoveImage
   const imageAttachments = useMemo(
     () => attachments.filter((attachment): attachment is Extract<ComposerAttachment, { kind: 'image' }> => attachment.kind === 'image'),
     [attachments],
@@ -76,7 +77,10 @@ export function ComposerAttachments({
       if (!canAcceptDrop) return
       const files = [...dataTransfer.files]
       if (files.length > 0) {
-        onAddImages(files)
+        const images = files.filter(file => file.type.startsWith('image/'))
+        const documents = files.filter(file => !file.type.startsWith('image/'))
+        if (images.length > 0) onAddImages(images)
+        if (documents.length > 0) onAddFiles?.(documents)
         return
       }
       const rawUri = dataTransfer.getData('text/uri-list').split(/\r?\n/u).find(value => value.trim() !== '' && !value.startsWith('#'))?.trim()
@@ -107,7 +111,7 @@ export function ComposerAttachments({
       document.removeEventListener('drop', onDrop)
       window.removeEventListener('dragend', reset)
     }
-  }, [canAcceptDrop, onAddImages])
+  }, [canAcceptDrop, onAddFiles, onAddImages])
 
   const railItems = useMemo<ComposerRailItem[]>(() => imageAttachments.map(attachment => ({
     id: attachment.id,
@@ -131,13 +135,13 @@ export function ComposerAttachments({
             items={railItems}
             labels={attachmentRailLabels(t)}
             onOpen={(item) => { setPreview(item.attachment) }}
-            onRemove={(item) => { onRemoveImage(item.attachment.id) }}
+            onRemove={(item) => { removeAttachment(item.attachment.id) }}
           />}
           {fileAttachments.length > 0 && <div className={css.files} role="list" aria-label={t('file.pending')}>
             {fileAttachments.map(file => <div className={css.file} role="listitem" key={file.id}>
               <span className={css.fileIcon} aria-hidden><IconDataOutline16 /></span>
               <span className={css.fileName} title={file.file.name}>{file.file.name || t('file.unnamed')}</span>
-              <button type="button" className={css.fileRemove} aria-label={t('file.remove', { name: file.file.name })} onClick={() => { onRemoveImage(file.id) }}>×</button>
+              <button type="button" className={css.fileRemove} aria-label={t('file.remove', { name: file.file.name })} onClick={() => { removeAttachment(file.id) }}>×</button>
             </div>)}
           </div>}
         </div>
