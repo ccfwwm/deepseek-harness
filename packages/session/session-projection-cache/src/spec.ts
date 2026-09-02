@@ -42,8 +42,11 @@ export const checkpointRow = z.object({
 export const checkpointIdentity = z.object({
   createdAt: z.number().int().nonnegative(),
   cwd: z.string().optional(),
-  isSeeded: z.boolean(),
-  inheritedEventCount: z.number().int().nonnegative().transform(SessionLogOffset),
+  // Alpha.4 added these identity fields. Legacy alpha.1-alpha.3 cache
+  // records are disposable derived data, so default the missing fields while
+  // keeping the original session log as the source of truth.
+  isSeeded: z.boolean().default(false),
+  inheritedEventCount: z.number().int().nonnegative().default(0).transform(SessionLogOffset),
 })
 
 /** The identity fields a record is bound to, inferred from {@link checkpointIdentity}. */

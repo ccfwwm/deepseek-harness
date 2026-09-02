@@ -302,6 +302,30 @@ describe('SessionProjectionCache write policy', () => {
   })
 })
 
+describe('SessionProjectionCache legacy compatibility', () => {
+  it('loads alpha.1-alpha.3 records without the alpha.4 identity fields', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-projcache-legacy-'))
+    await writeFile(join(root, 'session_projcache.json'), JSON.stringify({
+      unit: { name: 'session_projcache', version: 3 },
+      global: null,
+      tables: {
+        sessions: {
+          legacy: {
+            identity: { createdAt: 0 },
+            rows: {
+              'cache-test/marks': { ver: 1, seq: -1, val: { marks: [] } },
+            },
+          },
+        },
+      },
+    }))
+
+    const { cache } = await harness({ root })
+    expect(cache.cachedSnapshot(headerOf(SessionId('legacy')), SessionLogOffset(0)))
+      .toEqual({ asOfSeq: -1, values: { 'cache-test/marks': { marks: [] } } })
+  })
+})
+
 describe('SessionProjectionCache listing read', () => {
   it('refuses a checkpoint created for a different inherited cut', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-projcache-'))
