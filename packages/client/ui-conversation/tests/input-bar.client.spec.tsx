@@ -88,6 +88,7 @@ interface BenchOptions {
   footer?: React.ReactNode
   attachments?: readonly ComposerAttachment[]
   addImages?: (files: readonly File[]) => string | null
+  addFiles?: (files: readonly File[]) => Promise<string | null>
   commandMenuOpen?: boolean
   busyEnter?: 'queue' | 'steer'
   toggleCommandMenu?: (selection: { start: number; end: number }) => void
@@ -175,6 +176,7 @@ function bench(over?: BenchOptions) {
     inputActions: shell.actions,
     keyboard: shell,
     addImages: over?.addImages ?? (() => null),
+    addFiles: over?.addFiles,
     removeImage,
     draftImages: ids => ids.flatMap((id) => {
       const attachment = over?.attachments?.find(candidate => candidate.id === id)
@@ -246,7 +248,8 @@ function writeDraft(shell: SessionInputShell, text: string): void {
 describe('image draft rail', () => {
   it('collects clipboard files while preserving text from a mixed paste', async () => {
     const addImages = vi.fn(() => null)
-    const { textarea, shell } = bench({ addImages })
+    const addFiles = vi.fn(async () => null)
+    const { textarea, shell } = bench({ addImages, addFiles })
     const image = new File([Uint8Array.of(1, 2, 3)], 'pixel.png', { type: 'image/png' })
     fireEvent.paste(textarea, {
       clipboardData: {
@@ -260,6 +263,32 @@ describe('image draft rail', () => {
     expect(addImages).toHaveBeenCalledWith([image])
     // The paste lands inside the PASTE_COMMAND update; its commit is a microtask away.
     await vi.waitFor(() => { expect(shell.snapshot.draft).toBe('同时粘贴的文字') })
+  })
+
+  it('keeps ordinary file intake out of the legacy image callback', () => {
+    const addImages = vi.fn(() => null)
+    const addFiles = vi.fn(async () => null)
+    const result = bench({ addImages, addFiles })
+    const file = new File(['notes'], 'notes.txt', { type: 'text/plain' })
+    act(() => { attachmentOwner(result.slotCalls).onAddImages([file]) })
+    expect(addImages).not.toHaveBeenCalled()
+    expect(addFiles).toHaveBeenCalledWith([file])
+  })
+
+  it('exposes an unrestricted attachment picker and splits mixed selections', () => {
+    const addImages = vi.fn(() => null)
+    const addFiles = vi.fn(async () => null)
+    const result = bench({ addImages, addFiles })
+    const button = result.view.getByRole('button', { name: '添加附件' }) as HTMLButtonElement
+    const picker = result.view.container.querySelector<HTMLInputElement>('input[type="file"]')!
+    expect(button.disabled).toBe(false)
+    expect(picker.multiple).toBe(true)
+    expect(picker.accept).toBe('')
+    const image = new File([Uint8Array.of(1)], 'pixel.png', { type: 'image/png' })
+    const document = new File(['data'], 'data.csv', { type: 'text/csv' })
+    fireEvent.change(picker, { target: { files: [image, document] } })
+    expect(addImages).toHaveBeenCalledWith([image])
+    expect(addFiles).toHaveBeenCalledWith([document])
   })
 
   it('pre-checks projected limits at intake: whole-batch refusal with product copy, none added', () => {
@@ -303,10 +332,12 @@ describe('image draft rail', () => {
     expect(within.view.queryByRole('alert')).toBeNull()
   })
 
-  it('announces the format problem before any limit when the batch holds a non-image', () => {
-    const addImages = vi.fn(() => '仅支持 PNG、JPG、WebP、GIF 格式的图片')
+  it('routes ordinary files before image limits are evaluated', () => {
+    const addImages = vi.fn(() => null)
+    const addFiles = vi.fn(async () => null)
     const result = bench({
       addImages,
+      addFiles,
       imageLimits: {
         maxImageBytes: 8,
         maxImagesPerMessage: 1,
@@ -316,14 +347,15 @@ describe('image draft rail', () => {
         mediaTypes: ['image/png'] as const,
       },
     })
-    // Oversized AND over-count AND wrong type: the format rejection wins.
+    // Oversized and over-count ordinary files must not enter image intake.
     const files = [
       new File([new ArrayBuffer(64)], 'a.pdf', { type: 'application/pdf' }),
       new File([new ArrayBuffer(64)], 'b.pdf', { type: 'application/pdf' }),
     ]
     act(() => { attachmentOwner(result.slotCalls).onAddImages(files) })
-    expect(addImages).toHaveBeenCalledWith(files)
-    expect(result.view.getByRole('alert').textContent).toContain('仅支持 PNG、JPG、WebP、GIF 格式的图片')
+    expect(addImages).not.toHaveBeenCalled()
+    expect(addFiles).toHaveBeenCalledWith(files)
+    expect(result.view.queryByRole('alert')).toBeNull()
   })
 
   it('projects display-ready limits into the attachment slot', () => {
@@ -415,11 +447,11 @@ describe('image draft rail', () => {
     expect(result.view.getByRole('alert').textContent).toContain('图片发送失败')
   })
 
-  it('announces an image-intake rejection as a fading toast, repeatable for the same reason', () => {
+  it('announces a file-service rejection as a fading toast, repeatable for the same reason', async () => {
     vi.useFakeTimers()
     try {
-      const addImages = vi.fn(() => '仅支持 PNG、JPG、WebP、GIF 格式的图片')
-      const { view, textarea } = bench({ addImages })
+      const addFiles = vi.fn(async () => '文件读取服务不可用')
+      const { view, textarea } = bench({ addFiles })
       const paste = () => {
         fireEvent.paste(textarea, {
           clipboardData: {
@@ -429,12 +461,12 @@ describe('image draft rail', () => {
         })
       }
       paste()
-      expect(view.getByRole('alert').textContent).toContain('仅支持 PNG、JPG、WebP、GIF 格式的图片')
+      await vi.waitFor(() => { expect(view.getByRole('alert').textContent).toContain('文件读取服务不可用') })
       act(() => { vi.advanceTimersByTime(4000) })
       expect(view.queryByRole('alert')).toBeNull()
       // The identical rejection re-announces: the toast is keyed per show.
       paste()
-      expect(view.getByRole('alert').textContent).toContain('仅支持 PNG、JPG、WebP、GIF 格式的图片')
+      await vi.waitFor(() => { expect(view.getByRole('alert').textContent).toContain('文件读取服务不可用') })
     } finally {
       vi.useRealTimers()
     }

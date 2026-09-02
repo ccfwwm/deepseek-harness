@@ -233,12 +233,10 @@ export const InputBar = memo(function InputBar({
   const intakeFiles = useCallback((files: readonly File[]): void => {
     if (files.length === 0) return
     if (addFiles === undefined) {
-      // Older attachment slot occupants only expose the image callback. Keep
-      // that contract alive while newer compositions use the file service.
-      if (addImages !== undefined) {
-        const failure = addImages(files)
-        if (failure !== null) showToast(failure)
-      } else showToast(t('file.unavailable'))
+      // Do not route ordinary files through the legacy image callback: that
+      // would surface a misleading image-MIME rejection and can discard the
+      // file. Older compositions get an explicit capability error instead.
+      showToast(t('file.unavailable'))
       return
     }
     void addFiles(files).then((failure) => {
@@ -246,7 +244,7 @@ export const InputBar = memo(function InputBar({
     }).catch((error: unknown) => {
       showToast(error instanceof Error ? error.message : String(error))
     })
-  }, [addFiles, showToast])
+  }, [addFiles, showToast, t])
 
   const intakeImages = useCallback((files: readonly File[]): void => {
     if (files.length === 0) return
