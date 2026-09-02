@@ -90,7 +90,7 @@ function PluginCard({ rowKey, moduleName, entryId, trailing, ariaLabel, control,
   readonly entryId: string | null
   readonly trailing: ReactNode
   readonly ariaLabel: string
-  readonly control?: 'user-toggleable'
+  readonly control?: 'user-toggleable' | undefined
   readonly failed: boolean
   readonly expanded: string | null
   readonly onToggle: (key: string) => void
