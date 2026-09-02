@@ -84,12 +84,13 @@ function presetLabel(preset: AgentPresetGroup, t: Translate, presetName: (preset
 }
 
 /** One expandable plugin card; the caller owns the trailing status content. */
-function PluginCard({ rowKey, moduleName, entryId, trailing, ariaLabel, failed, expanded, onToggle, children }: {
+function PluginCard({ rowKey, moduleName, entryId, trailing, ariaLabel, control, failed, expanded, onToggle, children }: {
   readonly rowKey: string
   readonly moduleName: string
   readonly entryId: string | null
   readonly trailing: ReactNode
   readonly ariaLabel: string
+  readonly control?: 'user-toggleable'
   readonly failed: boolean
   readonly expanded: string | null
   readonly onToggle: (key: string) => void
@@ -104,6 +105,7 @@ function PluginCard({ rowKey, moduleName, entryId, trailing, ariaLabel, failed, 
       data-plugin-module={moduleName}
       data-failed={failed ? 'true' : undefined}
       data-open={open ? 'true' : undefined}
+      data-plugin-control={control}
     >
       <button
         className={css.cardContent}
@@ -170,7 +172,9 @@ function StateTag({ kind, label }: { readonly kind: string; readonly label: stri
 }
 
 /** Render the current Loader inventory with guarded enablement controls. */
-export function PluginInventorySettingsTab({ list, presetName, setEnabled, install, getTask, t }: PluginInventorySettingsTabProps): ReactNode {
+export function PluginInventorySettingsTab({
+  list, presetName, setEnabled, install, getTask, t,
+}: PluginInventorySettingsTabProps): ReactNode {
   const sectionId = useId()
   const [request, setRequest] = useState(0)
   const [query, setQuery] = useState('')
@@ -310,6 +314,7 @@ export function PluginInventorySettingsTab({ list, presetName, setEnabled, insta
         expanded={expanded}
         onToggle={toggleRow}
         ariaLabel={`${title}, ${stateText}`}
+        control={providers === undefined && !failed ? 'user-toggleable' : undefined}
         trailing={(
           <>
             {entry.enabled && !failed && entry.fiberPhase !== null

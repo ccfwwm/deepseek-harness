@@ -140,6 +140,7 @@ describe('PluginInventorySettingsTab', () => {
     expect(screen.queryByText(en.presetEnabledTag)).toBeNull()
     fireEvent.click(globalToggle())
     expect(globalToggle().getAttribute('aria-expanded')).toBe('true')
+    expect(view.container.querySelectorAll('[data-plugin-scope="global"] [data-plugin-control="user-toggleable"]')).toHaveLength(4)
     const failed = view.container.querySelector('[data-plugin-scope="global"] [data-failed="true"]')
     expect(failed?.getAttribute('data-plugin-entry')).toBe('telemetry')
     // Failures float above the Loader-ordered remainder.
