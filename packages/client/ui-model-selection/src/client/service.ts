@@ -164,7 +164,23 @@ export class ModelDirectoryResolver extends Service {
     this.cancelScheduledCheck?.()
     this.cancelScheduledCheck = postBackgroundTask(() => {
       this.cancelScheduledCheck = undefined
-      void this.catalog.checkAll(true).catch(() => { /* selectors expose the shared error */ })
+      void this.catalog.checkAll(true).then(() => {
+        // The Host normally pushes one `api-session/model-catalog` event per
+        // completed probe. A few embedded/older transports only return the
+        // metadata response and drop forwarded events; in that case the UI
+        // would remain stuck at “未检测”. If no row has moved after the grace
+        // period, run the same probes through the ordinary RPC path so every
+        // row still converges to available/unavailable instead of remaining
+        // unknown forever. This is a safety net, not the normal startup path.
+        const fallback = setTimeout(() => {
+          this.cancelScheduledCheck = undefined
+          const value = this.catalog.store.getSnapshot().value
+          const models = value?.groups.flatMap(group => group.models) ?? []
+          const stillUnknown = models.length > 0 && models.every(model => model.status === undefined || model.status === 'unknown')
+          if (stillUnknown) void this.catalog.checkAll(false).catch(() => { /* selectors expose the shared error */ })
+        }, 1500)
+        this.cancelScheduledCheck = () => { clearTimeout(fallback) }
+      }).catch(() => { /* selectors expose the shared error */ })
     })
   }
 

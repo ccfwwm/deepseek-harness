@@ -59,9 +59,10 @@ function fileIconFor(file: ChatFileAttachment): ReactNode {
   return <IconDataOutline16 size={22} />
 }
 
-function FileCards({ files, openAttachment }: {
+function FileCards({ files, openAttachment, openParsedAttachment }: {
   files: readonly ChatFileAttachment[]
   openAttachment?: ((attachment: ChatFileAttachment) => void) | undefined
+  openParsedAttachment?: ((attachment: ChatFileAttachment) => void) | undefined
 }): ReactNode {
   if (files.length === 0) return null
   return <div className={css.fileCards} role="list" aria-label="附件">
@@ -69,6 +70,9 @@ function FileCards({ files, openAttachment }: {
       <button type="button" className={css.fileOpen} onClick={() => openAttachment?.(file)} disabled={openAttachment === undefined} title="预览附件">
         <span className={css.fileIcon} aria-hidden>{fileIconFor(file)}</span>
         <span className={css.fileName}>{file.name}</span>
+      </button>
+      <button type="button" className={css.fileOpen} onClick={() => openParsedAttachment?.(file)} disabled={openParsedAttachment === undefined} title="查看解析结果">
+        <span className={css.fileIcon} aria-hidden>↗</span>
       </button>
     </div>)}
   </div>
@@ -191,11 +195,12 @@ function TurnMaxTokensItem({ t }: {
 
 /** Right-aligned bubble shared by user and steering rows. */
 function UserStyleBubble({
-  content, renderMessageImages, openAttachment, actions, pending = false, echo = false, referenceLabels = [], previewImages, t,
+  content, renderMessageImages, openAttachment, openParsedAttachment, actions, pending = false, echo = false, referenceLabels = [], previewImages, t,
 }: {
   content: readonly unknown[]
   renderMessageImages: ChatNodeOwnerProps['renderMessageImages']
   openAttachment?: ChatNodeOwnerProps['openAttachment']
+  openParsedAttachment?: ChatNodeOwnerProps['openParsedAttachment']
   /** Optional IconActions (or similar) below the bubble; receives the joined text. */
   actions?: (text: string) => ReactNode
   /** Whether this is the Host-authoritative pre-admission steering projection. */
@@ -220,7 +225,7 @@ function UserStyleBubble({
     >
       <div className={css.userStack}>
         {renderMessageImages({ images, align: 'end' })}
-        <FileCards files={files} openAttachment={openAttachment} />
+        <FileCards files={files} openAttachment={openAttachment} openParsedAttachment={openParsedAttachment} />
         {showBubble && <div className={css.bubble}>
           {projectUserText(text, referenceLabels)}
           {rest.map((block, i) => <JsonBlock key={i} label={t('message.extraBlock')} payload={block} truncatedLabel={truncated} />)}
@@ -320,7 +325,7 @@ export function PendingSubmissionBubble({ submission, renderMessageImages, t }: 
 
 /** User and admitted-steering keyed Chat renderer. */
 export const UserMessageNodeView = memo(function UserMessageNodeView({
-  node, renderMessageImages, openAttachment, t,
+  node, renderMessageImages, openAttachment, openParsedAttachment, t,
 }: ChatNodeViewProps<'user' | 'steering'>) {
   const data = node.data
   return (
@@ -328,6 +333,7 @@ export const UserMessageNodeView = memo(function UserMessageNodeView({
       content={data.content}
       renderMessageImages={renderMessageImages}
       openAttachment={openAttachment}
+      openParsedAttachment={openParsedAttachment}
       {...data.referenceLabels === undefined ? {} : { referenceLabels: data.referenceLabels }}
       t={t}
       actions={text => (

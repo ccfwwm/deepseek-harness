@@ -82,6 +82,7 @@ export interface ChatNodeOwnerProps {
   renderMessageImages: RenderMessageImages
   /** Open or copy an admitted file attachment from a transcript row. */
   openAttachment?: ((attachment: ChatFileAttachment) => void) | undefined
+  openParsedAttachment?: ((attachment: ChatFileAttachment) => void) | undefined
   copyAttachment?: ((attachment: ChatFileAttachment) => void) | undefined
   fileMentions: (owner: TurnTailOwnerProps) => MarkdownFileMentions | undefined
   /** Turn-process state when this Node belongs to a projected Turn. */

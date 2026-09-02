@@ -479,7 +479,11 @@ export const InputBar = memo(function InputBar({
               multiple
               hidden
               onChange={(event) => {
-                intakeImages(Array.from(event.currentTarget.files ?? []))
+                const files = Array.from(event.currentTarget.files ?? [])
+                const images = files.filter(file => file.type.startsWith('image/'))
+                const documents = files.filter(file => !file.type.startsWith('image/'))
+                if (images.length > 0) intakeImages(images)
+                if (documents.length > 0) intakeFiles?.(documents)
                 event.currentTarget.value = ''
               }}
             />

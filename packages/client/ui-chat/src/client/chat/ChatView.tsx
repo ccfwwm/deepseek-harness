@@ -291,6 +291,9 @@ export function ChatView({
   const openAttachment = useCallback((attachment: ChatFileAttachment): void => {
     window.dispatchEvent(new CustomEvent('zerowall:attachment-open', { detail: attachmentDetail(attachment) }))
   }, [attachmentDetail])
+  const openParsedAttachment = useCallback((attachment: ChatFileAttachment): void => {
+    window.dispatchEvent(new CustomEvent('zerowall:attachment-open', { detail: { ...attachmentDetail(attachment), view: 'parsed' } }))
+  }, [attachmentDetail])
   const copyAttachment = useCallback((attachment: ChatFileAttachment): void => {
     window.dispatchEvent(new CustomEvent('zerowall:attachment-copy', { detail: attachmentDetail(attachment) }))
   }, [attachmentDetail])
@@ -630,6 +633,7 @@ export function ChatView({
               forkAt={forkAt}
               sessionId={sessionId}
               openAttachment={openAttachment}
+              openParsedAttachment={openParsedAttachment}
               copyAttachment={copyAttachment}
               renderMessageImages={renderMessageImages}
               fileMentions={fileMentions}
