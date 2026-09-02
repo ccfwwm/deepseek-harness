@@ -13,7 +13,7 @@ import type { SessionId, SessionSeq } from '@deepseek-ai/dsh-session/types'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type { PromptContentPart, QueueAction, SessionRequestId } from '../../types.ts'
-import type { PendingSubmissionImage, SessionSnapshot } from './snapshot.ts'
+import type { PendingSubmissionFile, PendingSubmissionImage, SessionSnapshot } from './snapshot.ts'
 
 /**
  * Why a local submission echo left the snapshot: `observed` when its durable
@@ -33,6 +33,7 @@ export interface BeginSubmissionInput {
   readonly text: string
   /** Ordered image previews matching the upcoming prompt's image parts. */
   readonly images: readonly PendingSubmissionImage[]
+  readonly files?: readonly PendingSubmissionFile[]
   /** Settlement callback fired exactly once when the echo retires. */
   readonly onRetire?: (retirement: PendingSubmissionRetirement) => void
 }

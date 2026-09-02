@@ -8,7 +8,8 @@ import type {
 import { Button, IconChevronDownOutline14, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChatViewSlotProps } from '../contract/slots.ts'
 import type { ChatFileAttachment } from '../contract/slots.ts'
-import type { ChatSnapshot, TurnNavigationItem } from '../contract/snapshot.ts'
+import type { ChatSnapshot } from '../contract/snapshot.ts'
+import { mergeTurnRailItems, type TurnRailItem } from './turn-rail-items.ts'
 import { PendingSteeringBubble, PendingSubmissionBubble } from './MessageItem.tsx'
 import { ChatNodeSeat } from './ChatNodeSeat.tsx'
 import { TurnNavigator } from './TurnNavigator.tsx'
@@ -203,7 +204,7 @@ function TurnStatus({ startTime, t }: {
  * ordered business Node crosses the keyed renderer seat.
  */
 export function ChatView({
-  useSession, useChat, useSessions, useStore, actions, renderSlot, sessionId, openFile, loadOlder, loadImage, openView, chatScroll, forkAt,
+  useSession, useChat, useSessions, useStore, actions, renderSlot, sessionId, openFile, loadOlder, loadThrough, loadImage, openView, chatScroll, forkAt,
   fileMentions, useTranscriptView, t,
 }: ChatViewSlotProps) {
   const order = useChat(s => s.order)
@@ -211,7 +212,11 @@ export function ChatView({
   // The rail's items are accumulated in the Chat snapshot, so this selector is
   // both the data and its change signal: the array identity moves only when a
   // Turn enters, leaves, or changes its preview.
-  const turnNavigationItems = useChat(s => s.navigation.items())
+  const loadedTurnNavigationItems = useChat(s => s.navigation.items())
+  const turnNavigationItems = useMemo(
+    () => mergeTurnRailItems(loadedTurnNavigationItems, undefined),
+    [loadedTurnNavigationItems],
+  )
   const timeline = useChat(s => s.timeline)
   const inbox = useSession(s => s.queue)
   // Workspace root off the session list row: path summaries display relative to it.
@@ -558,10 +563,14 @@ export function ChatView({
   }
 
   // Identity feeds the memoized rail; a fresh closure per render would defeat it.
-  const navigateToTurn = useCallback((item: TurnNavigationItem): void => {
+  const navigateToTurn = useCallback((item: TurnRailItem): void => {
     const local = listRef.current
     if (local === null) return
-    const row = anchorElement(local, item.anchorKey)
+    if (item.anchor.kind === 'unloaded') {
+      void loadThrough(item.anchor.seq)
+      return
+    }
+    const row = anchorElement(local, item.anchor.key)
     if (row === null) return
     const el = scrollerOf(local)
     el.scrollTop += flowTop(row, el) - 24
@@ -579,7 +588,7 @@ export function ChatView({
     const position = isAtBottom ? null : scrollPosition(local, el)
     if (isAtBottom) chatScroll.save(null)
     else if (position !== null) chatScroll.save(position)
-  }, [loadingOlder, chatScroll])
+  }, [loadThrough, loadingOlder, chatScroll])
 
   return (
     <div className={css.root}>
@@ -587,6 +596,7 @@ export function ChatView({
         <TurnNavigator
           items={turnNavigationItems}
           activeTurn={activeTurn}
+          busyTurn={null}
           onNavigate={navigateToTurn}
           t={t}
         />

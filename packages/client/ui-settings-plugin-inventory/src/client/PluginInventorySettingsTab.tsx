@@ -169,12 +169,9 @@ function StateTag({ kind, label }: { readonly kind: string; readonly label: stri
   return <span className={css.configTag} data-kind={kind}>{label}</span>
 }
 
-/** Render the read-only plugin inventory: agent presets first, then the global plane. */
-export function PluginInventorySettingsTab({ list, presetName, t }: PluginInventorySettingsTabProps): ReactNode {
-  const sectionId = useId()
 /** Render the current Loader inventory with guarded enablement controls. */
 export function PluginInventorySettingsTab({ list, presetName, setEnabled, install, getTask, t }: PluginInventorySettingsTabProps): ReactNode {
-  const catalogId = useId()
+  const sectionId = useId()
   const [request, setRequest] = useState(0)
   const [query, setQuery] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -319,6 +316,11 @@ export function PluginInventorySettingsTab({ list, presetName, setEnabled, insta
               ? <PhaseDot phase={entry.fiberPhase} t={t} />
               : null}
             <StateTag kind={kind} label={stateText} />
+            {providers === undefined && !failed ? (
+              <button type="button" className={css.jumpLink} onClick={() => { void toggle(entry) }}>
+                {t(entry.enabled ? 'disable' : 'enable')}
+              </button>
+            ) : null}
           </>
         )}
       >
@@ -365,7 +367,7 @@ export function PluginInventorySettingsTab({ list, presetName, setEnabled, insta
 
   useEffect(() => {
     if (task === undefined || task.status === 'succeeded' || task.status === 'failed' || task.status === 'cancelled') return
-    const timer = window.setInterval(() => { void getTask(task.id).then(next => { if (next !== undefined) setTask(next) }) }, 700)
+    const timer = window.setInterval(() => { void getTask(task.id).then((next) => { if (next !== undefined) setTask(next) }) }, 700)
     return () => window.clearInterval(timer)
   }, [getTask, task])
 

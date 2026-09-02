@@ -207,6 +207,10 @@ export const SESSION_SEARCH_SNIPPET_MAX_CODE_POINTS = 240
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface RemoteErrorDetailsMap {
+    /** Client-only admission failures retained for subagent and attachment UX. */
+    'subagent-not-resumable': { readonly childSessionId: SessionId }
+    'subagent-delivery-unavailable': { readonly childSessionId: SessionId }
+    'attachment-error': { readonly reason: string }
     'session/model-unavailable': { readonly provider: string; readonly model: string }
     'session/conflict': {
       readonly sessionId: SessionId

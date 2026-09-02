@@ -1,6 +1,7 @@
 /** Session Remote owner: cold reads, explicit Agent commands, and live control state. */
 
 import { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-settings'
 import z from '@deepseek-ai/schemastery'
 import { errorChain } from '@deepseek-ai/dsh-llm'
 import { canOpenNativePath, openNativePath } from '@deepseek-ai/dsh-native-command'
@@ -141,7 +142,7 @@ export class SessionController extends TypertRemoteService {
     // Host-generation catalog. The next explicit read performs the new
     // startup-style check; opening a selector never probes by itself.
     ctx.on('llm/adapters-updated', () => { invalidateModelCatalog(ctx) })
-    ctx.on('settings/document-updated', (namespace) => {
+    ctx.on('settings/updated', (namespace: string) => {
       const key = String(namespace)
       if (key.startsWith('llm-')) invalidateModelCatalog(ctx)
     })

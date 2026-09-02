@@ -10,6 +10,7 @@ import {
   ReasoningEffortId, createUserMessage, freezeMessage,
 } from '@deepseek-ai/dsh-llm'
 import type { MessageSource } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { SessionLogOffset, SessionSeq } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, SessionHeader, SessionId, UserMessage } from '@deepseek-ai/dsh-session'
 import { SessionQueryError, type SessionObservation } from '@deepseek-ai/dsh-session-query'
@@ -324,7 +325,17 @@ export class SessionCommandController {
             )
           }
         }
-        const content = await admitPromptContent(this.ctx.attachments, request.content)
+        // alpha.4's attachment admission intentionally handles encoded images
+        // only. File references are already durable; translate their wire DTO
+        // into the canonical LLM file block without re-admitting or copying
+        // the underlying bytes.
+        const imageAndText = request.content.filter((part): part is Extract<typeof part, { type: 'text' | 'image' }> => part.type !== 'file')
+        const admitted = await admitPromptContent(this.ctx.attachments, imageAndText)
+        let admittedIndex = 0
+        const content = request.content.map((part) => {
+          if (part.type !== 'file') return admitted[admittedIndex++]
+          return { type: 'file', attachment: { ...part } }
+        }) as ContentBlock[]
         const message: UserMessage = createUserMessage({ content, source })
         if (request.mode === 'steer') agent.steer(message)
         else agent.followup(message)

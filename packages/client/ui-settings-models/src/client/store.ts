@@ -7,12 +7,13 @@
  * re-renders from the next describe, pushed or refetched.
  */
 
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {
   ClientRemote, CredentialInfo, LlmConfigurableProvider, LlmProviderInfo, ModelCatalog, SettingsNamespaceView,
 } from '@deepseek-ai/dsh-api-remotes/client'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
-import type { SettingsDescribeFace, SettingsRemote } from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { SettingsDescribeFace } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { SettingsSchemaOperations } from './schema-operations.ts'
 
 /**
@@ -23,6 +24,7 @@ const PROBE_ROUTE = '\u0000probe'
 
 /** The credentials Remote methods the Models page reads and writes through. */
 export type ModelsCredentials = Pick<ClientRemote['credentials'], 'describe' | 'set' | 'unset'>
+export type SettingsRemote = ClientRemote['settings']
 
 /** LLM Remote methods used by the Models page. */
 export type ModelsLlm = Pick<
@@ -103,14 +105,17 @@ export function joinProviderDirectory(
  */
 export interface ModelsWire {
   /** The settings Remote namespace: the redacted read and the profile writes. */
-  settings: SettingsRemote
+  settings: SettingsRemote | any
   /** Credential state and writes for the references provider profiles name. */
-  credentials: ModelsCredentials
+  credentials: ModelsCredentials | any
   /** Provider directory reads and draft endpoint discovery. */
-  llm: ModelsLlm
+  llm: ModelsLlm | any
   /** Host-generation model catalog and explicit health probes. */
-  session?: ModelsSession
+  session?: ModelsSession | any
 }
+
+/** Testable/runtime-compatible input accepted by the page store. */
+export type ModelsWireLike = Pick<ModelsWire, 'credentials' | 'llm' | 'session'> & { settings?: ModelsWire['settings'] }
 
 type ModelCatalogCall = (input?: {
   check?: boolean
@@ -237,11 +242,17 @@ export class ModelsSettingsStore {
    * @param api - the page's credentials Remote and LLM wire faces.
    * @param describeFace - the shared mirror's describe face (namespace views and writability).
    */
-  constructor(
-    private readonly api: Pick<ModelsWire, 'credentials' | 'llm' | 'session'>,
-    private readonly schema: SettingsSchemaOperations,
-    private readonly describeFace: SettingsDescribeFace,
-  ) {}
+  private readonly api: Pick<ModelsWire, 'credentials' | 'llm' | 'session'>
+  private readonly schema: SettingsSchemaOperations
+  private readonly describeFace: SettingsDescribeFace
+
+  constructor(api: ModelsWireLike, schema: SettingsSchemaOperations, describeFace: SettingsDescribeFace)
+  constructor(ctx: ClientContext, schema: SettingsSchemaOperations, describeFace: SettingsDescribeFace)
+  constructor(input: ClientContext | ModelsWireLike, schema: SettingsSchemaOperations, describeFace: SettingsDescribeFace) {
+    this.api = ('remote' in input ? input.remote : input) as Pick<ModelsWire, 'credentials' | 'llm' | 'session'>
+    this.schema = schema
+    this.describeFace = describeFace
+  }
 
   /** Consume the shared model directory's incremental Host snapshot. */
   acceptModelCatalog(value: ModelCatalog): void {

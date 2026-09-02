@@ -4,9 +4,10 @@ import type { ChatNodeOwnerProps, ChatViewSlotProps } from '../contract/slots.ts
 import type { ChatNode } from '../contract/chat-nodes.ts'
 import type { ChatNodeStore } from '../contract/snapshot.ts'
 import {
-  decodeTurnProcess, TURN_PROCESS_INDEPENDENT_KINDS, turnProcessGeneration,
+  TURN_PROCESS_INDEPENDENT_KINDS,
   type TurnProcessSpec,
 } from '../contract/turn-process.ts'
+import type { ConversationLocationDataStore, ConversationTurnDataMap } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { storedTurnProcessEntry } from '../stores.ts'
 import { useSearchableHidden } from './searchable-hidden.ts'
 import css from './ChatView.module.css'
@@ -90,10 +91,7 @@ export const ChatNodeSeat = memo(function ChatNodeSeat({
       ? location.turn.data.get('turn-process')
       : undefined
   })
-  const processSpec = useMemo(
-    () => processSignature === undefined ? undefined : decodeTurnProcess(processSignature),
-    [processSignature],
-  )
+  const processSpec = processSignature
   const nodeStore = useChat(snapshot => snapshot.nodes)
   const processLayoutKeys = useChat((snapshot) => {
     if (!compactTranscript || historyIncomplete || processSpec === undefined) return EMPTY_PROCESS_KEYS
@@ -113,20 +111,18 @@ export const ChatNodeSeat = memo(function ChatNodeSeat({
       : turnProcessLayout(processLayoutKeys, nodeStore, processSpec),
     [nodeStore, processLayoutKeys, processSpec],
   )
-  const processGeneration = useMemo(
-    () => processSpec === undefined ? undefined : turnProcessGeneration(processSpec),
-    [processSpec],
-  )
   const storedEntry = useStore(state => processSpec === undefined
     ? undefined
     : storedTurnProcessEntry(state, processSpec.turn))
-  const processEntry = storedEntry?.generation === processGeneration ? storedEntry : undefined
+  const processEntry = processSpec?.answerStep !== null && storedEntry?.answerStep === processSpec?.answerStep
+    ? storedEntry
+    : undefined
   const processOpen = processEntry !== undefined
   const setOpen = useCallback((open: boolean) => {
-    if (processGeneration !== undefined && processSpec !== undefined) {
-      actions.setTurnProcessOpen(processSpec.turn, processGeneration, open)
+    if (processSpec !== undefined && processSpec.answerStep !== null) {
+      actions.setTurnProcessOpen(processSpec.turn, processSpec.answerStep, open)
     }
-  }, [actions, processGeneration, processSpec])
+  }, [actions, processSpec])
   const routedNode = node as ChatNode | undefined
   const sameTurn = routedNode !== undefined
     && processSpec !== undefined
@@ -152,7 +148,7 @@ export const ChatNodeSeat = memo(function ChatNodeSeat({
   const foldable = processWindowReady
     && (processMember || (ownsDisclosure
       && ((processLayout?.hasExternalProcess ?? false) || processSpec.inlineReasoning)))
-  const turnProcess = useMemo(() => processGeneration === undefined || processSpec === undefined
+  const turnProcess = useMemo(() => processSpec === undefined
     ? undefined
     : {
       spec: processSpec,
@@ -160,7 +156,7 @@ export const ChatNodeSeat = memo(function ChatNodeSeat({
       open: processOpen,
       setOpen,
     }, [
-    foldable, processGeneration, processOpen, processSpec, setOpen,
+    foldable, processOpen, processSpec, setOpen,
   ])
   const controllerInactive = routedNode?.kind === 'turn-process'
     && !foldable
@@ -196,6 +192,7 @@ export const ChatNodeSeat = memo(function ChatNodeSeat({
   const turn = location.kind === 'turn' || location.kind === 'step'
     ? location.turn.turn
     : undefined
+  const turnData = location.kind === 'turn' || location.kind === 'step' ? location.turn.data : undefined
   // Runtime dispatch owns the correlation: every Node's discriminant is the
   // keyed-slot entry passed alongside that same Node. TypeScript does not
   // distribute an object containing a union into a union of objects itself.
@@ -214,7 +211,7 @@ export const ChatNodeSeat = memo(function ChatNodeSeat({
     >
       {renderSlot('conversation.chat.node', routedOwner, {
         entryKey: routedNode.kind,
-        hookContext: nodeKey,
+        hookContext: turnData as ConversationLocationDataStore<ConversationTurnDataMap> | undefined,
         fallback: (
           <JsonBlock
             label={t('message.unknownSurface', { type: routedNode.kind })}

@@ -5,10 +5,9 @@ import { randomUUID } from '@deepseek-ai/dsh-util-crypto'
 import type { AttachmentIdType, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type { SubagentAddress } from '@deepseek-ai/dsh-subagent/client'
 import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
-import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import { SessionLogOffset, SessionSeq, type SessionId } from '@deepseek-ai/dsh-session/types'
 import {
   SessionEventStream,
-  sessionStreamFailure,
 } from '../transport.ts'
 import type { SessionJournalChange } from '../transport.ts'
 import type {
@@ -18,7 +17,7 @@ import type {
   SessionControlFrame,
   SessionQueuedItem,
   SessionRequestId,
-  SessionError,
+  SessionProjectionBaseline,
 } from '../../types.ts'
 import type { ClientFailure, ClientResult } from '../contract/result.ts'
 import { transportResult } from '../contract/result.ts'
@@ -33,6 +32,8 @@ import type {
   SessionEventLikeEntry, SessionLiveEventEntry,
 } from '../contract/events.ts'
 import { Notifier } from './notifier.ts'
+import { isRemoteFailure } from '@deepseek-ai/dsh-api-gateway/client'
+import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { SessionRemotes } from './remotes.ts'
 import { ProjectionValueStore } from './projection-store.ts'
@@ -40,8 +41,18 @@ import type { ProjectionsBaseline } from './projection-store.ts'
 import { resolvedClientTimeZone } from '../time-zone.ts'
 import { SessionQueueMirror } from './queue-mirror.ts'
 
+function projectionsBaseline(value: SessionProjectionBaseline): ProjectionsBaseline {
+  return {
+    ...value,
+    asOfSeq: value.asOfSeq === -1 ? -1 : SessionSeq(value.asOfSeq),
+  }
+}
+
 /** Messages requested per history page. */
 export const PAGE_MESSAGES = 50
+
+/** Messages requested per page while a turn jump loops backwards. */
+export const JUMP_PAGE_MESSAGES = 200
 
 /** Manager-owned observers of a Session object's local state edges. */
 export interface SessionOptions {
@@ -74,7 +85,7 @@ export interface SessionOptions {
  */
 export class Session implements SessionFace {
   // ---- Window and derived state (all private; the snapshot is the only read API) ----
-  private baseSeq = 0
+  private baseSeq = SessionLogOffset(0)
   private hasMore = false
   private openState: OpenState = 'cold'
   private openError: ClientFailure | null = null
@@ -83,6 +94,10 @@ export class Session implements SessionFace {
    *  passes drop all writes once the generation moves on. */
   private openGeneration = 0
   private loadingOlder = false
+  /** Shared low-water target of the running history jump. */
+  private jumpTargetSeq: SessionSeq | null = null
+  /** Completion shared by concurrent/retargeting jump callers. */
+  private jumpPromise: Promise<void> | null = null
   /** Authoritative stream-only inbox snapshot; pending work never hits history. */
   private readonly queueMirror = new SessionQueueMirror()
   private running = false
@@ -189,10 +204,13 @@ export class Session implements SessionFace {
     const requestId = randomUUID() as SessionRequestId
     this.pendingSubmissions = [...this.pendingSubmissions, {
       requestId,
+      placement: this.running
+        ? input.mode === 'steer' ? 'steering' : 'queued'
+        : 'transcript',
       time: Date.now(),
       text: input.text,
       images: input.images,
-      files: input.files ?? [],
+      ...(input.files === undefined ? {} : { files: input.files }),
     }]
     this.submissionSettlements.set(requestId, { onRetire: input.onRetire, retiring: false })
     // The blank → engaging edge flips here, ahead of prompt(): the composer
@@ -239,21 +257,21 @@ export class Session implements SessionFace {
       } else if (this.address.mode === 'one-shot') {
         result = {
           ok: false,
-          error: {
-            code: 'subagent-not-resumable',
-            message: 'one-shot subagent conversations are read-only',
-            details: { childSessionId: this.address.childSessionId },
-          },
+          error: new RemoteError(
+            'subagent-not-resumable',
+            'one-shot subagent conversations are read-only',
+            { childSessionId: this.address.childSessionId },
+          ),
         }
       } else {
         if (content.some(part => part.type === 'image')) {
           result = {
             ok: false,
-            error: {
-              code: 'attachment-error',
-              message: 'Image input is unavailable for subagent continuations.',
-              details: { reason: 'SUBAGENT_IMAGE_UNSUPPORTED' },
-            },
+            error: new RemoteError(
+              'attachment-error',
+              'Image input is unavailable for subagent continuations.',
+              { reason: 'SUBAGENT_IMAGE_UNSUPPORTED' },
+            ),
           }
         } else {
           const routed = toSessionResult(await this.remote.subagents.prompt({
@@ -339,11 +357,11 @@ export class Session implements SessionFace {
     if (address !== undefined && address.mode === 'one-shot') {
       const result: ClientResult<{ accepted: true }> = {
         ok: false,
-        error: {
-          code: 'subagent-delivery-unavailable',
-          message: 'subagent activation cancellation is unavailable',
-          details: { childSessionId: address.childSessionId },
-        },
+        error: new RemoteError(
+          'subagent-delivery-unavailable',
+          'subagent activation cancellation is unavailable',
+          { childSessionId: address.childSessionId },
+        ),
       }
       this.promptError = { op: 'stop', error: result.error }
       this.notifier.markDirty()
@@ -377,11 +395,13 @@ export class Session implements SessionFace {
    * @param title - raw title text (the host normalizes acceptance).
    * @returns the rename result (normalized accepted title + title event seq).
    */
-  async rename(title: string): Promise<ClientResult<{ title: string; seq: number }>> {
+  async rename(title: string): Promise<ClientResult<{ title: string; seq: SessionSeq }>> {
     try {
       const result = toSessionResult(await this.remote.session.rename({ sessionId: this.sessionId, title }))
-      if (result.ok) this.projections.apply('title', result.value.title, result.value.seq)
-      return result
+      if (!result.ok) return result
+      const seq = SessionSeq(result.value.seq)
+      this.projections.apply('title', result.value.title, seq)
+      return { ok: true, value: { title: result.value.title, seq } }
     } catch (error) {
       return transportResult(error)
     }
@@ -422,13 +442,47 @@ export class Session implements SessionFace {
     try {
       await events.prepend({ beforeSeq: this.baseSeq, maxMessages: PAGE_MESSAGES })
     } catch (error) {
-      if (sessionStreamFailure(error) === undefined) {
+      if (!isRemoteFailure(error)) {
         console.error('[session-controller] loadOlder failed:', error)
       }
     } finally {
       this.loadingOlder = false
       this.notifier.markDirty()
     }
+  }
+
+  /** Page backwards until the event window covers the requested turn start. */
+  loadThrough(seq: SessionSeq): Promise<void> {
+    if (this.openState !== 'open' || !this.hasMore || this.baseSeq <= seq) return Promise.resolve()
+    if (this.jumpPromise !== null) {
+      this.jumpTargetSeq = SessionSeq(Math.min(this.jumpTargetSeq ?? seq, seq))
+      return this.jumpPromise
+    }
+    if (this.loadingOlder) return Promise.resolve()
+    this.jumpTargetSeq = seq
+    this.loadingOlder = true
+    this.notifier.markDirty()
+    const generation = this.openGeneration
+    this.jumpPromise = (async () => {
+      try {
+        while (this.hasMore && this.jumpTargetSeq !== null && this.baseSeq > this.jumpTargetSeq) {
+          if (generation !== this.openGeneration) return
+          const events = this.events
+          if (events === undefined) return
+          const before = this.baseSeq
+          await events.prepend({ beforeSeq: this.baseSeq, maxMessages: JUMP_PAGE_MESSAGES })
+          if (this.baseSeq >= before) return
+        }
+      } catch (error) {
+        if (!isRemoteFailure(error)) console.error('[session-controller] loadThrough failed:', error)
+      } finally {
+        this.jumpTargetSeq = null
+        this.jumpPromise = null
+        this.loadingOlder = false
+        this.notifier.markDirty()
+      }
+    })()
+    return this.jumpPromise
   }
 
   /** Rebuild an opened history source after address replacement.
@@ -443,7 +497,7 @@ export class Session implements SessionFace {
     this.openPromise = null
     this.openState = 'cold'
     this.openError = null
-    this.baseSeq = 0
+    this.baseSeq = SessionLogOffset(0)
     this.notifier.markDirty()
     await this.open()
   }
@@ -614,7 +668,11 @@ export class Session implements SessionFace {
   private acceptEventChange(change: SessionJournalChange): void {
     switch (change.type) {
       case 'replace':
-        this.installWindow(change.entries, change.hasMore, change.page.projections)
+        this.installWindow(
+          change.entries,
+          change.hasMore,
+          change.page.projections === undefined ? undefined : projectionsBaseline(change.page.projections),
+        )
         return
       case 'prepend':
         this.prependWindow(change.entries, change.hasMore)
@@ -626,7 +684,7 @@ export class Session implements SessionFace {
 
   /** Replace the complete contiguous window and apply page-owned projection metadata. */
   private installWindow(entries: readonly SessionEventLikeEntry[], hasMore: boolean, projections?: ProjectionsBaseline): void {
-    this.baseSeq = entries[0]?.event.seq ?? 0
+    this.baseSeq = SessionLogOffset(entries[0]?.event.seq ?? 0)
     this.hasMore = hasMore
     if (entries.some(entry => entry.event.type === 'turn/start')) this.firstPromptPendingTurn = false
     if (projections !== undefined) this.projections.seed(projections)
@@ -637,7 +695,7 @@ export class Session implements SessionFace {
 
   /** Prepend one stream-validated history page. */
   private prependWindow(entries: readonly SessionEventLikeEntry[], hasMore: boolean): void {
-    this.baseSeq = entries[0]?.event.seq ?? this.baseSeq
+    this.baseSeq = entries[0] === undefined ? this.baseSeq : SessionLogOffset(entries[0].event.seq)
     this.hasMore = hasMore
     this.eventSource.prepend(entries, hasMore)
   }
@@ -779,8 +837,7 @@ function imageRefsIn(content: unknown): readonly ImageAttachmentRef[] {
 
 /** Convert a terminal Session stream failure to the Client error vocabulary. */
 function openFailure(error: unknown): ClientFailure {
-  const failure = sessionStreamFailure(error)
-  if (failure !== undefined) return failure as SessionError
+  if (isRemoteFailure(error)) return error
   const folded = transportResult<never>(error)
   /* v8 ignore next -- transportResult never returns an ok result. */
   if (folded.ok) throw new Error('transportResult returned an unexpected success')
@@ -788,5 +845,5 @@ function openFailure(error: unknown): ClientFailure {
 }
 /** Narrow a generated Session Remote failure to its service-owned error vocabulary. */
 function toSessionResult<T>(result: RemoteResult<T>): ClientResult<T> {
-  return result.ok ? result : { ok: false, error: result.error as SessionError }
+  return result
 }

@@ -222,7 +222,7 @@ export class ConversationController extends Service implements IConversation {
    */
   async send(text: string): Promise<void> {
     const session = this.scopedSession('send')
-    const submission = session.beginSubmission({ text, images: [] })
+    const submission = session.beginSubmission({ mode: 'queue', text, images: [] })
     try {
       await nextPaint()
       const result = await session.prompt([{ type: 'text', text }], 'queue')
@@ -271,6 +271,7 @@ export class ConversationController extends Service implements IConversation {
       ? undefined
       : new Promise<PendingSubmissionRetirement>((resolve) => { finishRetirement = resolve })
     const submission = session.beginSubmission({
+      mode,
       text,
       images: images.map(attachment => ({
         previewUrl: attachment.previewUrl,
@@ -494,7 +495,7 @@ export class ConversationController extends Service implements IConversation {
     if (!result.ok) {
       if (
         action.kind === 'steer'
-        && (result.error.code === 'steer-unavailable' || result.error.code === 'queue-item-not-found')
+        && (result.error.code === 'session/steer-unavailable' || result.error.code === 'session/queue-item-not-found')
       ) return
       throw new Error(`conversation.updateQueue failed: ${result.error.code}: ${result.error.message}`)
     }

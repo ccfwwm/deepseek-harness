@@ -23,6 +23,7 @@ import { WelcomeNotice } from './WelcomeNotice.tsx'
 import type { WelcomeNoticeInjected } from './WelcomeNotice.tsx'
 import { decodeWelcomeSection, WelcomeNoticeStore } from './welcome-store.ts'
 import { ModelsSettingsStore } from './store.ts'
+import { createModelsOperations } from './operations.ts'
 import type { ModelsWire } from './store.ts'
 import { createSettingsSchemaOperations } from './schema-operations.ts'
 import { en, zh, type ModelsKey } from './locales.ts'
@@ -83,6 +84,7 @@ export function apply(ctx: ClientContext): void {
     settings: ctx.remote.settings,
   }
   const controller = new ModelsSettingsStore(wire, schema, ctx.settingsScope.describe())
+  const operations = createModelsOperations(ctx)
   // Warm the provider/model catalog as the desktop starts. The store guards
   // this probe so opening Settings or receiving invalidations does not cause
   // a second full health check.
@@ -93,14 +95,14 @@ export function apply(ctx: ClientContext): void {
   const injected = (): ModelsSectionInjected => ({
     controller,
     hooks: { snapshot: controller.store },
-    api: wire,
+    operations,
     schema,
     t,
   })
   const deepSeekOnboardingInjected = (): DeepSeekOnboardingInjected => ({
     controller,
     hooks: { models: controller.store },
-    api: wire,
+    operations,
     schema,
     t,
   })

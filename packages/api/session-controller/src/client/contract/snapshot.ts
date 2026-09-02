@@ -30,6 +30,12 @@ export interface PendingSubmissionImage {
   readonly height?: number
 }
 
+/** Browser file metadata retained in a pending submission echo. */
+export interface PendingSubmissionFile {
+  readonly name: string
+  readonly mediaType: string
+}
+
 /** Client surface selected when a local submission begins. */
 export type PendingSubmissionPlacement = 'transcript' | 'queued' | 'steering'
 
@@ -50,6 +56,8 @@ export interface PendingSubmission {
   readonly text: string
   /** Ordered image previews matching the prompt's image parts. */
   readonly images: readonly PendingSubmissionImage[]
+  /** Ordered document metadata matching file content blocks. */
+  readonly files?: readonly PendingSubmissionFile[]
 }
 
 /** History-open lifecycle of a Session event window. */
