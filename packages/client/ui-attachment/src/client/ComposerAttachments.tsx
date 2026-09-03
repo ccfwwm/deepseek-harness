@@ -152,7 +152,13 @@ export function ComposerAttachments({
           {fileAttachments.length > 0 && <div className={css.files} role="list" aria-label={t('file.pending')}>
             {fileAttachments.map(file => <div className={css.file} role="listitem" key={file.id}>
               <span className={css.fileIcon} aria-hidden><IconDataOutline16 /></span>
-              <span className={css.fileName} title={file.file.name}>{file.file.name || t('file.unnamed')}</span>
+              <span className={css.fileBody}>
+                <span className={css.fileName} title={file.file.name}>{file.file.name || t('file.unnamed')}</span>
+                {file.prepared.parseStatus !== undefined && file.prepared.parseStatus !== 'idle' && <span className={css.fileStatus} role="status">
+                  {file.prepared.parseStatus === 'queued' ? '等待解析' : file.prepared.parseStatus === 'running' ? '解析中' : file.prepared.parseStatus === 'done' ? '解析完成' : `解析失败${file.prepared.parseError ? `：${file.prepared.parseError}` : ''}`}
+                </span>}
+                {(file.prepared.parseStatus === 'queued' || file.prepared.parseStatus === 'running') && <span className={css.fileProgress} aria-hidden><span style={{ width: `${Math.max(6, Math.min(100, file.prepared.parseProgress ?? 10))}%` }} /></span>}
+              </span>
               <button type="button" className={css.fileRemove} aria-label={t('file.remove', { name: file.file.name })} onClick={() => { removeAttachment(file.id) }}>×</button>
             </div>)}
           </div>}

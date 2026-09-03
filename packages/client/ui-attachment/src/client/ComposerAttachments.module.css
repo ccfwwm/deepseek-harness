@@ -27,6 +27,37 @@
   white-space: nowrap;
 }
 
+.fileBody {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.fileStatus {
+  overflow: hidden;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileProgress {
+  display: block;
+  width: 100%;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 18%, transparent);
+}
+
+.fileProgress > span {
+  display: block;
+  height: 100%;
+  background: var(--dsw-alias-state-business-primary);
+  transition: width 240ms ease;
+}
+
 .fileIcon {
   display: grid;
   flex: 0 0 auto;
