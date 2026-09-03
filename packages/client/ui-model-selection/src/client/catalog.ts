@@ -127,7 +127,8 @@ export class ModelCatalogDirectory {
 
   /** Merge a Host-pushed incremental probe result into every selector. */
   accept(value: ModelCatalog): void {
-    this.store.set({ value, status: 'ready', error: null })
+    const current = this.store.getSnapshot().value
+    this.store.set({ value: current === null ? value : mergeCatalog(current, value), status: 'ready', error: null })
   }
 
   /** Mark startup rows immediately so asynchronous probes are observable. */
@@ -261,6 +262,31 @@ function preserveChecking(current: ModelCatalog, incoming: ModelCatalog): ModelC
           return prior?.status === 'checking' && (model.status === undefined || model.status === 'unknown')
             ? { ...model, status: 'checking' as const }
             : model
+        }),
+      }
+    }),
+  }
+}
+
+/** Merge out-of-order catalog events without regressing a completed probe. */
+function mergeCatalog(current: ModelCatalog, incoming: ModelCatalog): ModelCatalog {
+  return {
+    ...incoming,
+    groups: incoming.groups.map((group) => {
+      const previous = current.groups.find(candidate => candidate.id === group.id)
+      if (previous === undefined) return group
+      return {
+        ...group,
+        models: group.models.map((model) => {
+          const prior = previous.models.find(candidate => candidate.id === model.id)
+          if (prior === undefined) return model
+          if (prior.lastCheckedAt !== undefined
+            && model.lastCheckedAt !== undefined
+            && prior.lastCheckedAt > model.lastCheckedAt) return prior
+          if (model.status === undefined || model.status === 'unknown' || model.status === 'checking') {
+            if (prior.status !== undefined && prior.status !== 'unknown' && prior.status !== 'checking') return prior
+          }
+          return model
         }),
       }
     }),
