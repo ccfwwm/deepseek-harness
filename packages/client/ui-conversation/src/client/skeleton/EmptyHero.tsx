@@ -131,11 +131,6 @@ function HeroFish({ hovering }: { hovering: boolean }) {
  */
 export function HeroShell({ t, renderSlot, children }: HeroShellProps) {
   const [hovering, setHovering] = useState(false)
-  // The complete client build injects the authoritative application version
-  // through DSH_CLIENT_VERSION. Release builds show the version itself;
-  // preview/dev pages without release metadata retain the channel label.
-  const version = process.env.DSH_CLIENT_VERSION
-  const previewLabel = version ?? t('hero.preview')
   return (
     <div className={css.root}>
       <div className={css.stack}>
@@ -157,7 +152,6 @@ export function HeroShell({ t, renderSlot, children }: HeroShellProps) {
           <span className={css.headlineText}>
             {t('hero.headline')}
           </span>
-          <span className={css.previewBadge} data-build-version={version}>{previewLabel}</span>
         </div>
         <div className={css.body}>
           {/* The composer remains mounted outside this component. */}
