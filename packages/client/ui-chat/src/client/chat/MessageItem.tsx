@@ -41,7 +41,7 @@ function contentParts(content: readonly unknown[]): {
         ...(typeof attachment.pageCount === 'number' ? { pageCount: attachment.pageCount } : {}),
         ...(typeof attachment.sheetCount === 'number' ? { sheetCount: attachment.sheetCount } : {}),
         ...(typeof attachment.preview === 'string' ? { preview: attachment.preview } : {}),
-        ...(typeof attachment.parseStatus === 'string' ? { parseStatus: attachment.parseStatus as ChatFileAttachment['parseStatus'] } : {}),
+        ...(typeof attachment.parseStatus === 'string' ? { parseStatus: attachment.parseStatus as Exclude<ChatFileAttachment['parseStatus'], undefined> } : {}),
         ...(typeof attachment.parseProgress === 'number' ? { parseProgress: attachment.parseProgress } : {}),
         ...(typeof attachment.parseError === 'string' ? { parseError: attachment.parseError } : {}),
       })
@@ -245,7 +245,7 @@ function UserStyleBubble({
         {renderMessageImages({ images, align: 'end' })}
         <FileCards
           files={files}
-          sessionId={sessionId}
+          {...sessionId === undefined ? {} : { sessionId }}
           openAttachment={openAttachment}
           openParsedAttachment={openParsedAttachment}
           copyAttachment={copyAttachment}
