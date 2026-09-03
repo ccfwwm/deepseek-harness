@@ -78,6 +78,8 @@ export type PromptContentPart =
     readonly status?: string
     readonly textChars?: number
     readonly preview?: string
+    /** Complete extracted text, kept separate from the original bytes. */
+    readonly content?: string
     readonly pageCount?: number
     readonly sheetCount?: number
     readonly warning?: string

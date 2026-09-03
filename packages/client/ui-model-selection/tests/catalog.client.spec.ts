@@ -63,6 +63,26 @@ describe('ModelCatalogDirectory', () => {
     await expect(first).resolves.toEqual(initial)
   })
 
+  it('keeps terminal health states visible while a new batch is checking', async () => {
+    const initial: ModelCatalog = {
+      ...catalog('one'),
+      groups: [{ id: 'fixture', name: 'Fixture', models: [
+        { id: 'one', name: 'one', status: 'available', lastCheckedAt: 10 },
+        { id: 'two', name: 'two' },
+      ] }],
+    }
+    const pending = Promise.withResolvers<unknown>()
+    const models = vi.fn((request?: { check?: boolean }) => request?.check === true
+      ? pending.promise
+      : Promise.resolve({ ok: true, value: initial }))
+    const subject = directory(models)
+    await subject.load()
+    const check = subject.checkAll(true)
+    expect(subject.store.getSnapshot().value?.groups[0]?.models.map(model => model.status)).toEqual(['available', 'checking'])
+    pending.resolve({ ok: true, value: initial })
+    await expect(check).resolves.toEqual(initial)
+  })
+
   it('keeps the shared catalog ready while one model is being checked', async () => {
     const initial: ModelCatalog = {
       default: { provider: 'fixture', model: 'one' },

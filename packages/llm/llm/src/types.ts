@@ -88,6 +88,7 @@ export interface FileBlock {
     status?: string
     textChars?: number
     preview?: string
+    content?: string
     pageCount?: number
     sheetCount?: number
     warning?: string

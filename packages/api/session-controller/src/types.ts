@@ -89,6 +89,7 @@ export type PromptContentPart =
     readonly status?: string
     readonly textChars?: number
     readonly preview?: string
+    readonly content?: string
     readonly pageCount?: number
     readonly sheetCount?: number
     readonly warning?: string

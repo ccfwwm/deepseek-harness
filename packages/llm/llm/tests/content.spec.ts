@@ -29,6 +29,21 @@ describe('file attachment text', () => {
       storageStatus: 'stored',
     })).toContain('has not been extracted. Use read_uploaded_file or extract_uploaded_file')
   })
+
+  it('prefers the complete parser artifact over the bounded preview', () => {
+    expect(fileAttachmentText({
+      attachmentId: 'attachment-2',
+      name: 'paper.pdf',
+      mediaType: 'application/pdf',
+      bytes: 1024,
+      sha256: 'b'.repeat(64),
+      parser: 'mineru',
+      status: 'parsed',
+      textChars: 24,
+      preview: 'preview only',
+      content: '# Full Markdown\n\n完整正文',
+    })).toContain('# Full Markdown\n\n完整正文')
+  })
 })
 
 function offloadBase64(messages: readonly Message[], maxBytes: number | undefined): readonly Message[] {

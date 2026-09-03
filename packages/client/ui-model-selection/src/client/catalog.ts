@@ -140,7 +140,13 @@ export class ModelCatalogDirectory {
         ...current,
         groups: current.groups.map(group => ({
           ...group,
-          models: group.models.map(model => ({ ...model, status: 'checking' as const })),
+          // A new batch must not erase a previously confirmed health result.
+          // Unknown rows become checking; terminal rows remain visible until
+          // their own newer probe result arrives.
+          models: group.models.map(model => model.status !== undefined
+            && model.status !== 'unknown' && model.status !== 'checking'
+            ? model
+            : { ...model, status: 'checking' as const }),
         })),
       },
       status: 'ready',
@@ -280,12 +286,15 @@ function mergeCatalog(current: ModelCatalog, incoming: ModelCatalog): ModelCatal
         models: group.models.map((model) => {
           const prior = previous.models.find(candidate => candidate.id === model.id)
           if (prior === undefined) return model
+          // Probe events carry a per-model timestamp. Never let a metadata
+          // snapshot or an older batch regress a terminal result to unknown,
+          // checking, or an older terminal value.
+          const priorTerminal = prior.status !== undefined
+            && prior.status !== 'unknown' && prior.status !== 'checking'
           if (prior.lastCheckedAt !== undefined
-            && model.lastCheckedAt !== undefined
-            && prior.lastCheckedAt > model.lastCheckedAt) return prior
-          if (model.status === undefined || model.status === 'unknown' || model.status === 'checking') {
-            if (prior.status !== undefined && prior.status !== 'unknown' && prior.status !== 'checking') return prior
-          }
+            && (model.lastCheckedAt === undefined || prior.lastCheckedAt > model.lastCheckedAt)) return prior
+          if (priorTerminal && (model.lastCheckedAt === undefined
+            || model.status === undefined || model.status === 'unknown' || model.status === 'checking')) return prior
           return model
         }),
       }

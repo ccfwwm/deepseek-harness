@@ -50,6 +50,7 @@ export type ComposerAttachment = {
     parseError?: string
     textChars?: number
     preview?: string
+    content?: string
     pageCount?: number
     sheetCount?: number
     warning?: string

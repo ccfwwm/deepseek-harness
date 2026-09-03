@@ -41,6 +41,7 @@ function contentParts(content: readonly unknown[]): {
         ...(typeof attachment.pageCount === 'number' ? { pageCount: attachment.pageCount } : {}),
         ...(typeof attachment.sheetCount === 'number' ? { sheetCount: attachment.sheetCount } : {}),
         ...(typeof attachment.preview === 'string' ? { preview: attachment.preview } : {}),
+        ...(typeof attachment.content === 'string' ? { content: attachment.content } : {}),
         ...(typeof attachment.parseStatus === 'string' ? { parseStatus: attachment.parseStatus as Exclude<ChatFileAttachment['parseStatus'], undefined> } : {}),
         ...(typeof attachment.parseProgress === 'number' ? { parseProgress: attachment.parseProgress } : {}),
         ...(typeof attachment.parseError === 'string' ? { parseError: attachment.parseError } : {}),

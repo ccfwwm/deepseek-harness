@@ -132,10 +132,10 @@ function HeroFish({ hovering }: { hovering: boolean }) {
 export function HeroShell({ t, renderSlot, children }: HeroShellProps) {
   const [hovering, setHovering] = useState(false)
   // The complete client build injects the authoritative application version
-  // through DSH_CLIENT_VERSION. Keep the channel label as a fallback for
-  // preview/dev pages that are intentionally built without release metadata.
+  // through DSH_CLIENT_VERSION. Release builds show the version itself;
+  // preview/dev pages without release metadata retain the channel label.
   const version = process.env.DSH_CLIENT_VERSION
-  const previewLabel = version === undefined ? t('hero.preview') : `${t('hero.preview')} ${version}`
+  const previewLabel = version ?? t('hero.preview')
   return (
     <div className={css.root}>
       <div className={css.stack}>
