@@ -87,6 +87,11 @@ function FileCards({ files, sessionId, openAttachment, openParsedAttachment, cop
       <button type="button" className={css.fileCopy} onClick={() => copyAttachment?.(file)} disabled={copyAttachment === undefined} title="复制附件" aria-label="复制附件">
         <IconCopyOutline16 />
       </button>
+      {file.parseStatus !== undefined && file.parseStatus !== 'idle' && (
+        <div className={`${css.fileStatus} ${file.parseStatus === 'failed' ? css.fileStatusFailed : ''}`} role="status">
+          {file.parseStatus === 'queued' ? '等待解析' : file.parseStatus === 'running' ? '解析中' : file.parseStatus === 'done' ? '解析完成' : `解析失败${file.parseError ? `：${file.parseError}` : ''}`}
+        </div>
+      )}
       {(file.parseStatus === 'running' || file.parseStatus === 'queued') && <div className={css.fileProgress} role="status" aria-label="附件解析中">
         <span style={{ width: `${Math.max(6, Math.min(100, file.parseProgress ?? 12))}%` }} />
       </div>}

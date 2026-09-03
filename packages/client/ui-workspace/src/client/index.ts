@@ -11,7 +11,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { RemoteHostFacts } from '@deepseek-ai/dsh-api-remotes/client'
 import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
-import type { IWorkspaces, WorkspaceSnapshot } from '@deepseek-ai/dsh-api-workspace-controller/client'
+import type { IWorkspaces, WorkspaceSnapshot, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { HostObservable, SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: pulls the Controller service merges.
 import type {} from '@deepseek-ai/dsh-api-session-controller/client'
@@ -22,7 +22,7 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 // Type-only: pulls the Session root standard-hook merge.
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
-import type { WorkspaceBrowserInjected, WorkspacePickerInjected } from './contract/slots.ts'
+import type { WorkspaceBrowserInjected, WorkspaceContextAction, WorkspacePickerInjected } from './contract/slots.ts'
 import { UiWorkspaceService } from './navigation.ts'
 import { createWorkspaceViewStore } from './stores.ts'
 import { WorkspaceBrowser } from './rows/WorkspaceBrowser.tsx'
@@ -95,6 +95,41 @@ export function apply(ctx: Context): void {
     subscribe: listener => ctx.on('connection/reset', listener),
   }
   const pickerFlowSource = flowSource('conversation.hero.workspace.directoryFlow')
+  const workspaceContextActions: readonly WorkspaceContextAction[] = [
+    {
+      id: 'open-in-explorer',
+      label: '在资源管理器中打开',
+      order: 20,
+      run: async (workspace: WorkspaceView) => {
+        const desktop = (globalThis as {
+          zerowallDesktop?: {
+            openFolder?: (path: string) => Promise<boolean>
+            revealPath?: (path: string) => Promise<boolean>
+          }
+        }).zerowallDesktop
+        if (desktop?.openFolder !== undefined && await desktop.openFolder(workspace.path)) return
+        if (desktop?.revealPath !== undefined) {
+          await desktop.revealPath(workspace.path)
+          return
+        }
+        throw new Error('当前桌面运行时不支持打开资源管理器。')
+      },
+    },
+    {
+      id: 'copy-workspace-path',
+      label: '复制路径',
+      order: 21,
+      run: async (workspace: WorkspaceView) => {
+        const desktop = (globalThis as { zerowallDesktop?: { copyText?: (value: string) => Promise<boolean> } }).zerowallDesktop
+        if (await desktop?.copyText?.(workspace.path)) return
+        if (navigator.clipboard?.writeText !== undefined) {
+          await navigator.clipboard.writeText(workspace.path)
+          return
+        }
+        throw new Error('当前运行时不支持复制路径。')
+      },
+    },
+  ]
   const browserInjected = (): WorkspaceBrowserInjected => ({
     // Explicit group actions keep their target; a top-level action creates an
     // independent unscoped Session.
@@ -127,6 +162,7 @@ export function apply(ctx: Context): void {
       await workspaces.insertSessionBefore(workspaceId, sessionId, beforeSessionId)
     },
     createWorkspace: input => workspaces.create(input),
+    workspaceContextActions,
     hooks: { directoryFlow: browserFlowSource, hostInfo },
   })
   const pickerInjected = (): WorkspacePickerInjected => ({
