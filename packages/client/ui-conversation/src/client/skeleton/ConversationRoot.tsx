@@ -329,7 +329,7 @@ export function ConversationRoot({
   const blocked = !inert && composerBlock !== undefined && !noWorkspaceHero
   const inputBar = renderSlot('conversation.composer.bar', {
     variant: hero ? 'hero' : 'composer',
-    ...(inert || noWorkspaceHero
+    ...(inert
       ? {
         disabled: true,
         placeholder: t('placeholder.workspace'),

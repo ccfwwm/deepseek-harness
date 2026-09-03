@@ -42,7 +42,7 @@ export function ComposerAttachments({
   useEffect(() => {
     const fileTransfer = (event: globalThis.DragEvent): DataTransfer | null => {
       const dataTransfer = event.dataTransfer
-      if (dataTransfer === null || (!dataTransfer.types.includes('Files') && !dataTransfer.types.includes('text/uri-list') && !dataTransfer.types.includes('text/html'))) return null
+      if (dataTransfer === null || (!dataTransfer.types.includes('Files') && !dataTransfer.types.includes('text/uri-list') && !dataTransfer.types.includes('text/html') && !dataTransfer.types.includes('application/x-zerowall-attachment'))) return null
       return dataTransfer
     }
     const reset = (): void => {
@@ -75,6 +75,18 @@ export function ComposerAttachments({
       event.preventDefault()
       reset()
       if (!canAcceptDrop) return
+      const serialized = dataTransfer.getData('application/x-zerowall-attachment')
+      if (serialized) {
+        try {
+          const value = JSON.parse(serialized) as { attachmentId?: unknown; sessionId?: unknown }
+          if (typeof value.attachmentId === 'string') {
+            window.dispatchEvent(new CustomEvent('zerowall:attachment-readd', { detail: { attachmentId: value.attachmentId, sessionId: typeof value.sessionId === 'string' ? value.sessionId : undefined } }))
+            return
+          }
+        } catch {
+          // Continue with normal file/URL handling for malformed external data.
+        }
+      }
       const files = [...dataTransfer.files]
       if (files.length > 0) {
         const images = files.filter(file => file.type.startsWith('image/'))

@@ -246,6 +246,17 @@ export const InputBar = memo(function InputBar({
     })
   }, [addFiles, showToast, t])
 
+  useEffect(() => {
+    const onFiles = (event: Event): void => {
+      const files = (event as CustomEvent<{ files?: unknown }>).detail?.files
+      if (!Array.isArray(files)) return
+      const accepted = files.filter((file): file is File => typeof File !== 'undefined' && file instanceof File)
+      if (accepted.length > 0) intakeFiles(accepted)
+    }
+    window.addEventListener('zerowall:attachment-files', onFiles)
+    return () => { window.removeEventListener('zerowall:attachment-files', onFiles) }
+  }, [intakeFiles])
+
   const intakeImages = useCallback((files: readonly File[]): void => {
     if (files.length === 0) return
     const imageTypes = imageLimits?.mediaTypes ?? ['image/png', 'image/jpeg', 'image/webp', 'image/gif']

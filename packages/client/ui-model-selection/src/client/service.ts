@@ -178,7 +178,7 @@ export class ModelDirectoryResolver extends Service {
           const models = value?.groups.flatMap(group => group.models) ?? []
           const stillUnknown = models.length > 0 && models.every(model => model.status === undefined || model.status === 'unknown')
           if (stillUnknown) void this.catalog.checkAll(false).catch(() => { /* selectors expose the shared error */ })
-        }, 1500)
+        }, 500)
         this.cancelScheduledCheck = () => { clearTimeout(fallback) }
       }).catch(() => { /* selectors expose the shared error */ })
     })

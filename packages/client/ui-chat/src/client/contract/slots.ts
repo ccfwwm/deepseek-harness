@@ -101,6 +101,9 @@ export interface ChatFileAttachment {
   readonly pageCount?: number
   readonly sheetCount?: number
   readonly preview?: string
+  readonly parseStatus?: 'idle' | 'queued' | 'running' | 'done' | 'failed'
+  readonly parseProgress?: number
+  readonly parseError?: string
 }
 
 /** Shared presentation state for one Turn-process answer generation. */

@@ -29,7 +29,7 @@
 
 .fileCard {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 36px;
+  grid-template-columns: minmax(0, 1fr) 36px 36px;
   align-items: center;
   min-height: 68px;
   overflow: hidden;
@@ -43,6 +43,22 @@
   border: 0;
   background: transparent;
   color: inherit;
+}
+
+.fileProgress {
+  grid-column: 1 / -1;
+  height: 3px;
+  margin: 0 8px 6px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 18%, transparent);
+}
+
+.fileProgress span {
+  display: block;
+  height: 100%;
+  background: var(--dsw-alias-state-business-primary);
+  transition: width 240ms ease;
 }
 
 .fileOpen {

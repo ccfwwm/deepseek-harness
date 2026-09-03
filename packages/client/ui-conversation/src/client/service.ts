@@ -365,13 +365,17 @@ export class ConversationController extends Service implements IConversation {
       if (!response.ok) throw new Error(`${response.error.code}: ${response.error.message}`)
       const live = this.draftAttachments.get(attachment.id)
       if (live?.kind === 'file') {
-        live.prepared = response.value
+        live.prepared = { ...response.value, parseStatus: 'queued', parseProgress: 0 }
         shell?.setDraft(shell.state.getSnapshot().draft)
       }
       // Start extraction as soon as the original bytes are safely stored. The
       // Composer remains interactive, while submission serialization awaits
       // this already-running task so the model receives parsed text instead of
       // being told to materialize the original and choose another PDF Skill.
+      if (live?.kind === 'file') {
+        live.prepared = { ...live.prepared, parseStatus: 'running', parseProgress: 12 }
+        shell?.setDraft(shell.state.getSnapshot().draft)
+      }
       const extraction = await remote.extract({
         sessionId,
         attachmentId: response.value.attachmentId,
@@ -389,7 +393,7 @@ export class ConversationController extends Service implements IConversation {
       })
       if (!parsed.ok) throw new Error(`${parsed.error.code}: ${parsed.error.message}`)
       if (live?.kind === 'file') {
-        live.prepared = parsed.value
+        live.prepared = { ...parsed.value, parseStatus: 'done', parseProgress: 100 }
         shell?.setDraft(shell.state.getSnapshot().draft)
       }
       return parsed.value
@@ -398,7 +402,7 @@ export class ConversationController extends Service implements IConversation {
       const live = this.draftAttachments.get(attachment.id)
       if (live?.kind === 'file') {
         if (live.prepared.storageStatus === 'stored') {
-          live.prepared = { ...live.prepared, warning: `自动解析失败：${message}` }
+          live.prepared = { ...live.prepared, parseStatus: 'failed', parseProgress: 100, parseError: message, warning: `自动解析失败：${message}` }
           shell?.setDraft(shell.state.getSnapshot().draft)
           shell?.notify('info', `附件 ${live.file.name || 'uploaded-file'} 自动解析失败，已保留原文件。`)
           return live.prepared
