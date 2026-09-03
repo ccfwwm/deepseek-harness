@@ -77,6 +77,7 @@ export class ModelCatalogDirectory {
   checkAll(background = false): Promise<ModelCatalog> {
     const resident = background ? this.backgroundInflight : this.checkInflight
     if (resident !== undefined) return resident
+    if (background) this.markCheckingAll()
     const operation = this.runIncrementalCheck(background).finally(() => {
       if (background) {
         if (this.backgroundInflight === operation) this.backgroundInflight = undefined
@@ -92,7 +93,14 @@ export class ModelCatalogDirectory {
       const generation = this.generation
       const response = await this.session.modelCatalog({ check: true, refresh: true, background: true })
       if (!response.ok) throw new Error(`${response.error.code}: ${response.error.message}`)
-      if (generation === this.generation) this.accept(response.value)
+      if (generation === this.generation) {
+        // Embedded transports can return the metadata snapshot without
+        // forwarding the incremental probe events. Keep the visible
+        // "checking" state until a probe result arrives instead of replacing
+        // it with a second batch of "unknown" rows.
+        const current = this.store.getSnapshot().value
+        this.accept(current === null ? response.value : preserveChecking(current, response.value))
+      }
       return response.value
     }
     const catalog = await this.load()
@@ -120,6 +128,23 @@ export class ModelCatalogDirectory {
   /** Merge a Host-pushed incremental probe result into every selector. */
   accept(value: ModelCatalog): void {
     this.store.set({ value, status: 'ready', error: null })
+  }
+
+  /** Mark startup rows immediately so asynchronous probes are observable. */
+  private markCheckingAll(): void {
+    const current = this.store.getSnapshot().value
+    if (current === null) return
+    this.store.set({
+      value: {
+        ...current,
+        groups: current.groups.map(group => ({
+          ...group,
+          models: group.models.map(model => ({ ...model, status: 'checking' as const })),
+        })),
+      },
+      status: 'ready',
+      error: null,
+    })
   }
 
   private probeModel(provider: string, model: string, markChecking: boolean): Promise<ModelCatalog> {
@@ -220,6 +245,25 @@ export class ModelCatalogDirectory {
     // new metadata atomically once it is available.
     this.invalidate(false)
     void this.load().catch(() => { /* the selector exposes the shared error */ })
+  }
+}
+
+function preserveChecking(current: ModelCatalog, incoming: ModelCatalog): ModelCatalog {
+  return {
+    ...incoming,
+    groups: incoming.groups.map((group) => {
+      const previous = current.groups.find(candidate => candidate.id === group.id)
+      if (previous === undefined) return group
+      return {
+        ...group,
+        models: group.models.map((model) => {
+          const prior = previous.models.find(candidate => candidate.id === model.id)
+          return prior?.status === 'checking' && (model.status === undefined || model.status === 'unknown')
+            ? { ...model, status: 'checking' as const }
+            : model
+        }),
+      }
+    }),
   }
 }
 
