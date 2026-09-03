@@ -126,7 +126,11 @@ export function repositoryClientBuildEnvironment(
     ...inherited,
     DSH_CLIENT_COMMIT_HASH: repositoryCommitHash(root, environment),
     ...(dirty === true ? { DSH_CLIENT_GIT_DIRTY: 'true' } : {}),
-    DSH_CLIENT_VERSION: repositoryVersion(root),
+    // ZeroWall's desktop wrapper builds the upstream Harness from a nested
+    // checkout whose package version intentionally remains the DSH release
+    // version.  A namespaced override lets the outer product stamp its own
+    // public version without weakening the default repository invariant.
+    DSH_CLIENT_VERSION: environment.ZEROWALL_CLIENT_VERSION ?? repositoryVersion(root),
   }
 }
 
