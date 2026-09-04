@@ -233,6 +233,30 @@ describe('syncTools', () => {
     expect(result.content[0]).toEqual({ type: 'text', text: 'native' })
   })
 
+  it('injects the active Biomni model and key only for execution tools', async () => {
+    const resolver = vi.fn(async () => 'sentinel-api-key')
+    ctx.provide('zerowallMcpCredentialResolver', { resolve: resolver } as never)
+    const client = createMockClient([
+      { name: 'r_biomni_run_agent', inputSchema: { type: 'object' } },
+      { name: 'r_biomni_status', inputSchema: { type: 'object' } },
+    ])
+    await syncTools(client as never, ctx, { ...defaultOpts, serverName: 'rdatalinux_biomni' }, new Map())
+    const agent = {
+      session: {
+        id: 'session-1',
+        requestHeader: () => ({ config: { provider: 'zerowall-ai-cloud-50-completions', model: 'gpt-test' } }),
+      },
+    }
+    await ctx.tools.execute({ signal: testToolSignal, callId: ToolCallId('biomni-agent'), name: 'mcp__rdatalinux_biomni__r_biomni_run_agent', arguments: { prompt: 'x' }, agent } as never)
+    const agentCall = client.callTool.mock.calls[0]?.[0] as { name: string; arguments: Record<string, unknown> }
+    expect(agentCall.arguments).toMatchObject({ model: 'gpt-test', session_id: 'session-1', api_key: 'sentinel-api-key' })
+    expect(resolver).toHaveBeenCalledWith('zerowall-ai-cloud-50-completions', 'gpt-test')
+
+    await ctx.tools.execute({ signal: testToolSignal, callId: ToolCallId('biomni-status'), name: 'mcp__rdatalinux_biomni__r_biomni_status', arguments: {}, agent } as never)
+    const statusCall = client.callTool.mock.calls[1]?.[0] as { arguments: Record<string, unknown> }
+    expect(statusCall.arguments).not.toHaveProperty('api_key')
+  })
+
   it('rejects a tool list where one raw name appears twice', async () => {
     const client = createMockClient([
       { name: 'dup', inputSchema: { type: 'object' } },

@@ -326,6 +326,16 @@ function createExecutor(
       if (typeof argsObj.model !== 'string' && typeof route?.model === 'string') argsObj.model = route.model
       const sessionId = exec.agent?.session.id
       if (typeof argsObj.session_id !== 'string' && typeof sessionId === 'string' && sessionId.length > 0) argsObj.session_id = sessionId
+      // ZeroWall's AI Cloud routes keep the provider key in its Host-side
+      // credential broker. Resolve it only for the two Biomni execution
+      // tools that declare `api_key`; never add it to read-only calls or logs.
+      if (rawName === 'r_biomni_run_agent' || rawName === 'r_biomni_call_tool') {
+        const resolver = ctx.get('zerowallMcpCredentialResolver') as { resolve?: (provider: string, model: string) => Promise<string | undefined> } | undefined
+        if (typeof argsObj.api_key !== 'string' && typeof route?.provider === 'string' && typeof route?.model === 'string' && typeof resolver?.resolve === 'function') {
+          const apiKey = await resolver.resolve(route.provider, route.model)
+          if (apiKey !== undefined && apiKey.trim().length > 0) argsObj.api_key = apiKey
+        }
+      }
     }
     const result = await callToolUncached(client, rawName, argsObj, exec, opts)
 
