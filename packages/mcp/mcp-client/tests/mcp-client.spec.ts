@@ -242,9 +242,10 @@ describe('syncTools', () => {
     ])
     await syncTools(client as never, ctx, { ...defaultOpts, serverName: 'rdatalinux_biomni' }, new Map())
     const agent = {
+      options: { provider: 'zerowall-ai-cloud-50-completions', model: 'gpt-test' },
       session: {
         id: 'session-1',
-        requestHeader: () => ({ config: { provider: 'zerowall-ai-cloud-50-completions', model: 'gpt-test' } }),
+        requestHeader: () => undefined,
       },
     }
     await ctx.tools.execute({ signal: testToolSignal, callId: ToolCallId('biomni-agent'), name: 'mcp__rdatalinux_biomni__r_biomni_run_agent', arguments: { prompt: 'x' }, agent } as never)

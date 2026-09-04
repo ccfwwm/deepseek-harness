@@ -322,7 +322,7 @@ function createExecutor(
     // Inject only non-secret routing metadata; API keys remain in the Host
     // credential broker and are never added to MCP arguments or chat content.
     if (opts.serverName === 'rdatalinux_biomni') {
-      const route = exec.agent?.session.requestHeader()?.config
+      const route = exec.agent?.session.requestHeader()?.config ?? exec.agent?.options
       if (typeof argsObj.model !== 'string' && typeof route?.model === 'string') argsObj.model = route.model
       const sessionId = exec.agent?.session.id
       if (typeof argsObj.session_id !== 'string' && typeof sessionId === 'string' && sessionId.length > 0) argsObj.session_id = sessionId
