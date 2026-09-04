@@ -317,7 +317,16 @@ function createExecutor(
     // object, but can be any JSON value if the model misbehaves (outputs a bare
     // string/number/null). Fallback to {} lets the MCP server produce a
     // specific "missing required param" error the model can learn from.
-    const argsObj = (typeof args === 'object' && args !== null ? args : {}) as Record<string, unknown>
+    const argsObj = (typeof args === 'object' && args !== null ? { ...(args as Record<string, unknown>) } : {}) as Record<string, unknown>
+    // Biomni uses the model that is active in the current ZeroWall session.
+    // Inject only non-secret routing metadata; API keys remain in the Host
+    // credential broker and are never added to MCP arguments or chat content.
+    if (opts.serverName === 'rdatalinux_biomni') {
+      const route = exec.agent?.session.requestHeader()?.config
+      if (typeof argsObj.model !== 'string' && typeof route?.model === 'string') argsObj.model = route.model
+      const sessionId = exec.agent?.session.id
+      if (typeof argsObj.session_id !== 'string' && typeof sessionId === 'string' && sessionId.length > 0) argsObj.session_id = sessionId
+    }
     const result = await callToolUncached(client, rawName, argsObj, exec, opts)
 
     // The SDK may return a legacy `toolResult` shape; normalize to content array.
