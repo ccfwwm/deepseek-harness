@@ -37,6 +37,9 @@ const DEFAULT_PROBE_CONCURRENCY = 8
 export const BACKGROUND_PROBE_CONCURRENCY = 2
 
 interface CatalogCache {
+  generation: number
+  nextProbeVersion: number
+  probeVersions: Map<string, number>
   value?: ModelCatalog
   checked: boolean
   metadataInflight?: Promise<ModelCatalog> | undefined
@@ -65,6 +68,7 @@ export async function buildModelCatalog(
 ): Promise<ModelCatalog> {
   const cache = catalogCacheFor(ctx)
   await hydrateHealth(cache)
+  const generation = cache.generation
   const targeted = options.provider !== undefined || options.model !== undefined
   if (options.check !== true) {
     if (options.refresh !== true && cache.value !== undefined) return cache.value
@@ -73,7 +77,7 @@ export async function buildModelCatalog(
     cache.metadataInflight = operation
     try {
       const value = await operation
-      if (cache.value === undefined) cache.value = value
+      if (generation === cache.generation) cache.value = mergeHealth(value, cache.health)
       return value
     } finally {
       if (cache.metadataInflight === operation) cache.metadataInflight = undefined
@@ -82,8 +86,12 @@ export async function buildModelCatalog(
   if (!targeted && options.refresh !== true && cache.checked && cache.value !== undefined) return cache.value
   if (!targeted && cache.checkInflight !== undefined) return cache.checkInflight
   if (targeted) {
+    const key = healthKey(options.provider ?? '', options.model ?? '')
+    const version = ++cache.nextProbeVersion
+    cache.probeVersions.set(key, version)
     const base = cache.value ?? await buildModelCatalog(ctx, defaultSelection, {})
     const checkedValue = await checkOneModel(ctx, base, options)
+    if (generation !== cache.generation || cache.probeVersions.get(key) !== version) return cache.value ?? checkedValue
     const checked = checkedValue.groups
       .find(group => group.id === options.provider)?.models
       .find(model => model.id === options.model)
@@ -92,6 +100,7 @@ export async function buildModelCatalog(
       : replaceModel(cache.value ?? base, options.provider, options.model, checked)
     cache.value = value
     captureHealth(cache, value)
+    ctx.logger.debug('model-probe generation=%s version=%s provider=%s model=%s source=target status=%s', generation, version, options.provider, options.model, checked?.status)
     await persistHealth(cache)
     ctx.emit('api-session/model-catalog', value)
     // A targeted probe only establishes one row. Keep the generation marked
@@ -103,6 +112,7 @@ export async function buildModelCatalog(
   cache.checkInflight = operation
   try {
     const value = await operation
+    if (generation !== cache.generation) return cache.value ?? value
     cache.value = value
     cache.checked = true
     captureHealth(cache, value)
@@ -120,16 +130,25 @@ async function checkAllModels(
   options: ModelCatalogOptions,
 ): Promise<ModelCatalog> {
   const cache = catalogCacheFor(ctx)
-  const base = cache.value ?? await buildModelCatalogUncached(ctx, defaultSelection, {})
+  const generation = cache.generation
+  const base = options.refresh === true || cache.value === undefined
+    ? mergeHealth(await buildModelCatalogUncached(ctx, defaultSelection, {}), cache.health)
+    : cache.value
+  if (generation !== cache.generation) return cache.value ?? base
   // Keep the last known row states visible while probes run. The caller owns
   // the batch progress indicator; replacing every row with "checking" makes
   // the selector look unavailable and destroys useful startup history.
   cache.value = base
-  const targets = base.groups.flatMap(group => group.models.map(model => ({
-    provider: group.id,
-    model,
-  })))
+  const targets = base.groups.flatMap(group => group.models.map((model) => {
+    const key = healthKey(group.id, model.id)
+    const version = ++cache.nextProbeVersion
+    cache.probeVersions.set(key, version)
+    return { provider: group.id, model, key, version }
+  }))
   await mapWithConcurrency(targets, options.concurrency ?? DEFAULT_PROBE_CONCURRENCY, async (target) => {
+    if (generation !== cache.generation) return
+    const { key, version } = target
+    if (cache.probeVersions.get(key) !== version) return
     const checked = await modelEntry(ctx, target.provider, {
       provider: target.provider,
       id: target.model.id,
@@ -138,7 +157,10 @@ async function checkAllModels(
       ...(target.model.inputModalities === undefined ? {} : { inputModalities: [...target.model.inputModalities] }),
     }, { ...options, check: true })
     const entry = target.model.reasoning === undefined ? checked : { ...checked, reasoning: target.model.reasoning }
+    if (generation !== cache.generation || cache.probeVersions.get(key) !== version) return
     cache.value = replaceModel(cache.value ?? base, target.provider, target.model.id, entry)
+    captureHealth(cache, cache.value)
+    ctx.logger.debug('model-probe generation=%s version=%s provider=%s model=%s source=batch status=%s', generation, version, target.provider, target.model.id, entry.status)
     // Stream each completed row so the UI never waits for the slowest model.
     ctx.emit('api-session/model-catalog', cache.value)
   })
@@ -163,6 +185,8 @@ function replaceModel(
 export function invalidateModelCatalog(ctx: Context): void {
   const cache = catalogCaches.get(ctx as object)
   if (cache === undefined) return
+  cache.generation += 1
+  cache.probeVersions.clear()
   if (cache.value !== undefined) captureHealth(cache, cache.value)
   delete cache.value
   cache.checked = false
@@ -174,7 +198,10 @@ function catalogCacheFor(ctx: Context): CatalogCache {
   const key = ctx as object
   const existing = catalogCaches.get(key)
   if (existing !== undefined) return existing
-  const created: CatalogCache = { checked: false, visionSupported: new Set(), health: new Map() }
+  const created: CatalogCache = {
+    generation: 0, nextProbeVersion: 0, probeVersions: new Map(),
+    checked: false, visionSupported: new Set(), health: new Map(),
+  }
   catalogCaches.set(key, created)
   return created
 }
@@ -205,7 +232,7 @@ function mergeHealth(catalog: ModelCatalog, health: ReadonlyMap<string, Persiste
 function captureHealth(cache: CatalogCache, catalog: ModelCatalog): void {
   for (const group of catalog.groups) {
     for (const model of group.models) {
-      if (model.status === undefined || model.status === 'checking' || model.lastCheckedAt === undefined) continue
+      if (model.status === undefined || model.status === 'unknown' || model.status === 'checking' || model.lastCheckedAt === undefined) continue
       cache.health.set(healthKey(group.id, model.id), {
         status: model.status,
         ...(model.statusMessage === undefined ? {} : { statusMessage: model.statusMessage }),
@@ -357,10 +384,12 @@ async function modelEntry(
   // Adapters now expose local reasoning declarations from listModels(). Keep a
   // compatibility fallback for older adapters whose resolver is synchronous;
   // failures are ignored and never prevent the metadata catalog from loading.
-  if (options.check !== true && model.reasoning === undefined) {
+  if (options.check !== true) {
     try {
-      const resolved = await immediateResolution(ctx, provider, model.id)
-      if (resolved.reasoning !== undefined) entry = { ...entry, reasoning: toModelReasoning(resolved.reasoning) }
+      if (model.reasoning === undefined) {
+        const resolved = await immediateResolution(ctx, provider, model.id)
+        if (resolved.reasoning !== undefined) entry = { ...entry, reasoning: toModelReasoning(resolved.reasoning) }
+      }
     } catch { /* metadata-only catalog remains usable without enrichment */ }
     return entry
   }
@@ -368,22 +397,6 @@ async function modelEntry(
   // metadata here serializes every probe behind provider discovery and can
   // make a healthy model appear hung; metadata is refreshed in a separate
   // catalog operation.
-  if (options.check !== true) {
-    try {
-      const resolved = await ctx.llm.resolveModelInfo(provider, model.id)
-      const reasoning: ModelReasoning | undefined = resolved.reasoning === undefined ? undefined : toModelReasoning(resolved.reasoning)
-      entry = {
-        ...entry,
-        ...(model.description ?? resolved.description) === undefined
-          ? {}
-          : { description: model.description ?? resolved.description },
-        ...(resolved.inputModalities === undefined ? {} : { inputModalities: [...resolved.inputModalities] }),
-        ...(reasoning === undefined ? {} : { reasoning }),
-      }
-    } catch {
-      // A broken metadata lookup must not hide every other model in the group.
-    }
-  }
   const checkedAt = Date.now()
   let status: ModelAvailability = 'unavailable'
   let statusMessage: string | undefined
@@ -416,7 +429,6 @@ async function modelEntry(
     }
     const vision = await probeVisionWithTimeout(signal => ctx.llm.probeVision(provider, model.id, signal), options.timeoutMs)
     visionStatus = vision.status
-    if (visionStatus === 'supported') catalogCacheFor(ctx).visionSupported.add(visionKey)
     visionMessage = vision.message === undefined ? undefined : redact(vision.message)
   } catch (error) {
     visionMessage = redact(safeMessage(error))

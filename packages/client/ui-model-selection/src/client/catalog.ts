@@ -50,7 +50,7 @@ export class ModelCatalogDirectory {
         throw new Error(`${response.error.code}: ${response.error.message}`)
       }
       if (generation === this.generation) {
-        this.store.set({ value: response.value, status: 'ready', error: null })
+        this.accept(response.value)
       }
       return response.value
     }).catch((error: unknown) => {
@@ -108,6 +108,7 @@ export class ModelCatalogDirectory {
     const targets = catalog.groups.flatMap(group => group.models.map(model => ({ provider: group.id, model: model.id })))
     const failures: unknown[] = []
     await mapWithConcurrency(targets, 8, async ({ provider, model }) => {
+      if (generation !== this.generation) return
       try {
         await this.probeModel(provider, model, false)
       } catch (error) {
@@ -123,6 +124,20 @@ export class ModelCatalogDirectory {
   /** Explicit user action: probe one exact provider/model route. */
   checkModel(provider: string, model: string): Promise<ModelCatalog> {
     return this.probeModel(provider, model, true)
+  }
+
+  /** Retry only unresolved rows; completed probes are never repeated by fallback. */
+  async checkPending(): Promise<ModelCatalog> {
+    const generation = this.generation
+    const catalog = await this.load()
+    const targets = catalog.groups.flatMap(group => group.models
+      .filter(model => model.status === undefined || model.status === 'unknown' || model.status === 'checking')
+      .map(model => ({ provider: group.id, model: model.id })))
+    await mapWithConcurrency(targets, 2, async ({ provider, model }) => {
+      if (generation !== this.generation) return
+      await this.probeModel(provider, model, false).catch(() => {})
+    })
+    return this.store.getSnapshot().value ?? catalog
   }
 
   /** Merge a Host-pushed incremental probe result into every selector. */
@@ -208,7 +223,7 @@ export class ModelCatalogDirectory {
           })
           this.store.set({ value: { ...current, groups, failures: next.failures }, status: 'ready', error: null })
         } else {
-          this.store.set({ value: response.value, status: 'ready', error: null })
+          this.accept(response.value)
         }
       }
       return response.value
@@ -217,6 +232,18 @@ export class ModelCatalogDirectory {
         this.store.update((draft) => {
           draft.status = targeted && previous.value !== null ? 'ready' : 'error'
           draft.error = error instanceof Error ? error.message : String(error)
+          if (targeted && draft.value !== null) {
+            draft.value = {
+              ...draft.value,
+              groups: draft.value.groups.map(group => group.id !== request.provider ? group : {
+                ...group,
+                models: group.models.map(model => model.id !== request.model ? model : {
+                  ...model, status: 'unavailable' as const,
+                  statusMessage: 'Model check failed. Retry the check.', lastCheckedAt: Date.now(),
+                }),
+              }),
+            }
+          }
         })
       }
       throw error
@@ -247,10 +274,8 @@ export class ModelCatalogDirectory {
 
   /** Clear Host-specific values and load the replacement Host generation. */
   resetGeneration(): void {
-    // Preserve the last good directory while the replacement Host generation
-    // is handshaking. Selectors remain usable during reconnect and receive the
-    // new metadata atomically once it is available.
-    this.invalidate(false)
+    // The replacement Host owns a new directory; old health must not cross it.
+    this.invalidate(true)
     void this.load().catch(() => { /* the selector exposes the shared error */ })
   }
 }

@@ -23,7 +23,7 @@ import SessionStore from '@deepseek-ai/dsh-session'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionPromptRequest, SessionRequestId } from '../src/types.ts'
 import { ApiSessionAgentController } from '../src/agent.ts'
-import { buildModelCatalog } from '../src/catalog.ts'
+import { buildModelCatalog, invalidateModelCatalog } from '../src/catalog.ts'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import { createSessionTestRemote } from './test-remote.ts'
@@ -606,9 +606,7 @@ describe('Web session model selection', () => {
 
     const first = remote.modelCatalog({ check: true, refresh: true, background: true })
     const second = remote.modelCatalog({ check: true, refresh: true, background: true })
-    // Background calls return metadata immediately; the health batch continues
-    // in the Host and publishes incremental catalog events.
-    await expect(Promise.all([first, second])).resolves.toHaveLength(2)
+    // Batch responses carry final health even when progress events are lost.
     await vi.waitFor(() => { expect(active).toBe(2) })
     const metadata = expectValue(await remote.modelCatalog())
     expect(metadata.groups.find(group => group.id === 'background-check')?.models
@@ -616,6 +614,11 @@ describe('Web session model selection', () => {
     expect(maximum).toBe(2)
 
     gate.resolve(undefined)
+    const completed = await Promise.all([first, second])
+    for (const result of completed) {
+      expect(expectValue(result).groups.find(group => group.id === 'background-check')?.models
+        .every(model => model.status === 'available')).toBe(true)
+    }
     await vi.waitFor(() => { expect(calls).toBe(6) })
     expect(calls).toBe(6)
     expect(maximum).toBe(2)
@@ -638,6 +641,45 @@ describe('Web session model selection', () => {
     const beforeTwo = first.groups.find(group => group.id === 'targeted')?.models.find(model => model.id === 'two')
     const afterTwo = second.groups.find(group => group.id === 'targeted')?.models.find(model => model.id === 'two')
     expect(afterTwo).toEqual(beforeTwo)
+    await ctx.fiber.dispose()
+  })
+
+  it('does not probe reasoning-bearing models while refreshing metadata', async () => {
+    const { ctx } = await harness()
+    const probe = vi.fn(async () => [{ protocol: 'native', ok: true }])
+    ctx.llm.registerAdapter(['reasoning-metadata'], new class extends CatalogAdapter {
+      override probeModel = probe
+    }('Metadata', [{ provider: 'reasoning-metadata', id: 'one', name: 'One', reasoning: REASONING }]))
+    await buildModelCatalog(ctx, { provider: 'reasoning-metadata', model: 'one' }, { refresh: true })
+    expect(probe).not.toHaveBeenCalled()
+    await ctx.fiber.dispose()
+  })
+
+  it('discards older targeted results after a newer probe or generation completes', async () => {
+    const { ctx } = await harness()
+    const gate = Promise.withResolvers<undefined>()
+    let calls = 0
+    ctx.llm.registerAdapter(['probe-race'], new class extends CatalogAdapter {
+      override async probeModel() {
+        calls++
+        if (calls === 1) {
+          await gate.promise
+          return [{ protocol: 'native', ok: false, message: 'old failure' }]
+        }
+        return [{ protocol: 'native', ok: true }]
+      }
+    }('Race', [{ provider: 'probe-race', id: 'one', name: 'One' }]))
+    const selection = { provider: 'probe-race', model: 'one' }
+    await buildModelCatalog(ctx, selection)
+    const stale = buildModelCatalog(ctx, selection, { ...selection, check: true })
+    await vi.waitFor(() => expect(calls).toBe(1))
+    invalidateModelCatalog(ctx)
+    const fresh = await buildModelCatalog(ctx, selection, { ...selection, check: true })
+    expect(fresh.groups.find(group => group.id === selection.provider)?.models[0]?.status).toBe('available')
+    gate.resolve(undefined)
+    await stale
+    const final = await buildModelCatalog(ctx, selection, { refresh: true })
+    expect(final.groups.find(group => group.id === selection.provider)?.models[0]?.status).toBe('available')
     await ctx.fiber.dispose()
   })
 

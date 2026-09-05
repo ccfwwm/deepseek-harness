@@ -271,16 +271,13 @@ export class SessionController extends TypertRemoteService {
   }): Promise<ModelCatalog> {
     if (request?.background !== true) return buildModelCatalog(this.ctx, undefined, request)
     const { background: _background, ...options } = request
-    // A background probe must never occupy the RPC that opened the session.
-    // Return the current metadata snapshot first, then let the Host publish
-    // one catalog event for each completed model probe.
-    const metadata = buildModelCatalog(this.ctx, undefined,
-      options.refresh === undefined ? {} : { refresh: options.refresh })
-    void metadata.then(() => buildModelCatalog(this.ctx, undefined, {
+    // This is a separate startup RPC, not the metadata request that opens the
+    // selector. Events provide progress; the response remains authoritative
+    // even when an embedded transport drops those events.
+    return buildModelCatalog(this.ctx, undefined, {
       ...options,
       concurrency: BACKGROUND_PROBE_CONCURRENCY,
-    })).catch(() => { /* incremental health is best effort */ })
-    return metadata
+    })
   }
 
   /**

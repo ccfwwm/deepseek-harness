@@ -43,6 +43,8 @@ The Session object also carries local submission echoes: `session.beginSubmissio
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-api-session-controller) is the exhaustive source for accepted fields and their JSDoc.
 
+Background model checks return final per-model health with concurrency two; events also publish progress. Metadata refresh preserves terminal health and never probes models. Generation and per-route request versions reject stale results. See the [probe completion decision](../../../.agents/notes/implemented/architecture/2026-09-06-versioned-model-probes.md).
+
 -----
 
 <a id="model-experience"></a>

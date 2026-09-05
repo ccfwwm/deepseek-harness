@@ -119,7 +119,7 @@ export class ModelDirectoryResolver extends Service {
       // selectModel persists the accepted default through this namespace. It
       // changes only the selection, not provider health, so probing every model
       // here would gray the menu and delay the close after every selection.
-      if (key === 'agent-default-model') void this.catalog.refresh(false)
+      if (key === 'agent-default-model') void this.catalog.sync().catch(() => {})
       else if (key.startsWith('llm-')) this.refreshInBackground()
     })
     ctx.remote.$on('credentials/reference-updated', () => { this.refreshInBackground() })
@@ -156,7 +156,9 @@ export class ModelDirectoryResolver extends Service {
 
   private refreshInBackground(): void {
     this.cancelScheduledCheck?.()
+    this.cancelScheduledCheck = undefined
     void this.catalog.refresh(false)
+      .then(() => { this.scheduleBackgroundCheck() })
       .catch(() => { /* selectors expose the shared error */ })
   }
 
@@ -178,10 +180,12 @@ export class ModelDirectoryResolver extends Service {
           const models = value?.groups.flatMap(group => group.models) ?? []
           const unresolved = models.length > 0 && models.some(model =>
             model.status === undefined || model.status === 'unknown' || model.status === 'checking')
-          if (unresolved) void this.catalog.checkAll(false).catch(() => { /* selectors expose the shared error */ })
+          if (unresolved) void this.catalog.checkPending().catch(() => { /* selectors expose the shared error */ })
         }, 500)
         this.cancelScheduledCheck = () => { clearTimeout(fallback) }
-      }).catch(() => { /* selectors expose the shared error */ })
+      }).catch(() => {
+        void this.catalog.checkPending().catch(() => { /* selectors expose transport errors */ })
+      })
     })
   }
 

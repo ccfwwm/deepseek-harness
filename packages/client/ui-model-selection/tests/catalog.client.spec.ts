@@ -12,10 +12,36 @@ const catalog = (model: string): ModelCatalog => ({
 
 function directory(models: () => Promise<unknown>): ModelCatalogDirectory {
   // The providing plugin's context, scripted down to the one method it calls.
-  return new ModelCatalogDirectory({ remote: { session: { modelCatalog: models } } } as never)
+  return new ModelCatalogDirectory({ modelCatalog: models } as never)
 }
 
 describe('ModelCatalogDirectory', () => {
+  it('preserves completed health across metadata refresh and retries only unresolved rows', async () => {
+    const initial = catalog('one')
+    initial.groups[0]!.models.push({ id: 'two', name: 'two' })
+    const calls: string[] = []
+    const subject = directory(async (request?: { check?: boolean; model?: string }) => {
+      if (!request?.check) return { ok: true, value: initial }
+      calls.push(request.model!)
+      return { ok: true, value: { ...initial, groups: [{ ...initial.groups[0], models: initial.groups[0]!.models.map(model => model.id === request.model ? { ...model, status: 'available', lastCheckedAt: 10 } : model) }] } }
+    })
+    await subject.load()
+    await subject.checkModel('fixture', 'one')
+    await subject.sync()
+    expect(subject.store.getSnapshot().value!.groups[0]!.models[0]!.status).toBe('available')
+    await subject.checkPending()
+    expect(calls).toEqual(['one', 'two'])
+  })
+
+  it('writes a terminal failure when a targeted RPC fails', async () => {
+    const subject = directory(async (request?: { check?: boolean }) => {
+      if (request?.check) throw new Error('transport disconnected')
+      return { ok: true, value: catalog('one') }
+    })
+    await subject.load()
+    await expect(subject.checkModel('fixture', 'one')).rejects.toThrow('transport disconnected')
+    expect(subject.store.getSnapshot().value!.groups[0]!.models[0]!.status).toBe('unavailable')
+  })
   it('checks routes incrementally without clearing the last known rows', async () => {
     const initial = catalog('one')
     const completedCatalog: ModelCatalog = {
@@ -188,7 +214,7 @@ describe('ModelCatalogDirectory', () => {
     subject.resetGeneration()
     await vi.waitFor(() => {
       expect(subject.store.getSnapshot()).toEqual({
-        value: oldCatalog, status: 'error', error: 'reset failed',
+        value: null, status: 'error', error: 'reset failed',
       })
     })
   })

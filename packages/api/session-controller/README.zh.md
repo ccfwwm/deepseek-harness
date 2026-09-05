@@ -43,6 +43,8 @@ Session 对象还承载本地提交回显：`session.beginSubmission` 在调用�
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-api-session-controller)是所有受支持字段及其 JSDoc 的完整来源。
 
+后台模型检查以并发二返回各模型最终健康状态，事件同时发布进度。元数据刷新保留健康终态且不探测模型。generation 和各路由请求版本拒绝过期结果。参见[探测完成状态决策](../../../.agents/notes/implemented/architecture/2026-09-06-versioned-model-probes.zh.md)。
+
 -----
 
 <a id="model-experience"></a>
