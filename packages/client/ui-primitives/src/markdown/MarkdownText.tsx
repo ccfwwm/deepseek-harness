@@ -25,6 +25,14 @@ import css from './MarkdownText.module.css'
 
 export type { MarkdownCodeLabels, MarkdownFileMentions, MarkdownLabels } from './render.tsx'
 
+/** Safe defaults for framework-free consumers and plugin previews. Host UI
+ * normally supplies localized labels, but a missing label object must never
+ * crash the entire conversation renderer. */
+const DEFAULT_MARKDOWN_LABELS: MarkdownLabels = {
+  code: { copyLabel: 'Copy', copiedLabel: 'Copied' },
+  footnotes: 'Footnotes',
+}
+
 /** One settled full render: parse with math, resolve references, append the footnote section. */
 function renderSettled(
   text: string,
@@ -161,21 +169,22 @@ class StreamingRenderer {
 export const MarkdownText = memo(function MarkdownText({ text, streaming = false, labels, fileMentions }: {
   text: string
   streaming?: boolean
-  labels: MarkdownLabels
+  labels?: MarkdownLabels
   fileMentions?: MarkdownFileMentions | undefined
 }) {
+  const resolvedLabels = labels ?? DEFAULT_MARKDOWN_LABELS
   const streamRef = useRef<StreamingRenderer | null>(null)
-  const streamLabelsRef = useRef<MarkdownLabels>(labels)
+  const streamLabelsRef = useRef<MarkdownLabels>(resolvedLabels)
   const children = useMemo(() => {
     if (!streaming) {
       streamRef.current = null
-      return renderSettled(text, labels, fileMentions)
+      return renderSettled(text, resolvedLabels, fileMentions)
     }
-    if (streamRef.current === null || streamLabelsRef.current !== labels) {
-      streamRef.current = new StreamingRenderer(labels)
-      streamLabelsRef.current = labels
+    if (streamRef.current === null || streamLabelsRef.current !== resolvedLabels) {
+      streamRef.current = new StreamingRenderer(resolvedLabels)
+      streamLabelsRef.current = resolvedLabels
     }
     return streamRef.current.render(text)
-  }, [text, streaming, labels, fileMentions])
+  }, [text, streaming, resolvedLabels, fileMentions])
   return <div className={css.markdown}>{children}</div>
 })
