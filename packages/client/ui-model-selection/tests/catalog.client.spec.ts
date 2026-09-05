@@ -17,8 +17,8 @@ function directory(models: () => Promise<unknown>): ModelCatalogDirectory {
 
 describe('ModelCatalogDirectory', () => {
   it('preserves completed health across metadata refresh and retries only unresolved rows', async () => {
-    const initial = catalog('one')
-    initial.groups[0]!.models.push({ id: 'two', name: 'two' })
+    const base = catalog('one')
+    const initial: ModelCatalog = { ...base, groups: [{ ...base.groups[0]!, models: [...base.groups[0]!.models, { id: 'two', name: 'two' }] }] }
     const calls: string[] = []
     const subject = directory(async (request?: { check?: boolean; model?: string }) => {
       if (!request?.check) return { ok: true, value: initial }
