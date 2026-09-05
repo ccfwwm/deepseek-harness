@@ -133,6 +133,7 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
     registrationFailure: 'contain',
     serverName: config.serverName,
     toolCallTimeoutMs: config.toolCallTimeoutMs,
+    toolFilter: projectionFilter(config.serverName),
   }
   // The initial sync uses 'throw' when failOnStartupError is configured, so
   // a registration conflict propagates to the startup-await path. Re-syncs
@@ -368,4 +369,16 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
       disposers = new Map()
     },
   }
+}
+
+/** Prevent the three rdatalinux logical namespaces from exposing one another's tools. */
+function projectionFilter(serverName: string): ((rawName: string) => boolean) | undefined {
+  if (serverName === 'rplotfigure') return rawName => rawName.startsWith('rplotfigure_')
+  if (serverName === 'rbioagent' || serverName === 'rdatalinux_biomni') {
+    return rawName => rawName.startsWith('r_biomni_') || rawName.startsWith('biomni_')
+  }
+  if (serverName === 'rplatform') {
+    return rawName => !rawName.startsWith('rplotfigure_') && !rawName.startsWith('r_biomni_') && !rawName.startsWith('biomni_')
+  }
+  return undefined
 }

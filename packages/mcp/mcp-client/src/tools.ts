@@ -32,6 +32,8 @@ export interface ToolBridgeOptions {
   registrationFailure: 'contain' | 'throw'
   serverName: string
   toolCallTimeoutMs: number
+  /** Optional model-facing filter. */
+  toolFilter?: ((rawName: string) => boolean) | undefined
 }
 
 /** State for one sync generation: the current set of disposers keyed by public name. */
@@ -153,6 +155,7 @@ export async function syncTools(
   do {
     const response = await listToolsUncached(client, cursor)
     for (const tool of response.tools) {
+      if (opts.toolFilter !== undefined && !opts.toolFilter(tool.name)) continue
       const publicName = publicToolName(opts.serverName, tool.name)
       if (definitions.has(publicName)) {
         throw new Error(
@@ -164,8 +167,8 @@ export async function syncTools(
         ctx,
         publicName,
         tool.name,
-        tool.description ?? '',
-        tool.inputSchema,
+        compactDescription(tool.description ?? ''),
+        compactSchema(tool.inputSchema),
         supportedOutputSchema(tool.outputSchema),
         tool.execution?.taskSupport === 'required',
         opts,
@@ -191,6 +194,25 @@ export async function syncTools(
     return new Map()
   }
   return disposers
+}
+
+function compactDescription(value: string): string {
+  const normalized = value.replace(/\\s+/gu, ' ').trim()
+  return normalized.length > 900 ? `${normalized.slice(0, 897)}...` : normalized
+}
+
+function compactSchema(value: Record<string, unknown>): Record<string, unknown> {
+  const visit = (node: unknown): unknown => {
+    if (Array.isArray(node)) return node.map(visit)
+    if (node === null || typeof node !== 'object') return node
+    const result: Record<string, unknown> = {}
+    for (const [key, item] of Object.entries(node as Record<string, unknown>)) {
+      if (key === 'title' || key === '$comment' || key === 'examples' || key === 'default') continue
+      result[key] = key === 'description' && typeof item === 'string' ? compactDescription(item) : visit(item)
+    }
+    return result
+  }
+  return visit(value) as Record<string, unknown>
 }
 
 /**
@@ -321,7 +343,7 @@ function createExecutor(
     // Biomni uses the model that is active in the current ZeroWall session.
     // Inject only non-secret routing metadata; API keys remain in the Host
     // credential broker and are never added to MCP arguments or chat content.
-    if (opts.serverName === 'rdatalinux_biomni') {
+    if (opts.serverName === 'rbioagent' || opts.serverName === 'rdatalinux_biomni') {
       const route = exec.agent?.session.requestHeader()?.config ?? exec.agent?.options
       if (typeof argsObj.model !== 'string' && typeof route?.model === 'string') argsObj.model = route.model
       const sessionId = exec.agent?.session.id
