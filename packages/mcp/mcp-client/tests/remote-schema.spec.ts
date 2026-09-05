@@ -1,5 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import { Context } from '@deepseek-ai/cordis'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
@@ -16,7 +17,7 @@ describe.runIf(Boolean(process.env.R_PLATFORM_MCP_AUTHORIZATION && process.env.R
       await ctx.plugin(ToolRuntime)
       await client.connect(new StreamableHTTPClientTransport(new URL(process.env.R_PLATFORM_MCP_URL!), {
         requestInit: { headers: { Authorization: /^Bearer\s/iu.test(key) ? key : `Bearer ${key}` } },
-      }))
+      }) as Transport)
       const raw = []
       let cursor: string | undefined
       do {
