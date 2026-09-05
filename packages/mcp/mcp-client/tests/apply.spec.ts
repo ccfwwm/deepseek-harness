@@ -61,7 +61,7 @@ it('keeps an omitted tool allow-list distinct from an explicit empty list', () =
   for (const input of [
     { transport: 'stdio', serverName: 'fixture', command: 'node' },
     { transport: 'streamable-http', serverName: 'fixture', url: 'https://example.test/mcp' },
-  ]) {
+  ] as const) {
     expect(ConfigSchema(input).enabledTools).toBeUndefined()
     expect(ConfigSchema({ ...input, enabledTools: [] }).enabledTools).toEqual([])
   }
