@@ -31,6 +31,8 @@ kind: "package-reference"
 
 每台服务器添加一条配置项即可，无需其他内容。harness 启动后，服务器的工具会出现在模型的工具列表中。
 
+省略 `enabledTools` 会注册服务器的完整工具目录。显式设置 `enabledTools: []` 不注册任何工具；非空列表使用原始 MCP 工具名。配置校验会保留这一区别。
+
 ```yaml
 - id: mcp-github
   name: '@deepseek-ai/dsh-mcp-client'

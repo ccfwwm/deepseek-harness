@@ -57,6 +57,16 @@ vi.mock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({
 // mocked SDK even through a static import.
 import { apply, name, inject, Config as ConfigSchema } from '@deepseek-ai/dsh-mcp-client/src/index.ts'
 
+it('keeps an omitted tool allow-list distinct from an explicit empty list', () => {
+  for (const input of [
+    { transport: 'stdio', serverName: 'fixture', command: 'node' },
+    { transport: 'streamable-http', serverName: 'fixture', url: 'https://example.test/mcp' },
+  ]) {
+    expect(ConfigSchema(input).enabledTools).toBeUndefined()
+    expect(ConfigSchema({ ...input, enabledTools: [] }).enabledTools).toEqual([])
+  }
+})
+
 // ---- Helpers ----
 
 async function mountRegistry(): Promise<Context> {

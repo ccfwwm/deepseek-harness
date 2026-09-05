@@ -125,7 +125,7 @@ export const Config = z.union([
     toolCallTimeoutMs: z.number().default(DEFAULT_TOOL_CALL_TIMEOUT_MS),
     failOnStartupError: z.boolean().default(false),
     reconnect: Reconnect,
-    enabledTools: z.array(String),
+    enabledTools: z.union([z.array(String)]),
   }),
   z.object({
     transport: z.const('streamable-http'),
@@ -135,7 +135,7 @@ export const Config = z.union([
     toolCallTimeoutMs: z.number().default(DEFAULT_TOOL_CALL_TIMEOUT_MS),
     failOnStartupError: z.boolean().default(false),
     reconnect: Reconnect,
-    enabledTools: z.array(String),
+    enabledTools: z.union([z.array(String)]),
   }),
 ]) as unknown as z<ConfigInput, Config>
 

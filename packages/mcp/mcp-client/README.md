@@ -31,6 +31,8 @@ Add `dsh-mcp-client` when the model should call tools from an external MCP serve
 
 Add one entry per server; nothing else is required. After the harness starts, the server's tools appear in the model's tool list.
 
+Omitting `enabledTools` registers the server's complete tool catalog. An explicit `enabledTools: []` registers no tools; nonempty lists name raw MCP tools. Configuration validation preserves this distinction.
+
 ```yaml
 - id: mcp-github
   name: '@deepseek-ai/dsh-mcp-client'
