@@ -116,6 +116,8 @@ export interface ConnectionHandle {
    * still owns.
    */
   dispose(): Promise<void>
+  /** Replace the allow-list of raw tool names and synchronize registrations. */
+  setEnabledTools(names: readonly string[]): Promise<void>
 }
 
 /**
@@ -129,11 +131,15 @@ export interface ConnectionHandle {
  */
 export function startConnection(ctx: Context, config: Config, policy: ResolvedReconnectPolicy): ConnectionHandle {
   const label = `mcp-client(${config.serverName})`
+  let enabledTools: Set<string> | undefined = config.enabledTools === undefined ? undefined : new Set(config.enabledTools)
   const opts: ToolBridgeOptions = {
     registrationFailure: 'contain',
     serverName: config.serverName,
     toolCallTimeoutMs: config.toolCallTimeoutMs,
-    toolFilter: projectionFilter(config.serverName),
+    toolFilter: (rawName) => {
+      const projected = projectionFilter(config.serverName)
+      return (projected === undefined || projected(rawName)) && (enabledTools === undefined || enabledTools.has(rawName))
+    },
   }
   // The initial sync uses 'throw' when failOnStartupError is configured, so
   // a registration conflict propagates to the startup-await path. Re-syncs
@@ -345,6 +351,11 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
 
   return {
     ready,
+    async setEnabledTools(names: readonly string[]): Promise<void> {
+      enabledTools = new Set(names)
+      const current = client
+      if (current !== undefined) await enqueueSync(current)
+    },
     async dispose(): Promise<void> {
       disposed = true
       if (reconnectTimer !== undefined) {
@@ -372,13 +383,15 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
 }
 
 /** Prevent the three rdatalinux logical namespaces from exposing one another's tools. */
-function projectionFilter(serverName: string): ((rawName: string) => boolean) | undefined {
-  if (serverName === 'rplotfigure') return rawName => rawName.startsWith('rplotfigure_')
+function projectionFilter(serverName: string, enabledTools?: readonly string[]): ((rawName: string) => boolean) | undefined {
+  const allow = enabledTools === undefined ? undefined : new Set(enabledTools)
+  const selected = (rawName: string): boolean => allow === undefined || allow.has(rawName)
+  if (serverName === 'rplotfigure') return rawName => rawName.startsWith('rplotfigure_') && selected(rawName)
   if (serverName === 'rbioagent' || serverName === 'rdatalinux_biomni') {
-    return rawName => rawName.startsWith('r_biomni_') || rawName.startsWith('biomni_')
+    return rawName => (rawName.startsWith('r_biomni_') || rawName.startsWith('biomni_')) && selected(rawName)
   }
   if (serverName === 'rplatform') {
-    return rawName => !rawName.startsWith('rplotfigure_') && !rawName.startsWith('r_biomni_') && !rawName.startsWith('biomni_')
+    return rawName => !rawName.startsWith('rplotfigure_') && !rawName.startsWith('r_biomni_') && !rawName.startsWith('biomni_') && selected(rawName)
   }
-  return undefined
+  return enabledTools === undefined ? undefined : selected
 }
