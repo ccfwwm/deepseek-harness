@@ -355,6 +355,9 @@ function createExecutor(
     if (opts.serverName === 'rbioagent' || opts.serverName === 'rdatalinux_biomni' || rawName.startsWith('r_biomni_')) {
       const route = exec.agent?.session.requestHeader()?.config ?? exec.agent?.options
       if (typeof argsObj.model !== 'string' && typeof route?.model === 'string') argsObj.model = route.model
+      const baseUrl = canonicalAiCloudBaseUrl((route as { baseUrl?: unknown; baseURL?: unknown } | undefined)?.baseUrl)
+        ?? canonicalAiCloudBaseUrl((route as { baseURL?: unknown } | undefined)?.baseURL)
+      if (typeof argsObj.base_url !== 'string' && baseUrl !== undefined) argsObj.base_url = baseUrl
       const sessionId = exec.agent?.session.id
       if (typeof argsObj.session_id !== 'string' && typeof sessionId === 'string' && sessionId.length > 0) argsObj.session_id = sessionId
       // ZeroWall's AI Cloud routes keep the provider key in its Host-side
@@ -419,6 +422,12 @@ function containsImage(content: JsonValue[]): boolean {
 /** Narrow one JSON value to a string-keyed object. */
 function isRecord(value: JsonValue): value is { [key: string]: JsonValue } {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function canonicalAiCloudBaseUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.trim() === '') return undefined
+  const trimmed = value.trim().replace(/\/$/u, '')
+  return trimmed.replace(/^https:\/\/hkcode\.aicodeme\.xyz(?=\/|$)/u, 'https://code.aicodeme.xyz')
 }
 
 /** Narrow a declared MIME string to the durable image vocabulary. */
