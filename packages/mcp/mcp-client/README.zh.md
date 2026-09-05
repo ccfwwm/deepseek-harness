@@ -71,6 +71,8 @@ kind: "package-reference"
 
 ### 工具命名与共存
 
+Schema 压缩只移除 Schema 节点上的标题、注释和示例，并缩短描述。参数名、定义名、必填字段、默认值、enum/const 值和验证约束均完整保留。字面量对象不会被当作 Schema 处理。
+
 模型看到每个工具都带有稳定的服务器限定名称：`mcp__<serverName>__<rawName>`，例如 `mcp__github__create_issue`——与 Claude Code 和 Codex 使用的命名形态相同。只要服务器保持相同的工具名称，名称就保持不变，因此会话历史与权限规则在重启和重载后仍然有效。两个服务器可以同时提供名为 `search` 的工具，分别以 `mcp__github__search` 和 `mcp__web__search` 共存。
 
 - 发布相同工具名称（例如 `search`）的两个服务器会在各自的 namespace 下共存。

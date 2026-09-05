@@ -197,22 +197,31 @@ export async function syncTools(
 }
 
 function compactDescription(value: string): string {
-  const normalized = value.replace(/\\s+/gu, ' ').trim()
+  const normalized = value.replace(/\s+/gu, ' ').trim()
   return normalized.length > 900 ? `${normalized.slice(0, 897)}...` : normalized
 }
 
 function compactSchema(value: Record<string, unknown>): Record<string, unknown> {
+  const schemaMaps = new Set(['properties', 'patternProperties', '$defs', 'definitions', 'dependentSchemas'])
+  const schemaValues = new Set(['items', 'additionalItems', 'additionalProperties', 'contains', 'propertyNames', 'unevaluatedItems', 'unevaluatedProperties', 'not', 'if', 'then', 'else', 'allOf', 'anyOf', 'oneOf'])
   const visit = (node: unknown): unknown => {
     if (Array.isArray(node)) return node.map(visit)
     if (node === null || typeof node !== 'object') return node
     const result: Record<string, unknown> = {}
     for (const [key, item] of Object.entries(node as Record<string, unknown>)) {
-      if (key === 'title' || key === '$comment' || key === 'examples' || key === 'default') continue
-      result[key] = key === 'description' && typeof item === 'string' ? compactDescription(item) : visit(item)
+      if (key === 'title' || key === '$comment' || key === 'examples') continue
+      // Property/definition names and literal values are data, not schema keywords.
+      if ((schemaMaps.has(key) || key === 'dependencies') && item !== null && typeof item === 'object' && !Array.isArray(item)) {
+        result[key] = Object.fromEntries(Object.entries(item).map(([name, child]) => [name, visit(child)]))
+      } else if (schemaValues.has(key)) {
+        result[key] = visit(item)
+      } else {
+        result[key] = key === 'description' && typeof item === 'string' ? compactDescription(item) : item
+      }
     }
     return result
   }
-  return visit(value) as Record<string, unknown>
+  return visit(structuredClone(value)) as Record<string, unknown>
 }
 
 /**

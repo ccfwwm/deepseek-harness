@@ -71,6 +71,8 @@ After startup, the server's tools appear as `mcp__<serverName>__<tool>` — try 
 
 ### Tool naming and coexistence
 
+Schema compression removes only annotation titles, comments, and examples at schema nodes and shortens descriptions. Argument and definition names, required fields, defaults, enum/const values, and validation constraints remain intact. Literal objects are never interpreted as schemas.
+
 The model sees each tool under a stable server-qualified name: `mcp__<serverName>__<rawName>`, for example `mcp__github__create_issue` — the same naming shape Claude Code and Codex use. Names stay stable while the server keeps the same tool name, so session history and permission rules survive restarts and reloads. Two servers can both offer a tool named `search` and coexist as `mcp__github__search` and `mcp__web__search`.
 
 - Two servers publishing the same tool name (for example `search`) coexist under their own namespaces.

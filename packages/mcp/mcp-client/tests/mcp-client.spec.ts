@@ -204,6 +204,56 @@ describe('syncTools', () => {
     expect(ctx.tools.get('add')).toBeUndefined()
   })
 
+  it('preserves reproduction-record arguments and confirmation defaults during compression', async () => {
+    const inputSchema = {
+      type: 'object', title: 'Reproduction record',
+      properties: {
+        project_id: { type: 'string', minLength: 1 },
+        title: { type: 'string', minLength: 1, maxLength: 300 },
+        source: { type: 'string', enum: ['geo', 'nhanes', 'other'], default: 'other' },
+        data_references: { type: 'array', items: { type: 'object', additionalProperties: {} } },
+        confirm: { type: 'boolean', default: false },
+      },
+      required: ['project_id', 'title'], additionalProperties: false,
+    }
+    const original = structuredClone(inputSchema)
+    const client = createMockClient([{ name: 'r_create_reproduction_record', inputSchema }])
+    const disposers = await syncTools(client as never, ctx, { ...defaultOpts, serverName: 'rmcp' }, new Map())
+    const schema = ctx.tools.schemas().find(tool => tool.name === 'mcp__rmcp__r_create_reproduction_record')!
+    const { title: _annotation, ...expected } = original
+    expect(schema.parameters).toEqual(expected)
+    expect(inputSchema).toEqual(original)
+    const args = { project_id: 'project-1', title: 'Paper reproduction', confirm: true }
+    await ctx.tools.execute({ signal: testToolSignal, callId: ToolCallId('reproduction'), name: schema.name, arguments: args })
+    expect(client.callTool.mock.calls[0]?.[0]).toEqual({ name: 'r_create_reproduction_record', arguments: args })
+    for (const dispose of disposers.values()) dispose()
+    expect(ctx.tools.get(schema.name)).toBeUndefined()
+  })
+
+  it('compresses only schema annotations, preserving keyword-named properties and literal objects', async () => {
+    const literal = { title: 'Title', description: '  verbatim\n text  ', default: 1, examples: ['example'] }
+    const inputSchema = {
+      type: 'object', description: '  Short\n description  ', examples: [{}],
+      properties: Object.fromEntries(['title', 'description', 'default', 'examples', '$comment', 'enum', 'const', 'not'].map(name => [name, {
+        type: 'object', title: 'annotation', properties: { title: { type: 'string' } },
+        default: literal, const: literal, enum: [literal],
+      }])),
+      $defs: { title: { type: 'string', title: 'annotation' } },
+      allOf: [{ properties: { title: { description: ' nested\n description ' } } }],
+    }
+    const client = createMockClient([{ name: 'keywords', description: '  Tool\n description  ', inputSchema }])
+    await syncTools(client as never, ctx, defaultOpts, new Map())
+    const schema = ctx.tools.schemas().find(tool => tool.name === 'mcp__srv__keywords')!
+    const expected = structuredClone(inputSchema)
+    Reflect.deleteProperty(expected, 'examples')
+    expected.description = 'Short description'
+    Reflect.deleteProperty(expected.$defs.title, 'title')
+    expected.allOf[0]!.properties.title.description = 'nested description'
+    for (const property of Object.values(expected.properties)) Reflect.deleteProperty(property, 'title')
+    expect(schema).toMatchObject({ description: 'Tool description', parameters: expected })
+    expect(inputSchema.properties.title?.default).toEqual(literal)
+  })
+
   it('lets two servers publish the same raw name side by side', async () => {
     const clientA = createMockClient([{ name: 'search', inputSchema: { type: 'object' } }])
     const clientB = createMockClient([{ name: 'search', inputSchema: { type: 'object' } }])
