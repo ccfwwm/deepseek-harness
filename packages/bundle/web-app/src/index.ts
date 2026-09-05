@@ -55,6 +55,8 @@ export interface Config {
   surfaceContext: boolean
   /** Explicit `--trusted-host` authorities from this invocation. */
   trustedHosts: string[]
+  /** Maximum wait for optional Loader settlement before publishing the URL. */
+  readyTimeoutMs?: number
 }
 
 export const Config: z<Config> = z.object({
@@ -62,6 +64,7 @@ export const Config: z<Config> = z.object({
   printUrl: z.boolean().default(true),
   surfaceContext: z.boolean().default(true),
   trustedHosts: z.array(String).default([]),
+  readyTimeoutMs: z.number().default(15_000),
 })
 
 /** Bind-dependent Web values shared by the trust fence and URL display. */
@@ -287,6 +290,12 @@ export function apply(ctx: Context, config: Config): void {
           })
         }
       }
+      // A slow optional plugin must not leave an embedded desktop shell on
+      // its splash screen forever. The Loader settlement still wins when it
+      // completes first; this only bounds the browser handoff delay.
+      const readyTimer = setTimeout(announceReady, config.readyTimeoutMs ?? 15_000)
+      readyTimer.unref?.()
+      connectionCtx.effect(() => () => clearTimeout(readyTimer))
       // This row's own activation can precede a sibling failure. The app owns
       // readiness by waiting for its Loader tree, or announces at once in a
       // hand-built tree without Loader.
