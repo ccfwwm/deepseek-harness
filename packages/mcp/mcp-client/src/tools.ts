@@ -343,7 +343,7 @@ function createExecutor(
     // Biomni uses the model that is active in the current ZeroWall session.
     // Inject only non-secret routing metadata; API keys remain in the Host
     // credential broker and are never added to MCP arguments or chat content.
-    if (opts.serverName === 'rbioagent' || opts.serverName === 'rdatalinux_biomni') {
+    if (opts.serverName === 'rbioagent' || opts.serverName === 'rdatalinux_biomni' || rawName.startsWith('r_biomni_')) {
       const route = exec.agent?.session.requestHeader()?.config ?? exec.agent?.options
       if (typeof argsObj.model !== 'string' && typeof route?.model === 'string') argsObj.model = route.model
       const sessionId = exec.agent?.session.id
