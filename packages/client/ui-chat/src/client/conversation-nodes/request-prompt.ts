@@ -70,6 +70,21 @@ export function requestPromptDefinition(inspect: RequestPromptInspector): Conver
         : {}
       const inspection = inspect(previous?.prompt, match.event)
       const change = inspection.change?.kind
+      // Tool calls can start a new provider request within the same visible
+      // step.  The request header is durable and may legitimately carry the
+      // same system text again, but rendering another card here makes the UI
+      // look as if the system prompt was injected twice.  Keep the prompt
+      // visible for real text changes and for separate unresolved series
+      // (used by windowed history/rewrite), while suppressing same-step
+      // tool-only re-headers.
+      const sameStep = previous?.turn !== undefined
+        && previous.step !== undefined
+        && location.turn === previous.turn
+        && location.step === previous.step
+      const duplicateSameStepPrompt = sameStep
+        && inspection.prompt.system === previous?.prompt.system
+        && change !== 'system'
+        && change !== 'system-and-tools'
       return {
         anchorSeq: stableRequestPromptAnchor(
           context,
@@ -77,11 +92,11 @@ export function requestPromptDefinition(inspect: RequestPromptInspector): Conver
           previous,
           match.event.data.reason === 'initial',
         ),
-        showsPrompt: previous === undefined
+        showsPrompt: !duplicateSameStepPrompt && (previous === undefined
           || match.event.data.reason !== 'change'
           || match.event.data.startsSeries === true
           || change === 'system'
-          || change === 'system-and-tools',
+          || change === 'system-and-tools'),
         ...location,
         ...inspection,
       }

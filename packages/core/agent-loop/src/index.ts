@@ -413,7 +413,9 @@ export class AgentLoop extends Service implements AgentFactory {
     ctx.effect(() => ctx.agents.setFactory(this), 'agentLoop.setFactory()')
     ctx.systemPrompt.variable('provider', context => context.agent?.options.provider)
     ctx.systemPrompt.variable('model', context => context.agent?.options.model)
-    ctx.systemPrompt.variable('cwd', context => context.agent?.session.header.cwd)
+    // Workspace-free sessions are valid. Use an explicit neutral value so a
+    // deployment persona containing {{cwd}} cannot abort the first turn.
+    ctx.systemPrompt.variable('cwd', context => context.agent?.session.header.cwd ?? '')
 
     for (const { id, sessionId, cwd, resumeSessionId, ...options } of this.config.agents) {
       const meta = cwd === undefined ? {} : { cwd }
