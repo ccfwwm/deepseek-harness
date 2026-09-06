@@ -146,7 +146,6 @@ export class ApiSessionList {
         items.push(this.summaryFor(live))
         continue
       }
-      if (record.header.cwd === undefined) continue
       cold.push(record.header)
     }
     for (let offset = 0; offset < cold.length; offset += COLD_SUMMARY_BATCH_SIZE) {
@@ -236,9 +235,7 @@ export class ApiSessionList {
     try {
       const visible = await provider.listSessions(signal)
       signal.throwIfAborted()
-      const visibleIds = new Set(visible
-        .filter(record => record.header.cwd !== undefined)
-        .map(record => record.header.id))
+      const visibleIds = new Set(visible.map(record => record.header.id))
       if (visibleIds.size === 0) return { items: [], hasMore: false }
       const authorized: SessionSearchItem[] = []
       const acceptedIds = new Set<SessionId>()

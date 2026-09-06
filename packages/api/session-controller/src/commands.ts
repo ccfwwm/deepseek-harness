@@ -63,7 +63,7 @@ export class SessionCommandController {
   constructor(
     private readonly ctx: Context,
     private readonly agents: ApiSessionAgentController,
-    private readonly defaultCwd: string,
+    private readonly defaultCwd: string | undefined,
   ) {}
 
   /**
@@ -476,7 +476,7 @@ export class SessionCommandController {
     if (error instanceof ApiSessionCwdConflict) {
       throw new RemoteError('session/conflict', error.message, {
         sessionId: error.sessionId,
-        requestedCwd: error.requestedCwd,
+        requestedCwd: error.requestedCwd ?? '',
         ...(error.existingCwd === undefined ? {} : { existingCwd: error.existingCwd }),
       })
     }

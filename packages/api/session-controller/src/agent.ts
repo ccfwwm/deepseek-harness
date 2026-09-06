@@ -31,13 +31,13 @@ export class ApiSessionSubagentOwnership extends Error {
 export class ApiSessionCwdConflict extends Error {
   constructor(
     readonly sessionId: SessionId,
-    readonly requestedCwd: string,
+    readonly requestedCwd: string | undefined,
     readonly existingCwd: string | undefined,
   ) {
     super(
       existingCwd === undefined
-        ? `session "${sessionId}" records no cwd and cannot be adopted for "${requestedCwd}"`
-        : `session "${sessionId}" belongs to "${existingCwd}", not "${requestedCwd}"`,
+        ? `session "${sessionId}" records no cwd and cannot be adopted for "${requestedCwd ?? '(none)'}"`
+        : `session "${sessionId}" belongs to "${existingCwd}", not "${requestedCwd ?? '(none)'}"`,
     )
   }
 }
@@ -119,9 +119,6 @@ export async function inspectApiSession(
       ...(signal === undefined ? {} : { signal }),
       projectionMode: 'none',
     })
-    if (observation.header.cwd === undefined) {
-      throw new ApiSessionNotFound(`session "${sessionId}" not found`)
-    }
     return {
       meta: observation.header,
       inheritedEventCount: observation.inheritedEventCount,
@@ -231,7 +228,7 @@ export class ApiSessionAgentController {
    */
   async ensureSession(
     sessionId: SessionId,
-    cwd: string,
+    cwd: string | undefined,
     checkPersistedIdentity: boolean,
     presetId?: string,
   ): Promise<Agent> {
@@ -413,7 +410,7 @@ export class ApiSessionAgentController {
     sessionId: SessionId,
     observation: SessionObservation,
   ): Promise<Agent> {
-    if (observation.header.id !== sessionId || observation.header.cwd === undefined) {
+    if (observation.header.id !== sessionId) {
       throw new ApiSessionNotFound(`session "${sessionId}" not found`)
     }
     if (hasApiSessionSubagentOwner(this.ctx, { header: observation.header }, undefined)) {
@@ -434,7 +431,7 @@ export class ApiSessionAgentController {
 
   private async createOrAdopt(
     sessionId: SessionId,
-    cwd: string,
+    cwd: string | undefined,
     checkPersistedIdentity: boolean,
     presetId: string | undefined,
   ): Promise<Agent> {
@@ -446,7 +443,7 @@ export class ApiSessionAgentController {
     if (live !== undefined) return live
 
     if (checkPersistedIdentity) {
-      try {
+      if (cwd !== undefined) try {
         using observation = await this.ctx.sessionQuery.observeSession(sessionId)
         if (hasApiSessionSubagentOwner(this.ctx, { header: observation.header }, undefined)) {
           throw new ApiSessionSubagentOwnership(sessionId)
@@ -468,7 +465,7 @@ export class ApiSessionAgentController {
       }
     }
 
-    try {
+    if (cwd !== undefined) try {
       await mkdir(cwd, { recursive: true })
     } catch (error: unknown) {
       throw new Error(`failed to ensure project directory "${cwd}": ${String(error)}`, { cause: error })
@@ -478,7 +475,7 @@ export class ApiSessionAgentController {
       sessionId,
       agentOptions: this.agentOptions(),
       meta: {
-        cwd,
+        ...(cwd === undefined ? {} : { cwd }),
         ...(composition.agentPreset === undefined ? {} : { agentPreset: composition.agentPreset }),
       },
       setup: composition.setup,
