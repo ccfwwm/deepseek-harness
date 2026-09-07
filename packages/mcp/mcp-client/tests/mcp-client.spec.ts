@@ -566,7 +566,7 @@ describe('tool execution', () => {
   it('saves FigureYa artifacts locally and never forwards its image block to a text model', async () => {
     const root = mkdtempSync(join(tmpdir(), 'zerowall-figureya-'))
     try {
-      const files = {
+      const files: Record<string, Buffer> = {
         'FigureYa135multiVolcano.html': Buffer.from('<html>ok</html>'),
         'module-source/FigureYa135multiVolcano/multiVolcano.pdf': Buffer.from('%PDF-demo'),
         'module-source/FigureYa135multiVolcano/example.png': Buffer.from([137, 80, 78, 71]),
@@ -581,6 +581,7 @@ describe('tool execution', () => {
           if (name === 'rplotfigure_get_manifest') return { content: [{ type: 'text', text: 'manifest' }], structuredContent: { manifest: { files: Object.entries(files).map(([path, data]) => ({ path, bytes: data.length, mime_type: path.endsWith('.png') ? 'image/png' : 'application/octet-stream' })) } } }
           if (name === 'rplotfigure_read_file_chunk') {
             const data = files[String(args.path)]
+            if (data === undefined) throw new Error(`missing fixture ${String(args.path)}`)
             const offset = Number(args.offset ?? 0)
             const chunk = data.subarray(offset)
             return { content: [{ type: 'text', text: 'chunk' }], structuredContent: { data_base64: chunk.toString('base64'), offset, bytes: chunk.length, total_bytes: data.length, eof: true } }

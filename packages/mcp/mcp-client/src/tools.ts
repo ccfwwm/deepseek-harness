@@ -409,6 +409,7 @@ export async function persistFigureYaArtifacts(
   opts: ToolBridgeOptions,
 ): Promise<FigureYaArtifactDownload[]> {
   if (sessionCwd === undefined || sessionCwd.trim() === '') throw new Error('the current session has no workspace directory')
+  if (!/^[A-Za-z0-9._-]+$/u.test(runId)) throw new Error('FigureYa run_id is not a safe local directory name')
   const root = resolve(sessionCwd, 'figureya', runId)
   const manifestValue = await rawStructuredCall(client, 'rplotfigure_get_manifest', { project_id: projectId, run_id: runId }, exec, opts)
   const files = figureYaFiles(manifestValue)
@@ -430,6 +431,7 @@ async function persistInlineFigureYaImage(
   const image = content.find(item => isRecord(item) && item.type === 'image')
   if (cwd === undefined || runId === undefined || remotePath === undefined || image === undefined || !isRecord(image)) return undefined
   const decoded = decodeImage(image as unknown as McpContentBlock)
+  if (!/^[A-Za-z0-9._-]+$/u.test(runId)) throw new Error('FigureYa run_id is not a safe local directory name')
   const target = safeFigureYaPath(resolve(cwd, 'figureya', runId), remotePath)
   await mkdir(dirname(target), { recursive: true })
   const temporary = `${target}.part`
