@@ -309,6 +309,10 @@ function safeFigureYaPath(root: string, remotePath: string): string {
   return local
 }
 
+function safeFigureYaRunId(runId: string): void {
+  if (!/^[A-Za-z0-9._-]+$/u.test(runId) || runId === '.' || runId === '..') throw new Error('FigureYa run_id is not a safe local directory name')
+}
+
 function remoteStructured(value: unknown): Record<string, unknown> {
   return record(value) ?? {}
 }
@@ -366,6 +370,7 @@ async function downloadFigureYaFile(
   runId: string,
   exec: ToolExecution,
   opts: ToolBridgeOptions,
+  budget: { downloaded: number },
 ): Promise<FigureYaArtifactDownload> {
   const localPath = safeFigureYaPath(localRoot, file.path)
   const temporary = `${localPath}.part`
@@ -381,6 +386,8 @@ async function downloadFigureYaFile(
     if (data === undefined) throw new Error(`FigureYa artifact ${file.path} did not return a base64 chunk`)
     const bytes = Buffer.from(data, 'base64')
     if (bytes.length === 0 && firstNumber(value.bytes) !== 0) throw new Error(`FigureYa artifact ${file.path} returned an empty chunk`)
+    if (budget.downloaded + bytes.length > FIGUREYA_MAX_TOTAL_BYTES) throw new Error('FigureYa artifacts exceed the 250 MiB local download limit')
+    budget.downloaded += bytes.length
     chunks.push(bytes)
     offset += bytes.length
     total = firstNumber(value.total_bytes) ?? total
@@ -409,14 +416,15 @@ export async function persistFigureYaArtifacts(
   opts: ToolBridgeOptions,
 ): Promise<FigureYaArtifactDownload[]> {
   if (sessionCwd === undefined || sessionCwd.trim() === '') throw new Error('the current session has no workspace directory')
-  if (!/^[A-Za-z0-9._-]+$/u.test(runId)) throw new Error('FigureYa run_id is not a safe local directory name')
+  safeFigureYaRunId(runId)
   const root = resolve(sessionCwd, 'figureya', runId)
   const manifestValue = await rawStructuredCall(client, 'rplotfigure_get_manifest', { project_id: projectId, run_id: runId }, exec, opts)
   const files = figureYaFiles(manifestValue)
   const total = files.reduce((sum, file) => sum + (file.bytes ?? 0), 0)
   if (total > FIGUREYA_MAX_TOTAL_BYTES) throw new Error('FigureYa artifacts exceed the 250 MiB local download limit')
   const results: FigureYaArtifactDownload[] = []
-  for (const file of files) results.push(await downloadFigureYaFile(client, file, root, projectId, runId, exec, opts))
+  const budget = { downloaded: 0 }
+  for (const file of files) results.push(await downloadFigureYaFile(client, file, root, projectId, runId, exec, opts, budget))
   return results
 }
 
@@ -431,7 +439,7 @@ async function persistInlineFigureYaImage(
   const image = content.find(item => isRecord(item) && item.type === 'image')
   if (cwd === undefined || runId === undefined || remotePath === undefined || image === undefined || !isRecord(image)) return undefined
   const decoded = decodeImage(image as unknown as McpContentBlock)
-  if (!/^[A-Za-z0-9._-]+$/u.test(runId)) throw new Error('FigureYa run_id is not a safe local directory name')
+  safeFigureYaRunId(runId)
   const target = safeFigureYaPath(resolve(cwd, 'figureya', runId), remotePath)
   await mkdir(dirname(target), { recursive: true })
   const temporary = `${target}.part`

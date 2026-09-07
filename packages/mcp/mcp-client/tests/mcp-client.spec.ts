@@ -603,6 +603,29 @@ describe('tool execution', () => {
     }
   })
 
+  it('rejects traversal-like FigureYa run ids before reading remote artifacts', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'zerowall-figureya-unsafe-'))
+    try {
+      const calls: string[] = []
+      const client = {
+        request: vi.fn(async (request: { method: string; params?: Record<string, unknown> }) => {
+          if (request.method === 'tools/list') return { tools: [{ name: 'rplotfigure_wait_job', inputSchema: { type: 'object' } }], nextCursor: undefined }
+          const params = request.params ?? {}
+          const name = String(params.name)
+          calls.push(name)
+          if (name === 'rplotfigure_wait_job') return { content: [{ type: 'text', text: 'done' }], structuredContent: { status: 'succeeded', run_id: '..' } }
+          throw new Error(`unexpected tool ${name}`)
+        }),
+      }
+      await syncTools(client as never, ctx, { ...defaultOpts, serverName: 'rplotfigure' }, new Map())
+      const result = await ctx.tools.execute({ signal: testToolSignal, callId: ToolCallId('figureya-unsafe'), name: 'mcp__rplotfigure__rplotfigure_wait_job', arguments: { project_id: 'p', run_id: '..' }, agent: { session: { header: { cwd: root } } } as never })
+      expect(JSON.stringify(result.content)).toContain('not a safe local directory name')
+      expect(calls).toEqual(['rplotfigure_wait_job'])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it('keeps a valid raw image result while explicitly refusing it without a durable route', async () => {
     const blocks = [{ type: 'image', mimeType: 'image/png', data: 'AQ==' }] satisfies JsonValue[]
     const client = createMockClient(
