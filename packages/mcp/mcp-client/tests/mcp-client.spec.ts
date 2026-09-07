@@ -1,4 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { Context } from '@deepseek-ai/cordis'
@@ -558,6 +561,44 @@ describe('tool execution', () => {
     expect(JSON.stringify(result.content)).not.toContain('Ag==')
     if (result.isError) throw new Error('expected MCP success')
     expect(result.value).toEqual({ content: blocks })
+  })
+
+  it('saves FigureYa artifacts locally and never forwards its image block to a text model', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'zerowall-figureya-'))
+    try {
+      const files = {
+        'FigureYa135multiVolcano.html': Buffer.from('<html>ok</html>'),
+        'module-source/FigureYa135multiVolcano/multiVolcano.pdf': Buffer.from('%PDF-demo'),
+        'module-source/FigureYa135multiVolcano/example.png': Buffer.from([137, 80, 78, 71]),
+      }
+      const client = {
+        request: vi.fn(async (request: { method: string; params?: Record<string, unknown> }) => {
+          if (request.method === 'tools/list') return { tools: [{ name: 'rplotfigure_wait_job', inputSchema: { type: 'object' } }], nextCursor: undefined }
+          const params = request.params ?? {}
+          const name = String(params.name)
+          const args = (params.arguments ?? {}) as Record<string, unknown>
+          if (name === 'rplotfigure_wait_job') return { content: [{ type: 'text', text: 'done' }, { type: 'image', mimeType: 'image/png', data: 'iVBORw==' }], structuredContent: { status: 'succeeded', run_id: args.run_id } }
+          if (name === 'rplotfigure_get_manifest') return { content: [{ type: 'text', text: 'manifest' }], structuredContent: { manifest: { files: Object.entries(files).map(([path, data]) => ({ path, bytes: data.length, mime_type: path.endsWith('.png') ? 'image/png' : 'application/octet-stream' })) } } }
+          if (name === 'rplotfigure_read_file_chunk') {
+            const data = files[String(args.path)]
+            const offset = Number(args.offset ?? 0)
+            const chunk = data.subarray(offset)
+            return { content: [{ type: 'text', text: 'chunk' }], structuredContent: { data_base64: chunk.toString('base64'), offset, bytes: chunk.length, total_bytes: data.length, eof: true } }
+          }
+          throw new Error(`unexpected tool ${name}`)
+        }),
+      }
+      await syncTools(client as never, ctx, { ...defaultOpts, serverName: 'rplotfigure' }, new Map())
+      const result = await ctx.tools.execute({ signal: testToolSignal, callId: ToolCallId('figureya-local'), name: 'mcp__rplotfigure__rplotfigure_wait_job', arguments: { project_id: 'p', run_id: 'run-1' }, agent: { session: { header: { cwd: root } } } as never })
+      expect(result.content.every(block => block.type === 'text')).toBe(true)
+      expect(JSON.stringify(result.content)).not.toContain('iVBORw==')
+      expect(JSON.stringify(result.value)).not.toContain('iVBORw==')
+      expect(JSON.stringify(result.content)).toContain('figureya/run-1/FigureYa135multiVolcano.html')
+      expect(readFileSync(join(root, 'figureya', 'run-1', 'FigureYa135multiVolcano.html'), 'utf8')).toBe('<html>ok</html>')
+      expect(readFileSync(join(root, 'figureya', 'run-1', 'module-source', 'FigureYa135multiVolcano', 'example.png'))).toEqual(files['module-source/FigureYa135multiVolcano/example.png'])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   it('keeps a valid raw image result while explicitly refusing it without a durable route', async () => {

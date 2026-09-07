@@ -14,6 +14,8 @@
 
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
+import { mkdir, rename, writeFile } from 'node:fs/promises'
+import { dirname, relative, resolve } from 'node:path'
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { ListToolsResultSchema } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
@@ -239,6 +241,224 @@ interface McpContentBlock {
   uri?: string
 }
 
+interface FigureYaArtifactFile {
+  path: string
+  bytes?: number
+  mime_type?: string
+}
+
+interface FigureYaArtifactDownload {
+  path: string
+  localPath: string
+  bytes: number
+  sha256?: string
+  mimeType?: string
+}
+
+const FIGUREYA_CHUNK_BYTES = 4 * 1024 * 1024
+const FIGUREYA_MAX_FILE_BYTES = 100 * 1024 * 1024
+const FIGUREYA_MAX_TOTAL_BYTES = 250 * 1024 * 1024
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
+}
+
+function firstString(value: unknown): string | undefined {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value) && value.length === 1 && typeof value[0] === 'string') return value[0]
+  return undefined
+}
+
+function firstNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (Array.isArray(value) && value.length === 1 && typeof value[0] === 'number' && Number.isFinite(value[0])) return value[0]
+  return undefined
+}
+
+function structuredObject(value: Record<string, unknown>): Record<string, unknown> | undefined {
+  return record(value.structuredContent) ?? (() => {
+    const text = Array.isArray(value.content)
+      ? value.content.find(item => record(item)?.type === 'text')
+      : undefined
+    const raw = firstString(record(text)?.text)
+    if (raw === undefined) return undefined
+    try { return record(JSON.parse(raw)) } catch { return undefined }
+  })()
+}
+
+function figureYaFiles(manifestValue: Record<string, unknown>): FigureYaArtifactFile[] {
+  const manifest = record(manifestValue.manifest) ?? manifestValue
+  const raw = manifest.files
+  if (!Array.isArray(raw)) return []
+  return raw.flatMap((item) => {
+    const value = record(item)
+    const path = firstString(value?.path)
+    if (path === undefined || path.trim() === '') return []
+    const bytes = firstNumber(value?.bytes)
+    const mimeType = firstString(value?.mime_type)
+    return [{ path, ...(bytes === undefined ? {} : { bytes }), ...(mimeType === undefined ? {} : { mime_type: mimeType }) }]
+  })
+}
+
+function safeFigureYaPath(root: string, remotePath: string): string {
+  const normalized = remotePath.replaceAll('\\', '/')
+  if (normalized === '' || normalized === '.' || normalized.includes('\0') || normalized.startsWith('/') || /^[A-Za-z]:\//u.test(normalized) || normalized.includes('../') || normalized === '..') throw new Error(`FigureYa returned an unsafe artifact path: ${remotePath}`)
+  const local = resolve(root, normalized)
+  const rel = relative(root, local)
+  if (rel === '..' || rel.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) || rel.includes('\0')) throw new Error(`FigureYa artifact escapes the local workspace: ${remotePath}`)
+  return local
+}
+
+function remoteStructured(value: unknown): Record<string, unknown> {
+  return record(value) ?? {}
+}
+
+async function rawStructuredCall(
+  client: Client,
+  rawName: string,
+  args: Record<string, unknown>,
+  exec: ToolExecution,
+  opts: ToolBridgeOptions,
+): Promise<Record<string, unknown>> {
+  const result = await callToolUncached(client, rawName, args, exec, opts)
+  if (result.isError === true) {
+    const content = Array.isArray(result.content) ? result.content as unknown as JsonValue[] : []
+    throw new Error(extractText(content, rawName))
+  }
+  return structuredObject(result) ?? remoteStructured(result.structuredContent)
+}
+
+async function persistCompletedFigureYaResult(
+  client: Client,
+  rawResult: Record<string, unknown>,
+  args: Record<string, unknown>,
+  exec: ToolExecution,
+  opts: ToolBridgeOptions,
+): Promise<Record<string, unknown>> {
+  if (rawResult.isError === true) return rawResult
+  const projectId = firstString(args.project_id)
+  const runId = firstString(args.run_id)
+  if (projectId === undefined || runId === undefined) return rawResult
+  const structured = structuredObject(rawResult)
+  if (firstString(structured?.status) !== 'succeeded') return rawResult
+  try {
+    const downloads = await persistFigureYaArtifacts(client, projectId, runId, exec.agent?.session.header.cwd, exec, opts)
+    if (downloads.length === 0) return rawResult
+    const cwd = exec.agent?.session.header.cwd
+    const lines = downloads.map((item) => {
+      const workspacePath = cwd === undefined ? item.localPath : relative(cwd, item.localPath).replaceAll('\\', '/')
+      return `- ${workspacePath} (${item.bytes} bytes${item.mimeType === undefined ? '' : `, ${item.mimeType}`})`
+    })
+    const content = Array.isArray(rawResult.content) ? [...rawResult.content, { type: 'text', text: `FigureYa artifacts saved to the local ZeroWall workspace:\n${lines.join('\n')}` }] : rawResult.content
+    return { ...rawResult, content }
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error)
+    const content = Array.isArray(rawResult.content) ? [...rawResult.content, { type: 'text', text: `FigureYa completed, but local artifact download failed: ${message}` }] : rawResult.content
+    return { ...rawResult, content }
+  }
+}
+
+async function downloadFigureYaFile(
+  client: Client,
+  file: FigureYaArtifactFile,
+  localRoot: string,
+  projectId: string,
+  runId: string,
+  exec: ToolExecution,
+  opts: ToolBridgeOptions,
+): Promise<FigureYaArtifactDownload> {
+  const localPath = safeFigureYaPath(localRoot, file.path)
+  const temporary = `${localPath}.part`
+  await mkdir(dirname(localPath), { recursive: true })
+  const chunks: Buffer[] = []
+  let offset = 0
+  let total: number | undefined
+  for (;;) {
+    const value = await rawStructuredCall(client, 'rplotfigure_read_file_chunk', {
+      project_id: projectId, run_id: runId, path: file.path, offset, length: FIGUREYA_CHUNK_BYTES,
+    }, exec, opts)
+    const data = firstString(value.data_base64)
+    if (data === undefined) throw new Error(`FigureYa artifact ${file.path} did not return a base64 chunk`)
+    const bytes = Buffer.from(data, 'base64')
+    if (bytes.length === 0 && firstNumber(value.bytes) !== 0) throw new Error(`FigureYa artifact ${file.path} returned an empty chunk`)
+    chunks.push(bytes)
+    offset += bytes.length
+    total = firstNumber(value.total_bytes) ?? total
+    if (offset > FIGUREYA_MAX_FILE_BYTES || (total !== undefined && total > FIGUREYA_MAX_FILE_BYTES)) throw new Error(`FigureYa artifact ${file.path} exceeds the 100 MiB local download limit`)
+    if (firstString(value.eof ? 'true' : undefined) === 'true' || value.eof === true || offset >= (total ?? Number.MAX_SAFE_INTEGER)) break
+    if (bytes.length === 0) throw new Error(`FigureYa artifact ${file.path} returned a zero-length non-terminal chunk`)
+  }
+  const data = Buffer.concat(chunks)
+  if (file.bytes !== undefined && data.length !== file.bytes) throw new Error(`FigureYa artifact ${file.path} size changed during download`)
+  await writeFile(temporary, data)
+  await rename(temporary, localPath)
+  return { path: file.path, localPath, bytes: data.length, ...(file.mime_type === undefined ? {} : { mimeType: file.mime_type }) }
+}
+
+/**
+ * Persist every file listed by a completed FigureYa run into the current
+ * ZeroWall session workspace. The remote MCP response remains compact; only
+ * local paths are appended to the model-visible result.
+ */
+export async function persistFigureYaArtifacts(
+  client: Client,
+  projectId: string,
+  runId: string,
+  sessionCwd: string | undefined,
+  exec: ToolExecution,
+  opts: ToolBridgeOptions,
+): Promise<FigureYaArtifactDownload[]> {
+  if (sessionCwd === undefined || sessionCwd.trim() === '') throw new Error('the current session has no workspace directory')
+  const root = resolve(sessionCwd, 'figureya', runId)
+  const manifestValue = await rawStructuredCall(client, 'rplotfigure_get_manifest', { project_id: projectId, run_id: runId }, exec, opts)
+  const files = figureYaFiles(manifestValue)
+  const total = files.reduce((sum, file) => sum + (file.bytes ?? 0), 0)
+  if (total > FIGUREYA_MAX_TOTAL_BYTES) throw new Error('FigureYa artifacts exceed the 250 MiB local download limit')
+  const results: FigureYaArtifactDownload[] = []
+  for (const file of files) results.push(await downloadFigureYaFile(client, file, root, projectId, runId, exec, opts))
+  return results
+}
+
+async function persistInlineFigureYaImage(
+  content: JsonValue[],
+  args: Record<string, unknown>,
+  exec: ToolExecution,
+): Promise<string | undefined> {
+  const cwd = exec.agent?.session.header.cwd
+  const runId = firstString(args.run_id)
+  const remotePath = firstString(args.path)
+  const image = content.find(item => isRecord(item) && item.type === 'image')
+  if (cwd === undefined || runId === undefined || remotePath === undefined || image === undefined || !isRecord(image)) return undefined
+  const decoded = decodeImage(image as unknown as McpContentBlock)
+  const target = safeFigureYaPath(resolve(cwd, 'figureya', runId), remotePath)
+  await mkdir(dirname(target), { recursive: true })
+  const temporary = `${target}.part`
+  await writeFile(temporary, decoded.data)
+  await rename(temporary, target)
+  return relative(cwd, target).replaceAll('\\', '/')
+}
+
+function projectFigureYaContent(content: JsonValue[], localPath?: string): ContentBlock[] {
+  return projectContent(content, 'FigureYa', () => ({
+    type: 'text',
+    text: localPath === undefined
+      ? '[FigureYa image was kept out of model input; use the local figureya/<run_id> workspace directory]'
+      : `[FigureYa image saved to the local ZeroWall workspace: ${localPath}]`,
+  }))
+}
+
+function stripFigureYaBinary(value: JsonValue, localPath?: string): JsonValue {
+  if (Array.isArray(value)) return value.map(item => stripFigureYaBinary(item, localPath))
+  if (!isRecord(value)) return value
+  const output: Record<string, JsonValue> = {}
+  for (const [key, item] of Object.entries(value)) {
+    if (key === 'data_base64' || (value.type === 'image' && key === 'data')) continue
+    output[key] = stripFigureYaBinary(item, localPath)
+  }
+  if (localPath !== undefined) output.local_path = localPath
+  return output
+}
+
 /** Async rich projection staged for one exact ToolRuntime execution. */
 interface PreparedProjection {
   /** Canonical MCP value returned by execute before registry materialization. */
@@ -371,7 +591,15 @@ function createExecutor(
         }
       }
     }
-    const result = await callToolUncached(client, rawName, argsObj, exec, opts)
+    let result = await callToolUncached(client, rawName, argsObj, exec, opts)
+
+    // FigureYa produces a multi-file result (HTML, PDF, images, module source,
+    // and metadata). Persist the complete manifest into the user's local
+    // workspace while the remote MCP session is still available. The model
+    // receives only local paths, never the file base64.
+    if (rawName === 'rplotfigure_wait_job' && Array.isArray(result.content)) {
+      result = await persistCompletedFigureYaResult(client, result, argsObj, exec, opts)
+    }
 
     // The SDK may return a legacy `toolResult` shape; normalize to content array.
     if (!Array.isArray(result.content)) {
@@ -399,15 +627,31 @@ function createExecutor(
       throw new Error(text)
     }
 
+    const figureYaImage = (opts.serverName === 'rplotfigure' || rawName.startsWith('rplotfigure')) && containsImage(content)
+    const structuredContent = result.structuredContent === undefined
+      ? undefined
+      : figureYaImage
+        ? stripFigureYaBinary(result.structuredContent as JsonValue)
+        : result.structuredContent as JsonValue
     const value: McpResult = {
-      content,
-      ...result.structuredContent !== undefined
-        ? { structuredContent: result.structuredContent as JsonValue }
-        : {},
+      content: figureYaImage ? stripFigureYaBinary(content) as JsonValue[] : content,
+      ...(structuredContent === undefined ? {} : { structuredContent }),
     }
     if (containsImage(content)) {
       const fallback: ContentBlock[] = [{ type: 'text', text: extractText(content, rawName) }]
-      const projected = await prepareImageProjection(ctx, exec, content, rawName)
+      let projected: ContentBlock[]
+      if (opts.serverName === 'rplotfigure' || rawName.startsWith('rplotfigure')) {
+        let localPath: string | undefined
+        if (rawName === 'rplotfigure_read_image' || rawName === 'rplotfigure_get_result') {
+          try { localPath = await persistInlineFigureYaImage(content, argsObj, exec) } catch { localPath = undefined }
+        }
+        // FigureYa images are artifacts for the local workspace, not model
+        // inputs. This prevents a text-only model from receiving a native
+        // image block and failing the whole generation request.
+        projected = projectFigureYaContent(content, localPath)
+      } else {
+        projected = await prepareImageProjection(ctx, exec, content, rawName)
+      }
       projections.set(exec, { value, fallback, content: projected })
     }
     return value
