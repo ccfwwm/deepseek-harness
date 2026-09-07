@@ -1327,7 +1327,7 @@ describe('built-in conversation node Definitions', () => {
     })
   })
 
-  it('materializes series starts and system changes but not same-series config or tool changes', () => {
+  it('shows the first prompt and real system changes but not repeated series or tool changes', () => {
     const tools = [{ name: 'read', description: 'Read', parameters: { type: 'object' } }]
     const expandedTools = [...tools, { name: 'write', description: 'Write', parameters: { type: 'object' } }]
     const value = assembler([
@@ -1382,8 +1382,6 @@ describe('built-in conversation node Definitions', () => {
       .filter(candidate => candidate.kind === 'system-prompt')
     expect(prompts.map(prompt => ({ anchorSeq: prompt.anchorSeq, data: prompt.data }))).toEqual([
       { anchorSeq: 1, data: { text: '# Initial' } },
-      { anchorSeq: 4, data: { text: '# Initial' } },
-      { anchorSeq: 5, data: { text: '# Initial' } },
       { anchorSeq: 6, data: { text: '# Updated' } },
     ])
 
@@ -1557,7 +1555,7 @@ describe('built-in conversation node Definitions', () => {
     }
   })
 
-  it('repeats an unchanged system prompt after a surface rewrite and before an explicit later series', () => {
+  it('keeps one unchanged system prompt across surface rewrites and later series', () => {
     const value = assembler([
       at(1, 'turn/start', { turn: 1 }),
       at(2, 'step/start', { turn: 1, step: 1 }),
@@ -1591,10 +1589,10 @@ describe('built-in conversation node Definitions', () => {
       return candidate?.kind === 'system-prompt' || candidate?.kind === 'user' ? [candidate] : []
     })
     expect(ordered.map(candidate => candidate?.kind)).toEqual([
-      'system-prompt', 'user', 'system-prompt', 'system-prompt', 'user',
+      'system-prompt', 'user', 'user',
     ])
     expect(ordered.filter(candidate => candidate?.kind === 'system-prompt')
-      .map(candidate => candidate?.anchorSeq)).toEqual([1, 6, 9])
+      .map(candidate => candidate?.anchorSeq)).toEqual([1])
   })
 
   it('associates each direct message with its immediately following session recall', () => {

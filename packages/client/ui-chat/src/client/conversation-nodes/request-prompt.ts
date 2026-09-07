@@ -70,21 +70,13 @@ export function requestPromptDefinition(inspect: RequestPromptInspector): Conver
         : {}
       const inspection = inspect(previous?.prompt, match.event)
       const change = inspection.change?.kind
-      // Tool calls can start a new provider request within the same visible
-      // step.  The request header is durable and may legitimately carry the
-      // same system text again, but rendering another card here makes the UI
-      // look as if the system prompt was injected twice.  Keep the prompt
-      // visible for real text changes and for separate unresolved series
-      // (used by windowed history/rewrite), while suppressing same-step
-      // tool-only re-headers.
-      const sameStep = previous?.turn !== undefined
-        && previous.step !== undefined
-        && location.turn === previous.turn
-        && location.step === previous.step
-      const duplicateSameStepPrompt = sameStep
-        && inspection.prompt.system === previous?.prompt.system
-        && change !== 'system'
-        && change !== 'system-and-tools'
+      // Request headers remain durable for replay and may legitimately carry
+      // the same system text again when a new provider series starts. The Chat
+      // transcript should show one row per effective system text, not one row
+      // per transport header. A windowed view with no predecessor still shows
+      // its first available prompt; later rows appear only for a real system
+      // text change.
+      const systemChanged = change === 'system' || change === 'system-and-tools'
       return {
         anchorSeq: stableRequestPromptAnchor(
           context,
@@ -92,11 +84,7 @@ export function requestPromptDefinition(inspect: RequestPromptInspector): Conver
           previous,
           match.event.data.reason === 'initial',
         ),
-        showsPrompt: !duplicateSameStepPrompt && (previous === undefined
-          || match.event.data.reason !== 'change'
-          || match.event.data.startsSeries === true
-          || change === 'system'
-          || change === 'system-and-tools'),
+        showsPrompt: previous === undefined || systemChanged,
         ...location,
         ...inspection,
       }
@@ -104,7 +92,14 @@ export function requestPromptDefinition(inspect: RequestPromptInspector): Conver
     update: context => context.state,
     buildViewNode: (context) => {
       const state = context.state
-      if (state === undefined || !state.showsPrompt || state.prompt.system === '') return null
+      if (state === undefined || state.prompt.system === '') return null
+      if (!state.showsPrompt) {
+        // A windowed conversation can prepend an earlier header after this
+        // node was materialized. Preserve the existing stable row while the
+        // duplicate header contributes no new visible prompt.
+        const current = context.current.get('chat') as ChatNode | null | undefined
+        return current?.kind === 'system-prompt' ? current : null
+      }
       return chatNode(context, 'system-prompt', state.anchorSeq, { text: state.prompt.system })
     },
   }
