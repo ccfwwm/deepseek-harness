@@ -10,6 +10,7 @@ import {
 } from '../src/client/tool/models/tool-call-model.ts'
 import { ToolRow } from '../src/client/tool/components/ToolRow.tsx'
 import { GenericToolCard, type GenericToolCardProps } from '../src/client/tool/toolviews/GenericToolCard.tsx'
+import { ToolResultImages } from '../src/client/tool/toolviews/ToolResultImages.tsx'
 import { zh } from '@deepseek-ai/dsh-client-ui-conversation/src/client/locales.ts'
 
 afterEach(() => {
@@ -492,5 +493,31 @@ describe('GenericToolCard', () => {
     const bashView = render(<GenericToolCard {...bash} />)
     fireEvent.click(bashView.getByText('List files'))
     expect(bash.openFile).not.toHaveBeenCalled()
+  })
+
+  it('renders tool image blocks inline and exposes the filename as a sidebar button', () => {
+    const openAttachment = vi.fn()
+    const renderMessageImages: NonNullable<GenericToolCardProps['renderMessageImages']> = ({ images }) => {
+      const first = images[0]
+      return <div data-testid="inline-image">{first !== undefined && 'attachment' in first ? first.attachment.name : null}</div>
+    }
+    const imageResult = result({
+      content: [{ type: 'text', text: 'Image read.' }, {
+        type: 'image',
+        attachment: {
+          attachmentId: 'sha256:image' as never, mediaType: 'image/png', bytes: 10, width: 10, height: 10, name: 'demo.png',
+        },
+      }],
+    })
+    const view = render(
+      <ToolResultImages
+        block={imageResult}
+        renderMessageImages={renderMessageImages}
+        openAttachment={openAttachment}
+      />,
+    )
+    expect(view.getByTestId('inline-image').textContent).toContain('demo.png')
+    fireEvent.click(view.getByRole('button', { name: 'demo.png' }))
+    expect(openAttachment).toHaveBeenCalledWith(expect.objectContaining({ name: 'demo.png', mediaType: 'image/png' }))
   })
 })

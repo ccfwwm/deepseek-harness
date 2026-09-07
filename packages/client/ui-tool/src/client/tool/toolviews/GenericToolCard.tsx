@@ -3,6 +3,7 @@ import {
   IconApiOutline14, IconBrowseOutline16, IconCodeOutline16, IconEditOutline16, IconSearchOutline16, IconSparkle16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ToolCallOwnerProps, ToolTreeProps } from '../../contract/slots.ts'
+import { ToolResultImages } from './ToolResultImages.tsx'
 import { readCardModel } from '../models/read-card-model.ts'
 import { diffCardModel } from '../models/diff-card-model.ts'
 import { searchCardModel } from '../models/search-card-model.ts'
@@ -27,7 +28,9 @@ export interface GenericToolCardProps extends ToolCallOwnerProps {
   t: ToolTreeProps['t']
 }
 
-export function GenericToolCard({ toolName, block, cwd, home, openFile, inspect, t }: GenericToolCardProps) {
+export function GenericToolCard({
+  toolName, block, cwd, home, openFile, inspect, renderMessageImages, openAttachment, t,
+}: GenericToolCardProps) {
   const model = toolRowModel(toolName, block, cwd, home)
   const terminal = terminalCardModel(block, cwd)
   const read = readCardModel(block, cwd, home)
@@ -41,28 +44,35 @@ export function GenericToolCard({ toolName, block, cwd, home, openFile, inspect,
     : model.state
   const singleFile = model.filePath !== undefined
   return (
-    <ToolRow
-      t={t}
-      variant={model.variant}
-      toolName={toolName}
-      icon={VARIANT_ICONS[model.variant]}
-      title={t(model.titleKey)}
-      summary={model.summary}
-      // Single-file tools never expose an args body — the path link is the only
-      // args interaction. A card is not an args body: a read/write/edit row is
-      // single-file AND carries a card, so the card expands under the path link.
-      bodyRaw={singleFile ? null : model.bodyRaw}
-      output={model.output}
-      errorSummary={model.errorSummary}
-      terminal={terminal}
-      diff={diff}
-      read={read}
-      search={search}
-      web={web}
-      state={state}
-      filePath={model.filePath}
-      onOpenFile={singleFile ? openFile : undefined}
-      inspect={inspect}
-    />
+    <>
+      <ToolRow
+        t={t}
+        variant={model.variant}
+        toolName={toolName}
+        icon={VARIANT_ICONS[model.variant]}
+        title={t(model.titleKey)}
+        summary={model.summary}
+        // Single-file tools never expose an args body — the path link is the only
+        // args interaction. A card is not an args body: a read/write/edit row is
+        // single-file AND carries a card, so the card expands under the path link.
+        bodyRaw={singleFile ? null : model.bodyRaw}
+        output={model.output}
+        errorSummary={model.errorSummary}
+        terminal={terminal}
+        diff={diff}
+        read={read}
+        search={search}
+        web={web}
+        state={state}
+        filePath={model.filePath}
+        onOpenFile={singleFile ? openFile : undefined}
+        inspect={inspect}
+      />
+      <ToolResultImages
+        block={block}
+        renderMessageImages={renderMessageImages}
+        openAttachment={openAttachment}
+      />
+    </>
   )
 }

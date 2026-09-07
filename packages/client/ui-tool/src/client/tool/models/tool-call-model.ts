@@ -103,7 +103,8 @@ export interface ToolRowModel {
 
 /**
  * Flatten a settled result's content blocks to display text: text blocks
- * verbatim, other block shapes as pretty JSON. Empty content on a failed call
+ * verbatim, while image blocks are rendered by the attachment gallery instead
+ * of repeated as metadata; other block shapes use pretty JSON. Empty content on a failed call
  * falls back to the structured error's `name: code` line.
  * @param node - the settled result node.
  * @returns the flattened result text (may be empty).
@@ -112,7 +113,7 @@ export function resultText(node: ToolResultNode): string {
   const parts: string[] = []
   for (const block of node.content) {
     if (block.type === 'text') parts.push(block.text)
-    else parts.push(JSON.stringify(block, null, 2))
+    else if (block.type !== 'image' || !('attachment' in block)) parts.push(JSON.stringify(block, null, 2))
   }
   if (parts.length === 0 && node.error !== undefined) {
     parts.push(`${node.error.name}: ${node.error.code}`)

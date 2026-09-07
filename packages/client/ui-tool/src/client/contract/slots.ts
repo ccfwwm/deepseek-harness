@@ -3,6 +3,7 @@ import type {
   HostObservable, InjectFace, PropsLocale, PropsRenderSlots, PropsRuntime,
 } from '@deepseek-ai/dsh-client-ui-slots'
 import type { RemoteHostFacts } from '@deepseek-ai/dsh-api-remotes/client'
+import type { ChatNodeOwnerProps } from '@deepseek-ai/dsh-client-ui-chat/client'
 import type { ToolCallBlock } from '@deepseek-ai/dsh-client-ui-chat/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
@@ -35,6 +36,12 @@ export interface ToolCallOwnerProps {
   toolName: string
   /** Frozen running call or settled result node. */
   block: ToolCallBlock
+  /** Current session identity used when opening a result attachment in the sidebar. */
+  sessionId?: string | undefined
+  /** Shared durable-image renderer used by user and assistant transcript rows. */
+  renderMessageImages?: ChatNodeOwnerProps['renderMessageImages']
+  /** Open a durable result attachment in the workspace sidebar. */
+  openAttachment?: ChatNodeOwnerProps['openAttachment']
   /** Session workspace root for relative summaries. */
   cwd?: string | undefined
   /** Host account home; POSIX home-rooted summaries display as `~`. */
