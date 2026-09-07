@@ -393,6 +393,12 @@
   font: var(--dsw-font-markdown-code-block-small);
 }
 
+.turnErrorRetry {
+  grid-column: 2 / -1;
+  justify-self: start;
+  margin-top: 2px;
+}
+
 .maxTokensTitle {
   margin-right: 6px;
   color: var(--dsw-alias-state-warn-primary);

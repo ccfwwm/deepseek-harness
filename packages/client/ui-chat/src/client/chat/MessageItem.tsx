@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { PendingSubmission } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { MessageImageSource } from '@deepseek-ai/dsh-client-ui-conversation/client'
-import { IconArchiveOutline20, IconBrowseOutline16, IconCodeOutline16, IconCopyOutline16, IconDataOutline16, IconFolderClose16, JsonBlock, projectUserText, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconArchiveOutline20, IconBrowseOutline16, IconCodeOutline16, IconCopyOutline16, IconDataOutline16, IconFolderClose16, IconRefreshOutline16, JsonBlock, projectUserText, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChatFileAttachment, ChatNodeOwnerProps, ChatNodeViewProps, ChatViewSlotProps } from '../contract/slots.ts'
 import type { ModelRetryNode, TurnErrorNode, UserMessageNode } from '../contract/snapshot.ts'
 import { CompactionItem } from './CompactionItem.tsx'
@@ -217,10 +217,23 @@ function ModelRetryItem({ node, active, t }: {
 }
 
 /** Persistent, turn-positioned feedback for a terminal failure. */
-function TurnErrorItem({ node, t }: {
+function TurnErrorItem({ node, retryTurn, t }: {
   node: TurnErrorNode
+  retryTurn?: (turn: number) => Promise<void>
   t: ChatViewSlotProps['t']
 }) {
+  const [retrying, setRetrying] = useState(false)
+  const onRetry = async (): Promise<void> => {
+    if (retryTurn === undefined || retrying) return
+    setRetrying(true)
+    try {
+      await retryTurn(node.turn)
+    } catch {
+      // Keep the terminal failure visible so a later click can retry again.
+    } finally {
+      setRetrying(false)
+    }
+  }
   return (
     <div className={css.turnErrorRow} role="status">
       <StateDot state="error" className={css.turnErrorDot} />
@@ -229,6 +242,19 @@ function TurnErrorItem({ node, t }: {
         <span className={css.turnErrorMessage}>{failureMessage(node.message, node.code, t)}</span>
       </div>
       {node.code !== undefined && <code className={css.turnErrorCode}>{node.code}</code>}
+      {retryTurn !== undefined && (
+        <Button
+          variant="outline"
+          size="sm"
+          className={css.turnErrorRetry}
+          icon={<IconRefreshOutline16 />}
+          disabled={retrying}
+          onClick={() => { void onRetry() }}
+          aria-label={t(retrying ? 'message.turnError.retrying' : 'message.turnError.retry')}
+        >
+          {t(retrying ? 'message.turnError.retrying' : 'message.turnError.retry')}
+        </Button>
+      )}
     </div>
   )
 }
@@ -441,8 +467,8 @@ export const RetryNodeView = memo(function RetryNodeView({ node, t }: ChatNodeVi
 })
 
 /** Terminal turn-error keyed Chat renderer. */
-export const TurnErrorNodeView = memo(function TurnErrorNodeView({ node, t }: ChatNodeViewProps<'turn-error'>) {
-  return <TurnErrorItem node={node.data} t={t} />
+export const TurnErrorNodeView = memo(function TurnErrorNodeView({ node, retryTurn, t }: ChatNodeViewProps<'turn-error'>) {
+  return <TurnErrorItem node={node.data} {...retryTurn === undefined ? {} : { retryTurn }} t={t} />
 })
 
 /** Max-tokens turn-end notice keyed Chat renderer. */

@@ -204,8 +204,9 @@ function TurnStatus({ startTime, t }: {
  * ordered business Node crosses the keyed renderer seat.
  */
 export function ChatView({
-  useSession, useChat, useSessions, useStore, actions, renderSlot, sessionId, openFile, loadOlder, loadThrough, loadImage, openView, chatScroll, forkAt,
-  fileMentions, useTranscriptView, t,
+  useSession, useChat, useSessions, useStore, actions, renderSlot, sessionId, openFile,
+  loadOlder, loadThrough, loadImage, openView, chatScroll, forkAt,
+  fileMentions, retryTurn, useTranscriptView, t,
 }: ChatViewSlotProps) {
   const order = useChat(s => s.order)
   const nodeStore = useChat(s => s.nodes)
@@ -635,6 +636,7 @@ export function ChatView({
               openAttachment={openAttachment}
               openParsedAttachment={openParsedAttachment}
               copyAttachment={copyAttachment}
+              {...retryTurn === undefined ? {} : { retryTurn }}
               renderMessageImages={renderMessageImages}
               fileMentions={fileMentions}
               renderSlot={renderSlot}

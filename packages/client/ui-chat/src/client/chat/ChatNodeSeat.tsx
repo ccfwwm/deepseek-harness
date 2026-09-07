@@ -81,7 +81,8 @@ function turnProcessLayout(
 export const ChatNodeSeat = memo(function ChatNodeSeat({
   nodeKey, historyIncomplete, compactTranscript,
   selectedCallId, cwd, openFile, inspectCall, forkAt,
-  renderMessageImages, openAttachment, openParsedAttachment, copyAttachment, sessionId, fileMentions, useChat, useStore, actions, renderSlot, t,
+  renderMessageImages, openAttachment, openParsedAttachment, copyAttachment,
+  sessionId, fileMentions, retryTurn, useChat, useStore, actions, renderSlot, t,
 }: ChatNodeSeatProps) {
   const node = useChat(snapshot => snapshot.nodes.get(nodeKey))
   const processSignature = useChat((snapshot) => {
@@ -124,6 +125,14 @@ export const ChatNodeSeat = memo(function ChatNodeSeat({
     }
   }, [actions, processSpec])
   const routedNode = node as ChatNode | undefined
+  const canRetryTurn = retryTurn !== undefined
+    && routedNode?.kind === 'turn-error'
+    && [...nodeStore.values()].some((candidate) => {
+      if (candidate.kind !== 'user') return false
+      const location = candidate.location
+      return (location.kind === 'turn' || location.kind === 'step')
+        && location.turn.turn === routedNode.data.turn
+    })
   const sameTurn = routedNode !== undefined
     && processSpec !== undefined
     && (routedNode.location.kind === 'turn' || routedNode.location.kind === 'step')
@@ -183,10 +192,11 @@ export const ChatNodeSeat = memo(function ChatNodeSeat({
       openParsedAttachment,
       copyAttachment,
       fileMentions,
+      ...(canRetryTurn ? { retryTurn } : {}),
       turnProcess,
     }, [
     node, selectedCallId, sessionId, cwd, openFile, inspectCall, forkAt,
-    renderMessageImages, openAttachment, openParsedAttachment, copyAttachment, fileMentions, turnProcess,
+    canRetryTurn, renderMessageImages, openAttachment, openParsedAttachment, copyAttachment, fileMentions, retryTurn, turnProcess,
   ])
   if (routedNode === undefined || owner === null) return null
   const location = routedNode.location

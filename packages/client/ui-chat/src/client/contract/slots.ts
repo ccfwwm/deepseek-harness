@@ -85,6 +85,8 @@ export interface ChatNodeOwnerProps {
   openParsedAttachment?: ((attachment: ChatFileAttachment) => void) | undefined
   copyAttachment?: ((attachment: ChatFileAttachment) => void) | undefined
   fileMentions: (owner: TurnTailOwnerProps) => MarkdownFileMentions | undefined
+  /** Re-submit the original user content after a terminal model failure. */
+  retryTurn?: (turn: number) => Promise<void>
   /** Turn-process state when this Node belongs to a projected Turn. */
   turnProcess?: TurnProcessOwnerProps | undefined
 }
@@ -167,6 +169,8 @@ export interface ChatViewInjected {
     read: () => ChatScrollPosition | null
   }
   forkAt: (seq: number) => void
+  /** Re-submit a failed turn using its durable user content. */
+  retryTurn?: (turn: number) => Promise<void>
   fileMentions: (owner: TurnTailOwnerProps) => MarkdownFileMentions | undefined
 }
 

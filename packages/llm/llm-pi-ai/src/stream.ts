@@ -43,6 +43,15 @@ function classifyPiAiError(message: string): string {
   if (/\b(?:401|403)\b/.test(message)) return 'AUTH'
   if (isQuotaExceededError(message)) return QUOTA_EXCEEDED_CODE
   if (/\b429\b|rate.?limit/i.test(message)) return 'RATE_LIMIT'
+  // Some OpenAI-compatible gateways return transient overloads as a
+  // provider code/message without an HTTP status. Keep them in the stable
+  // SERVER class so the provider-owned retry policy can recover them.
+  if (/\bserver[_ -]?error\b/i.test(message)
+    || /\bservice\s+(?:is\s+)?busy\b/i.test(message)
+    || /\bservers?\s+are?\s+(?:currently\s+)?(?:busy|overloaded)\b/i.test(message)
+    || /\btemporarily\s+(?:unavailable|overloaded)\b/i.test(message)) {
+    return 'SERVER'
+  }
   // A rejected request body (gateway or provider size cap): resending the
   // same request cannot succeed, so it is invalid, not transient.
   if (/\b413\b|failed to buffer the request body:\s*length limit exceeded|payload too large|request body too large/i.test(message)) return 'INVALID_REQUEST'

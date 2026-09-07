@@ -894,6 +894,15 @@ describe('mapStopReason / mapUsage', () => {
   })
 
   it.each([
+    'The service is busy. Please retry later.',
+    'server_error: Our servers are currently overloaded. Please try again later.',
+    'temporarily unavailable, please try again later',
+  ])('maps transient overload text to SERVER for retry (%s)', (errorMessage) => {
+    expect(mapStopReason(assistant({ stopReason: 'error', errorMessage })))
+      .toMatchObject({ kind: 'error', failure: { code: 'SERVER', message: errorMessage } })
+  })
+
+  it.each([
     'other side closed',
     'HTTP2 request did not get a response',
     'WebSocket closed unexpectedly',

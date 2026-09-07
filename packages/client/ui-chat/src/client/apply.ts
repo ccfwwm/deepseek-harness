@@ -1,9 +1,11 @@
 /** Register the Chat Conversation target, renderers, stats, and details surface. */
 import type { Context } from '@deepseek-ai/cordis'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
+import type { PromptContentPart } from '@deepseek-ai/dsh-attachment/types'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type { SessionBinding } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { BoundActions, ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
+import type { ContentBlock } from '@deepseek-ai/dsh-llm/types'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { resolveWorkspacePath } from '@deepseek-ai/dsh-util-workspace-path'
 // Type-only service and declaration merges used by the apply world.
@@ -39,6 +41,61 @@ const CHAT_NODE_INJECT: ChatNodeTurnDataInjected = {
       return useTurnDataValue(data, key)
     },
   },
+}
+
+function base64Of(data: Uint8Array): string {
+  let binary = ''
+  const chunkSize = 0x8000
+  for (let offset = 0; offset < data.length; offset += chunkSize) {
+    binary += String.fromCharCode(...data.subarray(offset, Math.min(offset + chunkSize, data.length)))
+  }
+  return btoa(binary)
+}
+
+/** Convert durable message blocks back to the browser prompt format. */
+async function replayContentOf(
+  content: readonly ContentBlock[],
+  session: SessionBinding['session'],
+): Promise<PromptContentPart[]> {
+  const replay: PromptContentPart[] = []
+  for (const block of content) {
+    if (block.type === 'text') {
+      replay.push({ type: 'text', text: block.text })
+      continue
+    }
+    if (block.type === 'image') {
+      const result = await session.readAttachment(block.attachment.attachmentId)
+      if (!result.ok) throw new Error(`image attachment read failed: ${result.error.message}`)
+      replay.push({
+        type: 'image',
+        mediaType: result.value.attachment.mediaType,
+        data: base64Of(result.value.data),
+        ...(result.value.attachment.name === undefined ? {} : { name: result.value.attachment.name }),
+      })
+      continue
+    }
+    if (block.type === 'file') {
+      const attachment = block.attachment
+      replay.push({
+        type: 'file',
+        attachmentId: attachment.attachmentId,
+        name: attachment.name,
+        mediaType: attachment.mediaType,
+        bytes: attachment.bytes,
+        sha256: attachment.sha256,
+        storageStatus: 'stored',
+        ...(attachment.parser === undefined ? {} : { parser: attachment.parser }),
+        ...(attachment.status === undefined ? {} : { status: attachment.status }),
+        ...(attachment.textChars === undefined ? {} : { textChars: attachment.textChars }),
+        ...(attachment.preview === undefined ? {} : { preview: attachment.preview }),
+        ...(attachment.content === undefined ? {} : { content: attachment.content }),
+        ...(attachment.pageCount === undefined ? {} : { pageCount: attachment.pageCount }),
+        ...(attachment.sheetCount === undefined ? {} : { sheetCount: attachment.sheetCount }),
+        ...(attachment.warning === undefined ? {} : { warning: attachment.warning }),
+      })
+    }
+  }
+  return replay
 }
 
 /** Services required by the Chat target and its presentation registrations. */
@@ -128,6 +185,22 @@ export function apply(ctx: Context): void {
           },
           loadOlder: () => { void session.loadOlder() },
           loadThrough: seq => session.loadThrough(seq),
+          retryTurn: async (turn) => {
+            const node = chat.getSnapshot().nodes.values().find((candidate) => {
+              if (candidate.kind !== 'user') return false
+              const location = candidate.location
+              return (location.kind === 'turn' || location.kind === 'step') && location.turn.turn === turn
+            })
+            if (node === undefined || node.kind !== 'user') {
+              throw new Error(`cannot retry turn ${turn}: original user message is not loaded`)
+            }
+            const content = await replayContentOf(
+              (node.data as { readonly content: readonly ContentBlock[] }).content,
+              session,
+            )
+            const result = await session.prompt(content, 'queue')
+            if (!result.ok) throw new Error(`retry turn failed: ${result.error.message}`)
+          },
           loadImage: Object.assign(
             (attachment: ImageAttachmentRef) => ctx.uiConversation.imageUrl(sessionId, attachment),
             { peek: (attachment: ImageAttachmentRef) => ctx.uiConversation.peekImageUrl(sessionId, attachment) },

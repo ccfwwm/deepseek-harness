@@ -1221,12 +1221,18 @@ describe('ChatView', () => {
 
   it('renders terminal turn failures inline with their durable message and optional code', () => {
     const h = makeHarness({ nodes: [user(1, 'try'), turnError(2, 'AUTH'), turnError(3)] })
+    const retryTurn = vi.fn<(turn: number) => Promise<void>>().mockResolvedValue(undefined)
+    h.props.retryTurn = retryTurn
     const view = render(<h.ChatView {...h.props} />)
     const statuses = view.getAllByRole('status')
     expect(statuses.map(status => status.textContent)).toEqual([
-      '本轮运行失败API 密钥无效AUTH',
-      '本轮运行失败plugin exploded',
+      '本轮运行失败API 密钥无效AUTH重试本轮',
+      '本轮运行失败plugin exploded重试本轮',
     ])
+    const retryButtons = view.getAllByRole('button', { name: '重试本轮' })
+    expect(retryButtons).toHaveLength(2)
+    fireEvent.click(retryButtons[0]!)
+    expect(retryTurn).toHaveBeenCalledWith(1)
   })
 
   it('renders the max-tokens notice with localized guidance, distinct from turn errors', () => {
