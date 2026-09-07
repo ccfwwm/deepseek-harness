@@ -11,6 +11,56 @@ import { MessageIconActions } from './MessageIconActions.tsx'
 import css from './MessageItem.module.css'
 
 type UserImage = Extract<UserMessageNode['content'][number], { type: 'image' }>
+type MutableChatFileAttachment = { -readonly [Key in keyof ChatFileAttachment]: ChatFileAttachment[Key] }
+
+function stringField(value: Record<string, unknown>, key: string): string | undefined {
+  return typeof value[key] === 'string' && value[key] !== '' ? value[key] as string : undefined
+}
+
+/** Normalize canonical and legacy file blocks before rendering the user row. */
+function fileAttachmentFromBlock(block: unknown): ChatFileAttachment | undefined {
+  if (block === null || typeof block !== 'object' || Array.isArray(block)) return undefined
+  const value = block as Record<string, unknown>
+  if (value.type !== 'file') return undefined
+  const nested = value.attachment !== null && typeof value.attachment === 'object' && !Array.isArray(value.attachment)
+    ? value.attachment as Record<string, unknown>
+    : undefined
+  const source = nested ?? value
+  const attachmentId = stringField(source, 'attachmentId') ?? stringField(value, 'attachmentId')
+  if (attachmentId === undefined) return undefined
+  const name = stringField(source, 'name') ?? stringField(value, 'name') ?? 'uploaded-file'
+  const mediaType = stringField(source, 'mediaType') ?? stringField(value, 'mediaType') ?? 'application/octet-stream'
+  const numberField = (key: string): number | undefined => typeof source[key] === 'number' ? source[key] as number : typeof value[key] === 'number' ? value[key] as number : undefined
+  const optionalString = (key: string): string | undefined => stringField(source, key) ?? stringField(value, key)
+  const bytes = numberField('bytes') ?? 0
+  const attachment: MutableChatFileAttachment = {
+    attachmentId,
+    name,
+    mediaType,
+    bytes,
+  }
+  const parser = optionalString('parser')
+  const status = optionalString('status')
+  const textChars = numberField('textChars')
+  const pageCount = numberField('pageCount')
+  const sheetCount = numberField('sheetCount')
+  const preview = optionalString('preview')
+  const contentText = optionalString('content')
+  const parseStatus = optionalString('parseStatus')
+  const parseProgress = numberField('parseProgress')
+  const parseError = optionalString('parseError')
+  if (parser !== undefined) attachment.parser = parser
+  if (status !== undefined) attachment.status = status
+  if (textChars !== undefined) attachment.textChars = textChars
+  if (pageCount !== undefined) attachment.pageCount = pageCount
+  if (sheetCount !== undefined) attachment.sheetCount = sheetCount
+  if (preview !== undefined) attachment.preview = preview
+  if (contentText !== undefined) attachment.content = contentText
+  if (parseStatus !== undefined) attachment.parseStatus = parseStatus as Exclude<ChatFileAttachment['parseStatus'], undefined>
+  if (parseProgress !== undefined) attachment.parseProgress = parseProgress
+  if (parseError !== undefined) attachment.parseError = parseError
+  return attachment
+}
 
 function contentParts(content: readonly unknown[]): {
   text: string
@@ -28,27 +78,11 @@ function contentParts(content: readonly unknown[]): {
     else if (b.type === 'image' && b.attachment !== undefined) {
       images.push({ attachment: (b as UserImage).attachment })
     }
-    else if (b.type === 'file' && b.attachment !== undefined && typeof b.attachment === 'object') {
-      const attachment = b.attachment as Partial<ChatFileAttachment>
-      if (typeof attachment.attachmentId === 'string' && typeof attachment.name === 'string') files.push({
-        attachmentId: attachment.attachmentId,
-        name: attachment.name,
-        mediaType: typeof attachment.mediaType === 'string' ? attachment.mediaType : 'application/octet-stream',
-        bytes: typeof attachment.bytes === 'number' ? attachment.bytes : 0,
-        ...(typeof attachment.parser === 'string' ? { parser: attachment.parser } : {}),
-        ...(typeof attachment.status === 'string' ? { status: attachment.status } : {}),
-        ...(typeof attachment.textChars === 'number' ? { textChars: attachment.textChars } : {}),
-        ...(typeof attachment.pageCount === 'number' ? { pageCount: attachment.pageCount } : {}),
-        ...(typeof attachment.sheetCount === 'number' ? { sheetCount: attachment.sheetCount } : {}),
-        ...(typeof attachment.preview === 'string' ? { preview: attachment.preview } : {}),
-        ...(typeof attachment.content === 'string' ? { content: attachment.content } : {}),
-        ...(typeof attachment.parseStatus === 'string' ? { parseStatus: attachment.parseStatus as Exclude<ChatFileAttachment['parseStatus'], undefined> } : {}),
-        ...(typeof attachment.parseProgress === 'number' ? { parseProgress: attachment.parseProgress } : {}),
-        ...(typeof attachment.parseError === 'string' ? { parseError: attachment.parseError } : {}),
-      })
+    else {
+      const file = fileAttachmentFromBlock(block)
+      if (file !== undefined) files.push(file)
       else rest.push(block)
     }
-    else rest.push(block)
   }
   return { text: texts.join(''), images, files, rest }
 }

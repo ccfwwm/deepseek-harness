@@ -86,6 +86,26 @@ function MessageItem({ node, t: translate, referenceLabels }: MessageItemProps) 
 }
 
 describe('MessageItem arms', () => {
+  it('renders parsed canonical and legacy file blocks as file cards instead of extra content', () => {
+    const view = render(
+      <>
+        <MessageItem t={t} node={{
+          kind: 'user', seq: 1, time: 1_000,
+          content: [{ type: 'file', attachment: { attachmentId: 'file-1', name: 'paper.md', mediaType: 'text/markdown', bytes: 12, parser: 'text', status: 'parsed', textChars: 12 } }] as never,
+          source: null,
+        }} />
+        <MessageItem t={t} node={{
+          kind: 'user', seq: 2, time: 1_000,
+          content: [{ type: 'file', attachmentId: 'file-2', name: 'legacy.pdf', mediaType: 'application/pdf', bytes: 24, parser: 'pdfjs', status: 'parsed', textChars: 24 }] as never,
+          source: null,
+        }} />
+      </>,
+    )
+    expect(view.getByText('paper.md')).toBeTruthy()
+    expect(view.getByText('legacy.pdf')).toBeTruthy()
+    expect(view.queryAllByText('附加内容块')).toHaveLength(0)
+  })
+
   it('renders an adjacent session mention as a chip even without trailing whitespace', () => {
     const view = render(
       <MessageItem
