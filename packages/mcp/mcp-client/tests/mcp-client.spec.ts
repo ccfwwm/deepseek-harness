@@ -593,6 +593,7 @@ describe('tool execution', () => {
       expect(result.content.every(block => block.type === 'text')).toBe(true)
       expect(JSON.stringify(result.content)).not.toContain('iVBORw==')
       expect(JSON.stringify(result.value)).not.toContain('iVBORw==')
+      expect(JSON.stringify(result.value)).not.toContain('"type":"image"')
       expect(JSON.stringify(result.content)).toContain('figureya/run-1/FigureYa135multiVolcano.html')
       expect(readFileSync(join(root, 'figureya', 'run-1', 'FigureYa135multiVolcano.html'), 'utf8')).toBe('<html>ok</html>')
       expect(readFileSync(join(root, 'figureya', 'run-1', 'module-source', 'FigureYa135multiVolcano', 'example.png'))).toEqual(files['module-source/FigureYa135multiVolcano/example.png'])

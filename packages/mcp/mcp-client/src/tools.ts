@@ -450,6 +450,9 @@ function projectFigureYaContent(content: JsonValue[], localPath?: string): Conte
 function stripFigureYaBinary(value: JsonValue, localPath?: string): JsonValue {
   if (Array.isArray(value)) return value.map(item => stripFigureYaBinary(item, localPath))
   if (!isRecord(value)) return value
+  if (value.type === 'image') {
+    return { type: 'text', text: localPath === undefined ? '[FigureYa image saved in the local workspace]' : `[FigureYa image saved locally: ${localPath}]` }
+  }
   const output: Record<string, JsonValue> = {}
   for (const [key, item] of Object.entries(value)) {
     if (key === 'data_base64' || (value.type === 'image' && key === 'data')) continue
@@ -628,17 +631,18 @@ function createExecutor(
     }
 
     const figureYaImage = (opts.serverName === 'rplotfigure' || rawName.startsWith('rplotfigure')) && containsImage(content)
+    const modelContent = figureYaImage ? stripFigureYaBinary(content) as JsonValue[] : content
     const structuredContent = result.structuredContent === undefined
       ? undefined
       : figureYaImage
         ? stripFigureYaBinary(result.structuredContent as JsonValue)
         : result.structuredContent as JsonValue
     const value: McpResult = {
-      content: figureYaImage ? stripFigureYaBinary(content) as JsonValue[] : content,
+      content: modelContent,
       ...(structuredContent === undefined ? {} : { structuredContent }),
     }
     if (containsImage(content)) {
-      const fallback: ContentBlock[] = [{ type: 'text', text: extractText(content, rawName) }]
+      const fallback: ContentBlock[] = [{ type: 'text', text: extractText(modelContent, rawName) }]
       let projected: ContentBlock[]
       if (opts.serverName === 'rplotfigure' || rawName.startsWith('rplotfigure')) {
         let localPath: string | undefined
