@@ -46,7 +46,11 @@ export interface IConversation {
    * @returns completion; business failures reject (and land in promptError).
    */
   send(text: string): Promise<void>
-  /** Add capability-owned image bytes and optional context to one session draft. */
+  /**
+   * Add capability-owned image bytes and optional context to one session draft.
+   * @param sessionId - Session whose draft receives the image.
+   * @param input - Image bytes, media type, display name, and optional context.
+   */
   addImageBytesToDraft(sessionId: SessionId, input: {
     data: Uint8Array
     mediaType: ImageMediaType

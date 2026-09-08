@@ -323,7 +323,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       {
         signature: 'startSession(workspaceId?: WorkspaceId): void',
         description: 'Start a New Session flow and navigate to its Session.',
-        parameters: [{ name: 'workspaceId', description: 'explicit target; absent inherits the current or most recent Workspace.' }],
+        parameters: [{ name: 'workspaceId', description: 'explicit Workspace target; absent creates an independent unscoped Session.' }],
       },
       {
         signature: 'archiveSession(sessionId: SessionId): Promise<void>',
@@ -439,7 +439,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'BeginSubmissionInput',
-    declaration: 'export interface BeginSubmissionInput {\n    readonly mode: \'queue\' | \'steer\';\n    readonly text: string;\n    readonly images: readonly PendingSubmissionImage[];\n    readonly onRetire?: (retirement: PendingSubmissionRetirement) => void;\n}',
+    declaration: 'export interface BeginSubmissionInput {\n    readonly mode: \'queue\' | \'steer\';\n    readonly text: string;\n    readonly images: readonly PendingSubmissionImage[];\n    readonly files?: readonly PendingSubmissionFile[];\n    readonly onRetire?: (retirement: PendingSubmissionRetirement) => void;\n}',
   },
   {
     name: 'BoundActions',
@@ -627,7 +627,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PendingSubmission',
-    declaration: 'export interface PendingSubmission {\n    readonly requestId: SessionRequestId;\n    readonly placement: PendingSubmissionPlacement;\n    readonly time: number;\n    readonly text: string;\n    readonly images: readonly PendingSubmissionImage[];\n}',
+    declaration: 'export interface PendingSubmission {\n    readonly requestId: SessionRequestId;\n    readonly placement: PendingSubmissionPlacement;\n    readonly time: number;\n    readonly text: string;\n    readonly images: readonly PendingSubmissionImage[];\n    readonly files?: readonly PendingSubmissionFile[];\n}',
+  },
+  {
+    name: 'PendingSubmissionFile',
+    declaration: 'export interface PendingSubmissionFile {\n    readonly name: string;\n    readonly mediaType: string;\n}',
   },
   {
     name: 'PendingSubmissionImage',
@@ -647,7 +651,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PromptContentPart',
-    declaration: 'export type PromptContentPart = {\n    readonly type: \'text\';\n    readonly text: string;\n} | {\n    readonly type: \'image\';\n    readonly mediaType: ImageMediaType;\n    readonly data: string;\n    readonly name?: string;\n};',
+    declaration: 'export type PromptContentPart = {\n    readonly type: \'text\';\n    readonly text: string;\n} | {\n    readonly type: \'image\';\n    readonly mediaType: ImageMediaType;\n    readonly data: string;\n    readonly name?: string;\n} | {\n    readonly type: \'file\';\n    readonly attachmentId: string;\n    readonly name: string;\n    readonly mediaType: string;\n    readonly bytes: number;\n    readonly sha256: string;\n    readonly storageStatus: \'stored\';\n    readonly parser?: string;\n    readonly status?: string;\n    readonly textChars?: number;\n    readonly preview?: string;\n    readonly content?: string;\n    readonly pageCount?: number;\n    readonly sheetCount?: number;\n    readonly warning?: string;\n};',
   },
   {
     name: 'PromptError',

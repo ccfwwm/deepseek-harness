@@ -165,4 +165,27 @@ onGraphChanged(listener: () => void): () => void
 ```
 
 Source: [`packages/client/modules/src/index.ts`](../../packages/client/modules/src/index.ts)
+
+<a id="mcp-client-events"></a>
+
+### `mcp-client/*` events
+
+<a id="mcp-clientstatus--emit"></a>
+
+#### `mcp-client/status` — emit
+
+Live connection state after transport and tool synchronization.
+
+```ts cordis-catalog
+/**
+ * Live connection state after transport and tool synchronization.
+ * @mode emit
+ * @param serverName Configured MCP server name.
+ * @param state Current connection lifecycle state.
+ * @param error Optional diagnostic message when state is `error`.
+ */
+'mcp-client/status'(serverName: string, state: 'starting' | 'active' | 'error', error?: string): void
+```
+
+Source: [`packages/mcp/mcp-client/src/connection.ts`](../../packages/mcp/mcp-client/src/connection.ts)
 <!-- END GENERATED cordis-surface -->

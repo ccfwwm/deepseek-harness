@@ -717,7 +717,7 @@ inspect( sessionId: SessionId, signal?: AbortSignal, ): Promise<SessionInspectio
  * @param request - optional explicit health-check request; metadata-only when omitted.
  * @returns provider-grouped models, the deployment default, and isolated provider failures.
  */
-@Remote('modelCatalog') modelCatalog(request?: { readonly check?: boolean }): Promise<ModelCatalog>
+@Remote('modelCatalog') modelCatalog(request?: { readonly check?: boolean readonly refresh?: boolean /** Low-resource startup probe; explicit user checks omit this flag. */ readonly background?: boolean readonly provider?: string readonly model?: string }): Promise<ModelCatalog>
 
 /**
  * Report whether this deployment can hand a Session workspace path to a native desktop.
@@ -999,6 +999,23 @@ One Agent failed outside a durable turn position.
 ```
 
 Types: [SessionId](core.md)
+
+Source: [`packages/api/session-controller/src/types.ts`](../../packages/api/session-controller/src/types.ts)
+
+<a id="api-sessionmodel-catalog--emit"></a>
+
+#### `api-session/model-catalog` — emit
+
+A model probe completed and published the latest shared catalog snapshot.
+
+```ts cordis-catalog
+/**
+ * A model probe completed and published the latest shared catalog snapshot.
+ * @mode emit
+ * @param catalog - current model catalog and availability state.
+ */
+'api-session/model-catalog'(catalog: ModelCatalog): void
+```
 
 Source: [`packages/api/session-controller/src/types.ts`](../../packages/api/session-controller/src/types.ts)
 

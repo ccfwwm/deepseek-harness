@@ -38,6 +38,19 @@ export interface ToolBridgeOptions {
   toolFilter?: ((rawName: string) => boolean) | undefined
 }
 
+/** Host-resolved route details used by Biomni execution tools. */
+export interface BiomniRouteDetails {
+  provider?: string
+  model?: string
+  baseUrl?: string
+  apiKey?: string
+}
+
+/** Optional Host seam for resolving credentials and endpoint metadata. */
+export interface BiomniRouteResolver {
+  resolve?: (provider: string, model: string) => Promise<BiomniRouteDetails | undefined>
+}
+
 /** State for one sync generation: the current set of disposers keyed by public name. */
 export type ToolDisposers = Map<string, () => void>
 
@@ -585,24 +598,39 @@ function createExecutor(
     // Biomni uses the model that is active in the current ZeroWall session.
     // Inject only non-secret routing metadata; API keys remain in the Host
     // credential broker and are never added to MCP arguments or chat content.
-    if (opts.serverName === 'rbioagent' || opts.serverName === 'rdatalinux_biomni' || rawName.startsWith('r_biomni_')) {
+    const compactBiomniArgs = rawName === 'biomni_execute' && typeof argsObj.arguments === 'object' && argsObj.arguments !== null
+      ? { ...(argsObj.arguments as Record<string, unknown>) }
+      : undefined
+    const biomniArgs = compactBiomniArgs ?? argsObj
+    const compactBiomniAction = rawName === 'biomni_execute' && typeof argsObj.action === 'string' ? argsObj.action : undefined
+    if (opts.serverName === 'rbioagent' || opts.serverName === 'rdatalinux_biomni' || rawName.startsWith('r_biomni_') || rawName === 'biomni_execute') {
       const route = exec.agent?.session.requestHeader()?.config ?? exec.agent?.options
-      if (typeof argsObj.model !== 'string' && typeof route?.model === 'string') argsObj.model = route.model
-      const baseUrl = canonicalAiCloudBaseUrl((route as { baseUrl?: unknown; baseURL?: unknown } | undefined)?.baseUrl)
+      const provider = typeof route?.provider === 'string' ? route.provider : undefined
+      const model = typeof route?.model === 'string' ? route.model : undefined
+      const routeResolver = ctx.get('zerowallMcpRouteResolver') as BiomniRouteResolver | undefined
+      const resolved = provider !== undefined && model !== undefined && typeof routeResolver?.resolve === 'function'
+        ? await routeResolver.resolve(provider, model)
+        : undefined
+      if (typeof biomniArgs.model !== 'string' && typeof resolved?.model === 'string') biomniArgs.model = resolved.model
+      if (typeof biomniArgs.model !== 'string' && model !== undefined) biomniArgs.model = model
+      const baseUrl = canonicalAiCloudBaseUrl(resolved?.baseUrl)
+        ?? canonicalAiCloudBaseUrl((route as { baseUrl?: unknown; baseURL?: unknown } | undefined)?.baseUrl)
         ?? canonicalAiCloudBaseUrl((route as { baseURL?: unknown } | undefined)?.baseURL)
-      if (typeof argsObj.base_url !== 'string' && baseUrl !== undefined) argsObj.base_url = baseUrl
+      if (typeof biomniArgs.base_url !== 'string' && baseUrl !== undefined) biomniArgs.base_url = baseUrl
       const sessionId = exec.agent?.session.id
-      if (typeof argsObj.session_id !== 'string' && typeof sessionId === 'string' && sessionId.length > 0) argsObj.session_id = sessionId
+      if (typeof biomniArgs.session_id !== 'string' && typeof sessionId === 'string' && sessionId.length > 0) biomniArgs.session_id = sessionId
       // ZeroWall's AI Cloud routes keep the provider key in its Host-side
       // credential broker. Resolve it only for the two Biomni execution
       // tools that declare `api_key`; never add it to read-only calls or logs.
-      if (rawName === 'r_biomni_run_agent' || rawName === 'r_biomni_call_tool') {
+      if (rawName === 'r_biomni_run_agent' || rawName === 'r_biomni_call_tool' || compactBiomniAction === 'biomni.run.agent') {
         const resolver = ctx.get('zerowallMcpCredentialResolver') as { resolve?: (provider: string, model: string) => Promise<string | undefined> } | undefined
-        if (typeof argsObj.api_key !== 'string' && typeof route?.provider === 'string' && typeof route?.model === 'string' && typeof resolver?.resolve === 'function') {
-          const apiKey = await resolver.resolve(route.provider, route.model)
-          if (apiKey !== undefined && apiKey.trim().length > 0) argsObj.api_key = apiKey
+        if (typeof biomniArgs.api_key !== 'string' && typeof resolved?.apiKey === 'string') biomniArgs.api_key = resolved.apiKey
+        if (typeof biomniArgs.api_key !== 'string' && provider !== undefined && model !== undefined && typeof resolver?.resolve === 'function') {
+          const apiKey = await resolver.resolve(provider, model)
+          if (apiKey !== undefined && apiKey.trim().length > 0) biomniArgs.api_key = apiKey
         }
       }
+      if (compactBiomniArgs !== undefined) argsObj.arguments = biomniArgs
     }
     let result = await callToolUncached(client, rawName, argsObj, exec, opts)
 

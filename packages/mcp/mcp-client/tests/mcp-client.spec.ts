@@ -311,6 +311,24 @@ describe('syncTools', () => {
     expect(statusCall.arguments).not.toHaveProperty('api_key')
   })
 
+  it('injects the active model credential into compact Biomni A1 arguments', async () => {
+    const resolver = vi.fn(async () => ({
+      provider: 'zerowall-ai-cloud-50-completions', model: 'gpt-test',
+      baseUrl: 'https://hkcode.aicodeme.xyz/v1', apiKey: 'sentinel-api-key',
+    }))
+    ctx.provide('zerowallMcpRouteResolver', { resolve: resolver } as never)
+    const client = createMockClient([{ name: 'biomni_execute', inputSchema: { type: 'object' } }])
+    await syncTools(client as never, ctx, { ...defaultOpts, serverName: 'rmcp' }, new Map())
+    const agent = {
+      options: { provider: 'zerowall-ai-cloud-50-completions', model: 'gpt-test', baseUrl: 'https://hkcode.aicodeme.xyz/v1' },
+      session: { id: 'session-compact', requestHeader: () => undefined },
+    }
+    await ctx.tools.execute({ signal: testToolSignal, callId: ToolCallId('biomni-compact-agent'), name: 'mcp__rmcp__biomni_execute', arguments: { action: 'biomni.run.agent', arguments: { project_id: 'p', prompt: 'analyze', confirm: true } }, agent } as never)
+    const call = client.callTool.mock.calls[0]?.[0] as { arguments: { arguments: Record<string, unknown> } }
+    expect(call.arguments.arguments).toMatchObject({ model: 'gpt-test', base_url: 'https://code.aicodeme.xyz/v1', session_id: 'session-compact', api_key: 'sentinel-api-key' })
+    expect(resolver).toHaveBeenCalledWith('zerowall-ai-cloud-50-completions', 'gpt-test')
+  })
+
   it('rejects a tool list where one raw name appears twice', async () => {
     const client = createMockClient([
       { name: 'dup', inputSchema: { type: 'object' } },

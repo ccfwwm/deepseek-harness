@@ -26,7 +26,13 @@ import type { Config } from './index.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Events {
-    /** Live connection state after transport and tool synchronization. */
+    /**
+     * Live connection state after transport and tool synchronization.
+     * @mode emit
+     * @param serverName Configured MCP server name.
+     * @param state Current connection lifecycle state.
+     * @param error Optional diagnostic message when state is `error`.
+     */
     'mcp-client/status'(serverName: string, state: 'starting' | 'active' | 'error', error?: string): void
   }
 }

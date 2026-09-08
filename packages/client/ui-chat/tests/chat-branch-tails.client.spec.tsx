@@ -106,6 +106,26 @@ describe('MessageItem arms', () => {
     expect(view.queryAllByText('附加内容块')).toHaveLength(0)
   })
 
+  it('keeps a parsed file card when replay adds an extra attachment wrapper', () => {
+    const view = render(
+      <MessageItem t={t} node={{
+        kind: 'user', seq: 3, time: 1_000,
+        content: [{
+          type: 'file',
+          attachment: {
+            attachment: {
+              attachmentId: 'file-3', name: 'parsed.pdf', mediaType: 'application/pdf',
+              bytes: 48, parser: 'pdfjs', status: 'parsed', textChars: 48,
+            },
+          },
+        }] as never,
+        source: null,
+      }} />,
+    )
+    expect(view.getByText('parsed.pdf')).toBeTruthy()
+    expect(view.queryAllByText('附加内容块')).toHaveLength(0)
+  })
+
   it('renders an adjacent session mention as a chip even without trailing whitespace', () => {
     const view = render(
       <MessageItem

@@ -21,34 +21,52 @@ function stringField(value: Record<string, unknown>, key: string): string | unde
 function fileAttachmentFromBlock(block: unknown): ChatFileAttachment | undefined {
   if (block === null || typeof block !== 'object' || Array.isArray(block)) return undefined
   const value = block as Record<string, unknown>
+  // Durable logs written by the current Host use `{ type: 'file', attachment }`.
+  // Older replay/projection paths can retain one extra attachment wrapper; walk
+  // those wrappers so the block remains a file card instead of JsonBlock.
   if (value.type !== 'file') return undefined
-  const nested = value.attachment !== null && typeof value.attachment === 'object' && !Array.isArray(value.attachment)
-    ? value.attachment as Record<string, unknown>
-    : undefined
-  const source = nested ?? value
-  const attachmentId = stringField(source, 'attachmentId') ?? stringField(value, 'attachmentId')
+  const sources: Record<string, unknown>[] = [value]
+  let current = value
+  for (let depth = 0; depth < 3; depth += 1) {
+    const nested = current.attachment
+    if (nested === null || typeof nested !== 'object' || Array.isArray(nested)) break
+    current = nested as Record<string, unknown>
+    sources.push(current)
+  }
+  const firstString = (key: string): string | undefined => {
+    for (const source of sources) {
+      const found = stringField(source, key)
+      if (found !== undefined) return found
+    }
+    return undefined
+  }
+  const firstNumber = (key: string): number | undefined => {
+    for (const source of sources) {
+      if (typeof source[key] === 'number') return source[key] as number
+    }
+    return undefined
+  }
+  const attachmentId = firstString('attachmentId')
   if (attachmentId === undefined) return undefined
-  const name = stringField(source, 'name') ?? stringField(value, 'name') ?? 'uploaded-file'
-  const mediaType = stringField(source, 'mediaType') ?? stringField(value, 'mediaType') ?? 'application/octet-stream'
-  const numberField = (key: string): number | undefined => typeof source[key] === 'number' ? source[key] as number : typeof value[key] === 'number' ? value[key] as number : undefined
-  const optionalString = (key: string): string | undefined => stringField(source, key) ?? stringField(value, key)
-  const bytes = numberField('bytes') ?? 0
+  const name = firstString('name') ?? 'uploaded-file'
+  const mediaType = firstString('mediaType') ?? 'application/octet-stream'
+  const bytes = firstNumber('bytes') ?? 0
   const attachment: MutableChatFileAttachment = {
     attachmentId,
     name,
     mediaType,
     bytes,
   }
-  const parser = optionalString('parser')
-  const status = optionalString('status')
-  const textChars = numberField('textChars')
-  const pageCount = numberField('pageCount')
-  const sheetCount = numberField('sheetCount')
-  const preview = optionalString('preview')
-  const contentText = optionalString('content')
-  const parseStatus = optionalString('parseStatus')
-  const parseProgress = numberField('parseProgress')
-  const parseError = optionalString('parseError')
+  const parser = firstString('parser')
+  const status = firstString('status')
+  const textChars = firstNumber('textChars')
+  const pageCount = firstNumber('pageCount')
+  const sheetCount = firstNumber('sheetCount')
+  const preview = firstString('preview')
+  const contentText = firstString('content')
+  const parseStatus = firstString('parseStatus')
+  const parseProgress = firstNumber('parseProgress')
+  const parseError = firstString('parseError')
   if (parser !== undefined) attachment.parser = parser
   if (status !== undefined) attachment.status = status
   if (textChars !== undefined) attachment.textChars = textChars

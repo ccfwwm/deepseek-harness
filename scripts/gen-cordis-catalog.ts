@@ -196,6 +196,7 @@ export const EVENT_SCOPE_PAGE: Record<string, string> = {
   'fs': 'filesystem.md',
   'goal': 'goal.md',
   'llm': 'llm-streaming.md',
+  'mcp-client': 'client-modules.md',
   'session': 'session.md',
   'settings': 'settings.md',
   'skills': 'skills.md',
