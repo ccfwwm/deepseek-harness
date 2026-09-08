@@ -622,6 +622,18 @@ describe('Web session model selection', () => {
     await vi.waitFor(() => { expect(calls).toBe(6) })
     expect(calls).toBe(6)
     expect(maximum).toBe(2)
+
+    // Provider catalog events and reconnecting browser clients may request
+    // the startup check again, but one Host process must never pay twice.
+    ctx.emit('llm/adapters-updated')
+    const repeated = expectValue(await remote.modelCatalog({ check: true, refresh: true, background: true }))
+    expect(repeated.groups.find(group => group.id === 'background-check')?.models
+      .every(model => model.status === 'available')).toBe(true)
+    expect(calls).toBe(6)
+
+    // Explicit user checks remain available after the startup guard.
+    await remote.modelCatalog({ check: true, refresh: true })
+    expect(calls).toBe(12)
     await ctx.fiber.dispose()
   })
 

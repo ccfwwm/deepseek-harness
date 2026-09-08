@@ -108,6 +108,8 @@ export class SessionController extends TypertRemoteService {
   private readonly openPath: (path: string, signal: AbortSignal) => Promise<void>
   private readonly canOpenPath: () => boolean
   private readonly promotions = new Set<Promise<void>>()
+  /** One low-resource automatic probe per Host process, shared by every browser/reconnect. */
+  private startupModelProbe: Promise<ModelCatalog> | undefined
 
   /**
    * @param ctx - Host context containing the Session capability assembly.
@@ -270,14 +272,25 @@ export class SessionController extends TypertRemoteService {
     readonly model?: string
   }): Promise<ModelCatalog> {
     if (request?.background !== true) return buildModelCatalog(this.ctx, undefined, request)
+    if (this.startupModelProbe !== undefined) {
+      // A later browser or reconnect receives the current metadata plus the
+      // persisted health produced by the first probe. It never starts a new
+      // inference fan-out, even if provider metadata invalidated the catalog.
+      return this.startupModelProbe.then(
+        () => buildModelCatalog(this.ctx),
+        () => buildModelCatalog(this.ctx),
+      )
+    }
     const { background: _background, ...options } = request
     // This is a separate startup RPC, not the metadata request that opens the
     // selector. Events provide progress; the response remains authoritative
     // even when an embedded transport drops those events.
-    return buildModelCatalog(this.ctx, undefined, {
+    const operation = buildModelCatalog(this.ctx, undefined, {
       ...options,
       concurrency: BACKGROUND_PROBE_CONCURRENCY,
     })
+    this.startupModelProbe = operation
+    return operation
   }
 
   /**

@@ -180,6 +180,11 @@ async function bench() {
 
 const projection = (id: string) => ({ sessionId: sid(id) })
 
+function isCheckRequest(request: unknown): boolean {
+  return typeof request === 'object' && request !== null
+    && 'check' in request && request.check === true
+}
+
 describe('ui-model-selection dual entry', () => {
   it('registers the /model contribution and the composer model seat', async () => {
     const b = await bench()
@@ -255,6 +260,22 @@ describe('ui-model-selection dual entry', () => {
     b.remote.emit('settings/document-updated', ['agent-default-model', 2])
     await vi.waitFor(() => { expect(b.modelRequests).toHaveLength(before + 1) })
     expect(b.modelRequests.at(-1)).toEqual({ refresh: true })
+  })
+
+  it('refreshes metadata without repeating model probes on provider events', async () => {
+    const b = await bench()
+    b.mint('s1')
+    await vi.waitFor(() => {
+      expect(b.modelRequests).toContainEqual({ check: true, refresh: true, background: true })
+    })
+    const probesBefore = b.modelRequests.filter(isCheckRequest).length
+    const requestsBefore = b.modelRequests.length
+
+    b.remote.emit('llm/adapters-updated', [])
+    await vi.waitFor(() => { expect(b.modelRequests.length).toBeGreaterThan(requestsBefore) })
+    expect(b.modelRequests.at(-1)).toEqual({ refresh: true })
+    await new Promise(resolve => setTimeout(resolve, 25))
+    expect(b.modelRequests.filter(isCheckRequest)).toHaveLength(probesBefore)
   })
 
   it('a popup selection lands on the seat store — the reverse direction of the same state', async () => {

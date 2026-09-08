@@ -112,7 +112,7 @@ export class ModelDirectoryResolver extends Service {
       if (connection === undefined) loadForGeneration()
       else startGeneration()
     })
-    ctx.remote.$on('llm/adapters-updated', () => { this.refreshInBackground() })
+    ctx.remote.$on('llm/adapters-updated', () => { this.refreshMetadataInBackground() })
     ctx.remote.$on('api-session/model-catalog', (value) => { this.catalog.accept(value) })
     ctx.remote.$on('settings/document-updated', (namespace) => {
       const key = String(namespace)
@@ -120,9 +120,9 @@ export class ModelDirectoryResolver extends Service {
       // changes only the selection, not provider health, so probing every model
       // here would gray the menu and delay the close after every selection.
       if (key === 'agent-default-model') void this.catalog.sync().catch(() => {})
-      else if (key.startsWith('llm-')) this.refreshInBackground()
+      else if (key.startsWith('llm-')) this.refreshMetadataInBackground()
     })
-    ctx.remote.$on('credentials/reference-updated', () => { this.refreshInBackground() })
+    ctx.remote.$on('credentials/reference-updated', () => { this.refreshMetadataInBackground() })
     ctx.effect(() => () => {
       generationDisposer?.()
       if (connectionRetry !== undefined) clearTimeout(connectionRetry)
@@ -154,11 +154,12 @@ export class ModelDirectoryResolver extends Service {
     this.cancelScheduledCheck = () => clearTimeout(timer)
   }
 
-  private refreshInBackground(): void {
-    this.cancelScheduledCheck?.()
-    this.cancelScheduledCheck = undefined
+  private refreshMetadataInBackground(): void {
+    // Provider, settings, and credential events invalidate directory metadata,
+    // but they must never fan out paid inference probes. The one startup probe
+    // remains scheduled independently; later probes require an explicit user
+    // action through checkAll/checkModel.
     void this.catalog.refresh(false)
-      .then(() => { this.scheduleBackgroundCheck() })
       .catch(() => { /* selectors expose the shared error */ })
   }
 
