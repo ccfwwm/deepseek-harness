@@ -22,17 +22,33 @@ function fileAttachmentFromBlock(block: unknown): ChatFileAttachment | undefined
   if (block === null || typeof block !== 'object' || Array.isArray(block)) return undefined
   const value = block as Record<string, unknown>
   // Durable logs written by the current Host use `{ type: 'file', attachment }`.
-  // Older replay/projection paths can retain one extra attachment wrapper; walk
-  // those wrappers so the block remains a file card instead of JsonBlock.
-  if (value.type !== 'file') return undefined
-  const sources: Record<string, unknown>[] = [value]
-  let current = value
-  for (let depth = 0; depth < 3; depth += 1) {
-    const nested = current.attachment
-    if (nested === null || typeof nested !== 'object' || Array.isArray(nested)) break
-    current = nested as Record<string, unknown>
-    sources.push(current)
+  // Older replay/projection paths can retain a flat file DTO, or one extra
+  // attachment wrapper. Walk all of these shapes so parsing metadata cannot
+  // turn the file card into the generic "extra block" renderer.
+  const hasFileIdentity = (record: Record<string, unknown>): boolean =>
+    typeof record.attachmentId === 'string'
+    && record.attachmentId.length > 0
+    && (typeof record.name === 'string' || typeof record.mediaType === 'string')
+  const sources: Record<string, unknown>[] = []
+  const pending: Array<{ record: Record<string, unknown>; depth: number }> = [{ record: value, depth: 0 }]
+  const seen = new Set<Record<string, unknown>>()
+  while (pending.length > 0) {
+    const next = pending.shift()
+    if (next === undefined || seen.has(next.record)) continue
+    seen.add(next.record)
+    sources.push(next.record)
+    if (next.depth >= 5) continue
+    for (const key of ['attachment', 'file', 'metadata', 'ref', 'data']) {
+      const nested = next.record[key]
+      if (nested !== null && typeof nested === 'object' && !Array.isArray(nested)) {
+        pending.push({ record: nested as Record<string, unknown>, depth: next.depth + 1 })
+      }
+    }
   }
+  // Some older projection records wrap the DTO in an envelope without a
+  // `type: file` tag. Only classify the block as a file when one of the
+  // expanded records carries the durable attachment identity.
+  if (value.type !== 'file' && !sources.some(hasFileIdentity)) return undefined
   const firstString = (key: string): string | undefined => {
     for (const source of sources) {
       const found = stringField(source, key)

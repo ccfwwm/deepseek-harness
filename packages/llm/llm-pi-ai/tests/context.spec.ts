@@ -91,6 +91,19 @@ describe('pi-ai request context conversion', () => {
     expect(JSON.stringify(context.messages)).toContain('附件正文内容')
   })
 
+  it('sends complete parsed content instead of the bounded card preview', () => {
+    const context = toPiContext(request([user([{
+      type: 'file',
+      attachment: {
+        attachmentId: 'file-sha256:complete', name: 'paper.pdf', mediaType: 'application/pdf',
+        bytes: 10, sha256: 'complete', parser: 'pdfjs', status: 'parsed', textChars: 18,
+        preview: 'card preview', content: 'complete parsed document body',
+      },
+    }])]))
+    expect(JSON.stringify(context.messages)).toContain('complete parsed document body')
+    expect(JSON.stringify(context.messages)).not.toContain('card preview')
+  })
+
   it('omits absent and empty request-level optional fields', () => {
     const base = { provider: 'openai', model: 'gpt-4.1', messages: [] }
     expect(toPiContext(base)).toEqual({ messages: [] })

@@ -44,6 +44,13 @@ describe('file attachment text', () => {
       content: '# Full Markdown\n\n完整正文',
     })).toContain('# Full Markdown\n\n完整正文')
   })
+
+  it('sends complete content when legacy metadata is incomplete', () => {
+    expect(fileAttachmentText({
+      attachmentId: 'file-legacy', name: 'legacy.pdf', mediaType: 'application/pdf',
+      bytes: 1, sha256: 'legacy', content: 'complete parsed body',
+    })).toContain('complete parsed body')
+  })
 })
 
 function offloadBase64(messages: readonly Message[], maxBytes: number | undefined): readonly Message[] {

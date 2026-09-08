@@ -282,6 +282,53 @@ describe('Web session model selection', () => {
     await ctx.fiber.dispose()
   })
 
+  it('preserves parsed file metadata and content in the admitted user message', async () => {
+    const { ctx, agent, sessionId } = await harness()
+    const followup = vi.fn()
+    Object.assign(agent, { followup })
+    const remote = createSessionTestRemote(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+      cwd: '/tmp',
+    })
+
+    const result = await remote.prompt(promptRequest({
+      sessionId,
+      mode: 'queue' as const,
+      content: [{
+        type: 'file' as const,
+        attachmentId: 'file-sha256:parsed',
+        name: 'paper.pdf',
+        mediaType: 'application/pdf',
+        bytes: 10,
+        sha256: 'parsed',
+        storageStatus: 'stored' as const,
+        parser: 'pdfjs',
+        status: 'parsed',
+        textChars: 22,
+        preview: 'card preview',
+        content: 'complete parsed document body',
+      }],
+    }))
+    expect(result.ok).toBe(true)
+    expect((followup.mock.calls[0]?.[0] as UserMessage).content).toEqual([{
+      type: 'file',
+      attachment: {
+        attachmentId: 'file-sha256:parsed',
+        name: 'paper.pdf',
+        mediaType: 'application/pdf',
+        bytes: 10,
+        sha256: 'parsed',
+        storageStatus: 'stored',
+        parser: 'pdfjs',
+        status: 'parsed',
+        textChars: 22,
+        preview: 'card preview',
+        content: 'complete parsed document body',
+      },
+    }])
+    await ctx.fiber.dispose()
+  })
+
   it('allows a text-only selection while durable or pending images remain available for later models', async () => {
     const { ctx, agent, sessionId } = await harness()
     registerTextOnly(ctx)

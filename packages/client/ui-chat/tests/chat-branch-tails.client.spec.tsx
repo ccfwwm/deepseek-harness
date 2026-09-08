@@ -91,7 +91,7 @@ describe('MessageItem arms', () => {
       <>
         <MessageItem t={t} node={{
           kind: 'user', seq: 1, time: 1_000,
-          content: [{ type: 'file', attachment: { attachmentId: 'file-1', name: 'paper.md', mediaType: 'text/markdown', bytes: 12, parser: 'text', status: 'parsed', textChars: 12 } }] as never,
+          content: [{ type: 'file', attachment: { attachmentId: 'file-1', name: 'paper.md', mediaType: 'text/markdown', bytes: 12, parser: 'text', status: 'parsed', textChars: 12, content: '# parsed body', parseStatus: 'done', parseProgress: 100 } }] as never,
           source: null,
         }} />
         <MessageItem t={t} node={{
@@ -103,6 +103,18 @@ describe('MessageItem arms', () => {
     )
     expect(view.getByText('paper.md')).toBeTruthy()
     expect(view.getByText('legacy.pdf')).toBeTruthy()
+    expect(view.getByText('解析完成')).toBeTruthy()
+    expect(view.queryAllByText('附加内容块')).toHaveLength(0)
+  })
+
+  it('keeps a flat parsed file DTO as a file card after parsing completes', () => {
+    const view = render(<MessageItem t={t} node={{
+      kind: 'user', seq: 4, time: 1_000,
+      content: [{ type: 'file', attachmentId: 'file-4', name: 'table.xlsx', mediaType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', bytes: 48, parser: 'xlsx', status: 'parsed', textChars: 48, content: 'A1\tB1', parseStatus: 'done', parseProgress: 100 }] as never,
+      source: null,
+    }} />)
+    expect(view.getByText('table.xlsx')).toBeTruthy()
+    expect(view.getByText('解析完成')).toBeTruthy()
     expect(view.queryAllByText('附加内容块')).toHaveLength(0)
   })
 
@@ -123,6 +135,23 @@ describe('MessageItem arms', () => {
       }} />,
     )
     expect(view.getByText('parsed.pdf')).toBeTruthy()
+    expect(view.queryAllByText('附加内容块')).toHaveLength(0)
+  })
+
+  it('keeps a file card when an old projection adds an untyped envelope', () => {
+    const view = render(<MessageItem t={t} node={{
+      kind: 'user', seq: 5, time: 1_000,
+      content: [{
+        kind: 'attachment-envelope',
+        data: { metadata: {
+          attachmentId: 'file-5', name: 'wrapped.docx',
+          mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          bytes: 20, parser: 'docx', status: 'parsed', content: 'wrapped body',
+        } },
+      }] as never,
+      source: null,
+    }} />)
+    expect(view.getByText('wrapped.docx')).toBeTruthy()
     expect(view.queryAllByText('附加内容块')).toHaveLength(0)
   })
 

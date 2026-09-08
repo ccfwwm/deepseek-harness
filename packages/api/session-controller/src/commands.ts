@@ -334,7 +334,29 @@ export class SessionCommandController {
         let admittedIndex = 0
         const content = request.content.map((part) => {
           if (part.type !== 'file') return admitted[admittedIndex++]
-          return { type: 'file', attachment: { ...part } }
+          // File parts are already durable. Normalize the wire DTO at the
+          // admission boundary so replay, UI projection, and model adapters
+          // always receive one canonical shape even when an older client sent
+          // optional parser fields in a different order.
+          return {
+            type: 'file',
+            attachment: {
+              attachmentId: part.attachmentId,
+              name: part.name || 'uploaded-file',
+              mediaType: part.mediaType || 'application/octet-stream',
+              bytes: part.bytes,
+              sha256: part.sha256,
+              storageStatus: part.storageStatus,
+              ...(part.parser === undefined ? {} : { parser: part.parser }),
+              ...(part.status === undefined ? {} : { status: part.status }),
+              ...(part.textChars === undefined ? {} : { textChars: part.textChars }),
+              ...(part.preview === undefined ? {} : { preview: part.preview }),
+              ...(part.content === undefined ? {} : { content: part.content }),
+              ...(part.pageCount === undefined ? {} : { pageCount: part.pageCount }),
+              ...(part.sheetCount === undefined ? {} : { sheetCount: part.sheetCount }),
+              ...(part.warning === undefined ? {} : { warning: part.warning }),
+            },
+          }
         }) as ContentBlock[]
         const message: UserMessage = createUserMessage({ content, source })
         if (request.mode === 'steer') agent.steer(message)
