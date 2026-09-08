@@ -206,6 +206,33 @@ describe('MessageItem arms', () => {
     expect(writeText).toHaveBeenCalledWith('hello bubble')
   })
 
+  it('user copy uses the desktop clipboard bridge and shows success', async () => {
+    const copyText = vi.fn().mockResolvedValue(true)
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('zerowallDesktop', { copyText })
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
+    render(
+      <MessageItem t={t} node={{
+        kind: 'user', seq: 1, time: 1_000,
+        content: [{ type: 'text', text: 'desktop body' }] as never,
+        source: null,
+      }} />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '复制' }))
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(copyText).toHaveBeenCalledWith('desktop body')
+    expect(writeText).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: '复制成功' })).toBeTruthy()
+  })
+
   it('user copy falls back to execCommand when clipboard.writeText is unavailable', () => {
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
@@ -228,11 +255,12 @@ describe('MessageItem arms', () => {
     expect(exec).toHaveBeenCalledWith('copy')
   })
 
-  it('user copy never claims success when the host rejects the write', async () => {
+  it('user copy never claims success when every clipboard path rejects the write', async () => {
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
       value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
     })
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: undefined })
     render(
       <MessageItem t={t} node={{
         kind: 'user', seq: 1, time: 1_000,

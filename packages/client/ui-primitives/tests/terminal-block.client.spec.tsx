@@ -13,7 +13,10 @@ function TerminalBlock(props: Omit<ComponentProps<typeof LocalizedTerminalBlock>
 
 const ESC = '\u001b'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 
 beforeEach(() => {
   vi.useRealTimers()
@@ -364,6 +367,27 @@ describe('TerminalBlock copy', () => {
 })
 
 describe('writeClipboard', () => {
+  it('prefers the desktop bridge over the browser Clipboard API', async () => {
+    const copyText = vi.fn().mockResolvedValue(true)
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('zerowallDesktop', { copyText })
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+
+    await expect(writeClipboard('payload')).resolves.toBe(true)
+    expect(copyText).toHaveBeenCalledWith('payload')
+    expect(writeText).not.toHaveBeenCalled()
+  })
+
+  it('falls through when the desktop bridge rejects', async () => {
+    const copyText = vi.fn().mockRejectedValue(new Error('bridge unavailable'))
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('zerowallDesktop', { copyText })
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+
+    await expect(writeClipboard('payload')).resolves.toBe(true)
+    expect(writeText).toHaveBeenCalledWith('payload')
+  })
+
   it('reports true after the async Clipboard API accepts the exact text', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
@@ -377,6 +401,18 @@ describe('writeClipboard', () => {
       value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
     })
     await expect(writeClipboard('payload')).resolves.toBe(false)
+  })
+
+  it('falls through to execCommand when the Clipboard API rejects', async () => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
+    })
+    const exec = vi.fn(() => true)
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: exec })
+
+    await expect(writeClipboard('payload')).resolves.toBe(true)
+    expect(exec).toHaveBeenCalledWith('copy')
   })
 
   it('selects a detached textarea for the execCommand fallback and removes it after', async () => {
