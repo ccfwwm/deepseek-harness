@@ -212,7 +212,7 @@ export function apply(ctx: Context, config: Config = {}, internals: RetryInterna
       if (downstream.type === 'decision' && downstream.decision?.kind === 'retry') {
         return downstream.decision
       }
-    } else if (!policy.retryableCodes.includes(failure.code)) {
+    } else if (!policy.retryableCodes.includes('*') && !policy.retryableCodes.includes(failure.code)) {
       return next()
     }
 

@@ -423,10 +423,12 @@ describe('provider-routed retry policy', () => {
     expect(adapter.requests).toHaveLength(2)
   })
 
-  it('delegates non-transient failures without scheduling a timer', async () => {
+  it('keeps an explicit retry-code allowlist narrower than the default', async () => {
     vi.useFakeTimers()
     const adapter = new ScriptedAdapter([new LlmError('bad key', 'AUTH')])
-    ;({ ctx: context } = await harness(adapter))
+    ;({ ctx: context } = await harness(adapter, {
+      mock: normalConfig({ retryableCodes: ['SERVER'] }),
+    }))
     const agent = context.agentLoop.create(SessionId('retry-auth'), { provider: 'mock', model: 'mock' })
     const idle = waitForIdle(context, agent)
     agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
@@ -470,6 +472,7 @@ describe('provider-routed retry policy', () => {
       textResponse('other recovered'),
     ])
     ;({ ctx: context } = await harness(adapter, {
+      mock: normalConfig({ retryableCodes: ['SERVER'] }),
       other: alwaysConfig({ initialDelayMs: 1, maxDelayMs: 1, jitterRatio: 0 }),
     }))
 

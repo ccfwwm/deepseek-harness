@@ -9,19 +9,15 @@
 
 import z from '@deepseek-ai/schemastery'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
-import { EMPTY_RESPONSE_CODE } from './error.ts'
 
 const DEFAULT_MAX_RETRIES = 5
 const DEFAULT_INITIAL_DELAY_MS = 500
 const DEFAULT_MAX_DELAY_MS = 10_000
 const DEFAULT_JITTER_RATIO = 0.1
-const DEFAULT_RETRYABLE_CODES = Object.freeze([
-  EMPTY_RESPONSE_CODE,
-  'RATE_LIMIT',
-  'SERVER',
-  'TIMEOUT',
-  'TRANSPORT',
-])
+/** Wildcard used only by the default policy: every provider failure gets the
+ * bounded five-retry budget, including new/unknown stream-read codes. */
+export const ALL_FAILURES_RETRY_CODE = '*'
+const DEFAULT_RETRYABLE_CODES = Object.freeze([ALL_FAILURES_RETRY_CODE])
 
 /** Bounded exponential backoff with symmetric jitter around each local delay. */
 export interface BackoffConfig {
