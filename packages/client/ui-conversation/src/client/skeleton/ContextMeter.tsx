@@ -150,6 +150,7 @@ export function ContextMeter({ useProjection, t }: ContextMeterProps) {
           </div>
           {breakdown !== undefined && (
             <dl className={css.rows}>
+              <div className={css.row}><dt>{t('context.estimated')}</dt><dd /></div>
               {ROWS.map(row => (
                 <div key={row.key} className={css.row}>
                   <dt>
