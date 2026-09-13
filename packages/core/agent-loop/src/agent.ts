@@ -68,17 +68,18 @@ function utf8Bytes(value: unknown): number {
 
 /** Count repeated tool call/result identifiers in the request boundary. */
 function duplicateToolCallIds(messages: readonly Message[]): number {
-  const seen = new Set<string>()
-  const duplicates = new Set<string>()
+  const calls = new Map<string, number>()
+  const results = new Map<string, number>()
   for (const message of messages) {
     for (const block of message.content) {
-      if ((block.type === 'tool-call' || block.type === 'tool-result') && typeof block.toolCallId === 'string') {
-        if (seen.has(block.toolCallId)) duplicates.add(block.toolCallId)
-        seen.add(block.toolCallId)
-      }
+      if (block.type === 'tool-call') calls.set(String(block.id), (calls.get(String(block.id)) ?? 0) + 1)
+      if (block.type === 'tool-result') results.set(String(block.toolCallId), (results.get(String(block.toolCallId)) ?? 0) + 1)
     }
   }
-  return duplicates.size
+  // A valid call/result pair is not a duplicate. Report only repeated calls
+  // or repeated results, which are the actual protocol anomalies.
+  return [...calls.values()].filter(count => count > 1).length
+    + [...results.values()].filter(count => count > 1).length
 }
 
 /** Remove adapter-derived values before plugins propose the next request config. */
