@@ -73,6 +73,25 @@ function registerEcho(ctx: Context) {
 }
 
 describe('request stability across the loop', () => {
+  it('emits bounded request metrics without request contents', async () => {
+    const adapter = new MockAdapter([textResponse('done')])
+    const ctx = await harness(adapter)
+    const infos: string[] = []
+    ctx.logger.info = ((message: unknown) => { infos.push(String(message)) }) as typeof ctx.logger.info
+    const agent = ctx.agentLoop.create(SessionId('request-metrics'), { provider: 'mock', model: 'mock' })
+
+    send(agent, 'private user payload')
+    await waitForIdle(ctx, agent)
+
+    expect(infos).toHaveLength(1)
+    expect(infos[0]).toContain('agent request metrics:')
+    expect(infos[0]).toContain('systemBytes=')
+    expect(infos[0]).toContain('tools=')
+    expect(infos[0]).toContain('messages=')
+    expect(infos[0]).toContain('duplicateToolCallIds=0')
+    expect(infos[0]).not.toContain('private user payload')
+  })
+
   it('each step request within a turn append-extends the previous, frozen end to end', async () => {
     const adapter = new MockAdapter([
       toolCallResponse('c1', 'echo', { text: 'one' }, 'first'),

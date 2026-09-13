@@ -57,6 +57,30 @@ type PreparedStep =
     assembly: PromptAssembly
   }
 
+/** Return UTF-8 bytes without retaining request content in telemetry. */
+function utf8Bytes(value: unknown): number {
+  try {
+    return new TextEncoder().encode(typeof value === 'string' ? value : JSON.stringify(value) ?? '').byteLength
+  } catch {
+    return 0
+  }
+}
+
+/** Count repeated tool call/result identifiers in the request boundary. */
+function duplicateToolCallIds(messages: readonly Message[]): number {
+  const seen = new Set<string>()
+  const duplicates = new Set<string>()
+  for (const message of messages) {
+    for (const block of message.content) {
+      if ((block.type === 'tool-call' || block.type === 'tool-result') && typeof block.toolCallId === 'string') {
+        if (seen.has(block.toolCallId)) duplicates.add(block.toolCallId)
+        seen.add(block.toolCallId)
+      }
+    }
+  }
+  return duplicates.size
+}
+
 /** Remove adapter-derived values before plugins propose the next request config. */
 function requestProposal(header: EpochHeader): LlmCallConfig {
   if (header.adapterDefaults === undefined) return header.config
@@ -540,6 +564,16 @@ export class ReactLoopAgent implements Agent {
       sessionId: this.session.id,
       signal,
     }))
+    // Keep request-size diagnostics local and bounded: names/counts/sizes only,
+    // never system text, tool schemas, message contents, or tool parameters.
+    this.loopCtx.logger.info(
+      `agent request metrics: session=${String(this.session.id)} turn=${turn} step=${step}`
+      + ` surfaceGeneration=${surfaceGeneration}`
+      + ` systemBytes=${utf8Bytes(header.system ?? '')}`
+      + ` tools=${header.tools?.length ?? 0} toolsBytes=${utf8Bytes(header.tools ?? [])}`
+      + ` messages=${boundaryMessages.length} messagesBytes=${utf8Bytes(boundaryMessages)}`
+      + ` duplicateToolCallIds=${duplicateToolCallIds(boundaryMessages)}`,
+    )
     return { request, ...preparedCall === undefined ? {} : { preparedCall } }
   }
 }
