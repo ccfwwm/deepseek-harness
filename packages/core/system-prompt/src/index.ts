@@ -233,6 +233,34 @@ function compareToolNames(a: ToolSchema, b: ToolSchema): number {
   return compareNames(a.name, b.name)
 }
 
+/**
+ * Remove duplicate model-facing entries at the final assembly boundary.
+ *
+ * Multiple plugin layers can legitimately register the same contribution
+ * while being mounted in different scopes (and a hot reload can briefly
+ * expose both layers). Sending duplicate schemas or identical prompt text is
+ * both invalid for some providers and needlessly expensive. Keep the first
+ * deterministic entry so scoped/provider ordering remains authoritative.
+ */
+function dedupeAssemblyInputs(
+  sections: AssembledSection[],
+  tools: ToolSchema[],
+): { sections: AssembledSection[]; tools: ToolSchema[] } {
+  const seenSectionText = new Set<string>()
+  const uniqueSections = sections.filter((section) => {
+    if (seenSectionText.has(section.text)) return false
+    seenSectionText.add(section.text)
+    return true
+  })
+  const seenToolNames = new Set<string>()
+  const uniqueTools = tools.filter((tool) => {
+    if (seenToolNames.has(tool.name)) return false
+    seenToolNames.add(tool.name)
+    return true
+  })
+  return { sections: uniqueSections, tools: uniqueTools }
+}
+
 /** Plugin config: the deployment-authored fragment of the system prompt (see {@link Config.persona} for its contract). */
 export interface Config {
   /** Include the fixed DeepSeek Harness identity before the deployment persona (default true). */
@@ -602,10 +630,17 @@ export class SystemPrompt extends Service {
       scopeTarget(this, scope), 'system-prompt/assemble', assembly, context,
       () => Promise.resolve(assembly),
     )
-    if (completeSection === undefined && !runtimeContextSuppressed) return transformed
+    // Waterfall listeners are allowed to mutate the assembly. Apply the same
+    // de-duplication after the waterfall so a late plugin cannot reintroduce
+    // duplicate prompt text or tool names during hot reload/rehydration.
+    const unique = dedupeAssemblyInputs(transformed.sections, transformed.tools)
+    if (completeSection === undefined && !runtimeContextSuppressed) {
+      return { ...transformed, sections: unique.sections, tools: unique.tools }
+    }
     return {
       ...transformed,
-      sections: completeSection === undefined ? transformed.sections : [completeSection],
+      sections: completeSection === undefined ? unique.sections : [completeSection],
+      tools: unique.tools,
       contexts: runtimeContextSuppressed ? [] : transformed.contexts,
     }
   }

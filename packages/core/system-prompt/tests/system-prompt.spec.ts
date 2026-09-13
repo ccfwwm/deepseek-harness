@@ -30,6 +30,15 @@ function contributed(assembly: PromptAssembly): PromptAssembly['sections'] {
 }
 
 describe('SystemPrompt', () => {
+  it('deduplicates identical section text contributed by multiple providers', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt, {})
+    ctx.systemPrompt.section({ name: 'duplicate-a', order: 1, text: 'same guidance' })
+    ctx.systemPrompt.section({ name: 'duplicate-b', order: 2, text: 'same guidance' })
+    const assembly = await ctx.systemPrompt.assemble()
+    expect(assembly.sections.filter(section => section.text === 'same guidance')).toHaveLength(1)
+  })
+
   it('keeps repository section placements unique, integral, and at least ten apart', async () => {
     const ctx = new Context()
     await ctx.plugin(SystemPrompt, {})

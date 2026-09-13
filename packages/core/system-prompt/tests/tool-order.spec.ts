@@ -71,11 +71,11 @@ describe('SystemPrompt tool order', () => {
       `tool provider returned reserved tool name "${TOOL_ORDER_REST}"`)
   })
 
-  it('keeps collection order between tools that share a name (stable sort)', async () => {
+  it('removes duplicate tool schemas by name at the assembly boundary', async () => {
     const ctx = await mount()
     ctx.systemPrompt.tools(() => ({ schemas: [tool('dup', 'first'), tool('anchor'), tool('dup', 'second')] }))
     const assembly = await ctx.systemPrompt.assemble()
-    expect(assembly.tools.map(t => t.description)).toEqual(['anchor', 'first', 'second'])
+    expect(assembly.tools.map(t => t.description)).toEqual(['anchor', 'first'])
   })
 
   it('canonicalizes BEFORE the assemble waterfall: listeners see the ordered list and own their own edits', async () => {
