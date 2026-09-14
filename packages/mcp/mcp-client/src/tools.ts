@@ -535,18 +535,19 @@ function createDefinition(
   opts: ToolBridgeOptions,
 ): ToolDefinition {
   const projections = new WeakMap<ToolExecution, PreparedProjection>()
+  const concurrencySafe: ToolDefinition['isConcurrencySafe'] = rawName === 'r_files'
+    ? (args: unknown) => {
+      if (args === null || typeof args !== 'object' || Array.isArray(args)) return false
+      const action = (args as { action?: unknown }).action
+      return typeof action === 'string' && /(?:^catalog$|list|read|manifest|resolve|inspect|status)/iu.test(action)
+    }
+    : undefined
   return {
     name: publicName,
     description,
     parameters,
     modelVisible,
-    isConcurrencySafe: rawName === 'r_files'
-      ? (args: unknown) => {
-        if (args === null || typeof args !== 'object' || Array.isArray(args)) return false
-        const action = (args as { action?: unknown }).action
-        return typeof action === 'string' && /(?:^catalog$|list|read|manifest|resolve|inspect|status)/iu.test(action)
-      }
-      : undefined,
+    ...(concurrencySafe === undefined ? {} : { isConcurrencySafe: concurrencySafe }),
     output: createOutput(rawName, structuredSchema),
     execute: createExecutor(client, ctx, rawName, taskRequired, opts, projections),
     finalizeContent(exec: Readonly<ToolExecution>, result: Readonly<ToolExecutionResult>) {
