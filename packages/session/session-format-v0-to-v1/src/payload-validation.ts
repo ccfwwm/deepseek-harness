@@ -17,6 +17,14 @@ export function assertReleasedPayloadSemantics(event: SessionFormatEvent, versio
   const data = releasedV0Record(event.data, `${event.type} ${event.seq} data`)
   const label = `${event.type} ${event.seq}`
   switch (event.type) {
+    case 'zerowall/capabilities/selection':
+      for (const key of ['tools', 'disabled', 'onDemand']) {
+        if (data[key] !== undefined) arrayValue(data[key], `${label} ${key}`, stringValue)
+      }
+      return
+    case 'autoReview/state':
+      booleanValue(data['enabled'], `${label} enabled`)
+      return
     case 'agent-preset/selected':
       stringValue(data['agentPreset'], `${label} agentPreset`)
       return
@@ -432,6 +440,15 @@ function contentBlockValue(value: SessionFormatJsonValue, label: string, version
   const block = releasedV0Record(value, label)
   switch (block['type']) {
     case 'text':
+      assertReleasedV0Keys(block, ['type', 'text'], ['dshFileReview'], label)
+      stringValue(block['text'], `${label} text`)
+      if (block['dshFileReview'] !== undefined) {
+        const marker = releasedV0Record(block['dshFileReview'], `${label} dshFileReview`)
+        if (block['text'] !== '' || !Array.isArray(marker['files'])) {
+          throw new SessionFormatError(`${label} has an invalid file review marker`)
+        }
+      }
+      return
     case 'reasoning':
       assertReleasedV0Keys(block, ['type', 'text'], [], label)
       stringValue(block['text'], `${label} text`)

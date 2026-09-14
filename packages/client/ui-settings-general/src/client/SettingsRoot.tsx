@@ -129,6 +129,14 @@ export function SettingsRoot(props: SettingsRootComponentProps) {
     setActiveId(id)
     setOpen(true)
   }, [])
+  useEffect(() => {
+    const openRequestedSection = (event: Event): void => {
+      const id = (event as CustomEvent<unknown>).detail
+      if (typeof id === 'string') openSection(id)
+    }
+    window.addEventListener('zerowall:open-settings', openRequestedSection)
+    return () => { window.removeEventListener('zerowall:open-settings', openRequestedSection) }
+  }, [openSection])
 
   // The ledger tick keeps the nav rows fresh: registrants re-register with
   // freshly localized text on locale change, and the trigger/header/close

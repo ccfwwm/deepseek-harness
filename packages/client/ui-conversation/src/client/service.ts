@@ -103,6 +103,7 @@ interface PreparedFileExtraction {
   createdAt: string
 }
 interface FilesRemote {
+  prepareNative(input: { sessionId: SessionId; receiptId: string }): Promise<RemoteResult<PreparedFile>>
   prepare(input: { sessionId: SessionId; name: string; mediaType?: string; data: string }): Promise<RemoteResult<PreparedFile>>
   inspect(input: {
     sessionId: SessionId
@@ -534,6 +535,20 @@ export class ConversationController extends Service implements IConversation {
             })
           },
         )
+        if (this.fileUploadOperations.get(attachment.id)?.controller !== controller) return
+        if (result.ok) {
+          const remote = this.ctx.get('remote.zerowallFiles') as FilesRemote | undefined
+          if (remote?.prepareNative !== undefined) {
+            try {
+              const parsed = await remote.prepareNative({ sessionId, receiptId: result.value.receiptId })
+              if (this.fileUploadOperations.get(attachment.id)?.controller !== controller) return
+              if (parsed.ok) attachment.prepared = parsed.value
+            } catch (error) {
+              // The receipt remains usable when extraction is unavailable.
+              this.ctx.logger.warn('File extraction failed: %s', String(error))
+            }
+          }
+        }
         if (this.fileUploadOperations.get(attachment.id)?.controller !== controller) return
         this.fileUploads.update((draft) => {
           if (!(attachment.id in draft)) return

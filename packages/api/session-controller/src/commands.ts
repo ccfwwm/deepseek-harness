@@ -351,6 +351,15 @@ export class SessionCommandController {
           receiptId => this.ctx.fileUploads.resolve(agent, receiptId),
         )
         const content = await this.ctx.attachments.admitPromptContent(admission.content)
+        const parser = this.ctx.get('zerowallFiles') as {
+          enrichNative(sessionId: string, ref: Extract<typeof content[number], { type: 'file' }>['attachment']): Promise<Extract<typeof content[number], { type: 'file' }>['attachment']>
+        } | undefined
+        if (parser !== undefined) {
+          for (let index = 0; index < content.length; index += 1) {
+            const block = content[index]
+            if (block?.type === 'file') content[index] = { ...block, attachment: await parser.enrichNative(request.sessionId, block.attachment) }
+          }
+        }
         const message: UserMessage = createUserMessage({ content, source })
         if (this.ctx.agents.get(agent.id) !== agent) {
           throw new RemoteError(

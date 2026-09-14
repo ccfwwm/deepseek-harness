@@ -50,6 +50,7 @@ export type {
 
 export { isRunningTool, isSettledTool } from './contract/chat-nodes.ts'
 export { EMPTY_CHAT_SNAPSHOT } from './contract/snapshot.ts'
+export { UserStyleBubble } from './chat/MessageItem.tsx'
 
 /** Public merge surface for Chat renderer payloads contributed by other plugins. */
 export interface ChatNodeDataMap {}

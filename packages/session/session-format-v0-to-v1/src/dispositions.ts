@@ -35,6 +35,8 @@ const disposition = defineReleasedPayloadDisposition
  * unknown variants as owner-opaque JSON.
  */
 export const RELEASED_V0_EVENT_DISPOSITIONS: Readonly<Record<string, ReleasedV0PayloadDisposition>> = Object.freeze({
+  'zerowall/capabilities/selection': disposition(['tools', 'disabled'], ['onDemand']),
+  'autoReview/state': disposition(['enabled']),
   'agent-preset/selected': disposition(['agentPreset']),
   'agent/inbox/spliced': disposition(
     ['target', 'start', 'inserted'],

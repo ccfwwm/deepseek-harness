@@ -186,7 +186,14 @@ function assertContentBlock(value: SessionFormatJsonValue | undefined, label: st
   if (block['type'] === 'file') {
     keys(block, ['type', 'attachment'], [], label + ' kind "file"')
     const attachment = record(block['attachment'], label + ' kind "file" attachment')
-    keys(attachment, ['attachmentId', 'name', 'bytes'], [], label + ' kind "file" attachment')
+    keys(attachment, ['attachmentId', 'name', 'bytes'], ['type', 'mediaType', 'content', 'parser', 'preview', 'sha256', 'status', 'storageStatus', 'textChars', 'pageCount', 'sheetCount', 'warning', 'parseStatus', 'parseProgress', 'parseError'], label + ' kind "file" attachment')
+    for (const key of ['mediaType', 'content', 'parser', 'preview', 'sha256', 'status', 'storageStatus', 'warning', 'parseStatus', 'parseError']) {
+      if (attachment[key] !== undefined && typeof attachment[key] !== 'string') throw new SessionFormatError(label + ' invalid file field ' + key)
+    }
+    if (attachment['type'] !== undefined && attachment['type'] !== 'file') throw new SessionFormatError(label + ' invalid nested file type')
+    for (const key of ['textChars', 'pageCount', 'sheetCount', 'parseProgress']) {
+      if (attachment[key] !== undefined) sessionFormatCount(attachment[key], label + ' file ' + key)
+    }
     if (typeof attachment['attachmentId'] !== 'string' || attachment['attachmentId'].length === 0
       || typeof attachment['name'] !== 'string') throw new SessionFormatError(label + ' kind "file": file attachment requires attachmentId and name')
     sessionFormatCount(attachment['bytes'], label + ' kind "file" attachment bytes')

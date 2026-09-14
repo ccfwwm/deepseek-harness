@@ -51,6 +51,22 @@ async function bench(maxConcurrentFileUploads = 2) {
 }
 
 describe('ConversationController', () => {
+  it('waits for receipt-authorized parsing before publishing a ready upload', async () => {
+    const b = await bench()
+    const session = b.runtime.sessions.binding('s1')!.session
+    let finish!: (value: unknown) => void
+    const prepareNative = vi.fn(() => new Promise((resolve) => { finish = resolve }))
+    b.runtime.ctx.provide('remote.zerowallFiles', { prepareNative })
+    ;(session as { uploadFile?: unknown }).uploadFile = vi.fn(async () => ({ ok: true, value: { receiptId: 'pdf-receipt', file: { attachmentId: 'pdf-file', name: 'paper.pdf', bytes: 1 } } }))
+    const [attachment] = b.root.createDrafts(session.sessionId, [new File(['x'], 'paper.pdf')])
+    if (attachment === undefined) throw new Error('missing draft')
+    await vi.waitFor(() => { expect(prepareNative).toHaveBeenCalledWith({ sessionId: session.sessionId, receiptId: 'pdf-receipt' }) })
+    expect(b.root.fileUploads.getSnapshot()[attachment.id]?.status).toBe('uploading')
+    finish({ ok: true, value: { attachmentId: 'pdf-file', content: 'Extracted paper', parser: 'mineru' } })
+    await vi.waitFor(() => { expect(b.root.fileUploads.getSnapshot()[attachment.id]?.status).toBe('ready') })
+    expect(attachment.kind === 'file' && attachment.prepared?.content).toBe('Extracted paper')
+    await b.runtime.dispose()
+  })
   it('routes operations through the public Session binding', async () => {
     const b = await bench()
     await b.scoped.send('hello')

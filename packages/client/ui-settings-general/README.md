@@ -9,6 +9,8 @@ English | [中文](README.zh.md)
 
 ## Summary
 
+Product shortcuts open a section by dispatching the browser event `zerowall:open-settings` with the section ID as its string detail.
+
 Use this package to give the dsh web client a Settings panel, connection-recovery control, feature-contributed navigation, and sequential first-run onboarding. Users can open it from the sidebar, retry a failed connection immediately, and access a local configuration file when the Host makes one available on a loopback browser. Feature packages supply their own settings rows, sections, and onboarding steps; this package supplies their shared presentation and does not add onboarding copy or built-in General rows.
 
 ## Table of Contents

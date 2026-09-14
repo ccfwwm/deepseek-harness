@@ -97,6 +97,9 @@ export function SidebarRoot({
   renderSlot,
 }: SidebarRootComponentProps) {
   const panels = usePanels(snapshot => snapshot)
+  const [footerExpanded, setFooterExpanded] = useState(() => {
+    try { return localStorage.getItem('zerowall.sidebar.footerExpanded') === 'true' } catch { return false }
+  })
   // Wide content stays mounted while the collapse animates (fading via
   // .collapsed .wide), unmounts at settle, and remounts right away on expand.
   const [settled, setSettled] = useState(collapsed)
@@ -266,11 +269,17 @@ export function SidebarRoot({
 
       {/* Footer actions stack above Settings in both sidebar widths. */}
       <div className={css.footArea}>
-        <div className={css.footerActions}>
+        <div className={css.footerActions} hidden={!footerExpanded}>
           {renderSlot('sidebar.footer.action', { wide })}
         </div>
-        <div className={css.settingsArea}>
-          {renderSlot('sidebar.settings', { wide })}
+        <div className={css.footerBar}>
+          <div className={css.settingsArea}>
+            {renderSlot('sidebar.settings', { wide })}
+          </div>
+          <button type="button" className={css.footerToggle} aria-expanded={footerExpanded} aria-label={t(footerExpanded ? 'footer.collapse' : 'footer.expand')} title={t(footerExpanded ? 'footer.collapse' : 'footer.expand')} onClick={() => {
+            setFooterExpanded(!footerExpanded)
+            try { localStorage.setItem('zerowall.sidebar.footerExpanded', String(!footerExpanded)) } catch { /* Storage may be unavailable in private profiles. */ }
+          }}>{footerExpanded ? '⌄' : '⋯'}</button>
         </div>
       </div>
     </div>

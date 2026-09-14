@@ -1,6 +1,8 @@
 /** Isolated verification for a staged or competing current JSONL generation. */
 
 import { Worker } from 'node:worker_threads'
+import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
 import type { WorkerOptions } from 'node:worker_threads'
 import type { JsonlCompression } from './format.ts'
 import type { JsonlExpectedPrefix, JsonlVerifiedGeneration } from './generation.ts'
@@ -79,9 +81,10 @@ function workerSpawn(request: VerificationRequest): { readonly entry: string | U
     }
   }
   const workerEntry = new URL('./worker.ts', import.meta.url)
+  const require = createRequire(import.meta.url)
   const bootstrap = [
-    `import { register as registerEsm } from ${JSON.stringify(import.meta.resolve('tsx/esm/api'))}`,
-    `import { register as registerCjs } from ${JSON.stringify(import.meta.resolve('tsx/cjs/api'))}`,
+    `import { register as registerEsm } from ${JSON.stringify(pathToFileURL(require.resolve('tsx/esm/api')).href)}`,
+    `import { register as registerCjs } from ${JSON.stringify(pathToFileURL(require.resolve('tsx/cjs/api')).href)}`,
     'registerCjs()',
     'registerEsm()',
     `await import(${JSON.stringify(workerEntry.href)})`,
