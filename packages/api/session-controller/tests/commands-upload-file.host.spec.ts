@@ -121,6 +121,24 @@ function promptRequest(content: Parameters<SessionCommandController['prompt']>[0
 }
 
 describe('Session file uploads', () => {
+  it('restages only files admitted in the receiving session without copying bytes', async () => {
+    const { ctx, uploads, agent, saveFile } = await uploadHarness()
+    try {
+      const receipt = await uploads.upload(agent, { data: 'AAAA', name: 'retry.pdf' }, new AbortController().signal)
+      expect(() => uploads.restage(agent, receipt.file.attachmentId)).toThrow('File is not referenced')
+      agent.session.append('user/message', createUserMessage({
+        content: [{ type: 'file', attachment: receipt.file }], source: { kind: 'user' },
+      }), { surfaceOp: 'append' })
+      const replay = await uploads.restage(agent, receipt.file.attachmentId)
+      expect(replay.receiptId).not.toBe(receipt.receiptId)
+      expect(uploads.resolve(agent, replay.receiptId)).toEqual(receipt.file)
+      expect(saveFile).toHaveBeenCalledOnce()
+      expect(() => uploads.restage(agent, AttachmentId('foreign-file'))).toThrow('File is not referenced')
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('registers an HTTP route bound to the upload service', async () => {
     const { uploadRoute } = await uploadHarness()
     await expect(uploadRoute(new Request('http://host/upload')))

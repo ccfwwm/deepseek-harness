@@ -8,7 +8,8 @@
  */
 
 import { spawn, type StdioOptions } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { createRequire } from 'node:module'
 import { delimiter, join } from 'node:path'
 import type { Win32DialogWorkerData } from './win32-dialog-worker.ts'
 
@@ -43,7 +44,7 @@ export function spawnDialogWorker(data: Win32DialogWorkerData): ReturnType<typeo
     child.stderr?.on('data', chunk => process.stderr.write(`[directory-picker] ${String(chunk)}`))
     return child
   }
-  return spawn(process.execPath, ['--import', import.meta.resolve('tsx/esm'), fileURLToPath(new URL('./win32-dialog-worker.ts', import.meta.url))], { env, stdio, windowsHide: true })
+  return spawn(process.execPath, ['--import', pathToFileURL(createRequire(import.meta.url).resolve('tsx/esm')).href, fileURLToPath(new URL('./win32-dialog-worker.ts', import.meta.url))], { env, stdio, windowsHide: true })
 }
 
 export { closeThreadWindows } from './win32-dialog-bindings.ts'

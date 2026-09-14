@@ -8,9 +8,28 @@ import type {
   IWorkspaces, WorkspaceId,
 } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 
 /** Workspace archive and directory operations consumed by Client UI domains. */
 export interface UiWorkspace {
+  /**
+   * Select a Session and show its Conversation as one UI navigation action.
+   * @param sessionId - listed or retained Session to display.
+   */
+  openSession(sessionId: SessionId): void
+  /**
+   * Connect a Workspace and open its Session unless a later navigation supersedes it.
+   * @param workspaceId - target Workspace.
+   * @param beforeOpen - optional synchronous preparation for the selected Session, skipped after supersession.
+   * @returns completion; a superseded request may create a Session but does not open it.
+   */
+  openWorkspace(workspaceId: WorkspaceId, beforeOpen?: (sessionId: SessionId) => void): Promise<void>
+  /**
+   * Fork a Session and open the child unless a later navigation supersedes it.
+   * @param sessionId - source Session.
+   * @returns completion; a superseded request leaves its child available without selecting it.
+   */
+  forkSession(sessionId: SessionId): Promise<void>
   /**
    * Resolve the reusable or newly created blank Session for a Workspace.
    * @param workspaceId - target Workspace.
@@ -69,6 +88,7 @@ export class DirectoryBrowseError extends Error {
 class UiWorkspaceService extends Service implements UiWorkspace {
   private readonly connecting = new Map<WorkspaceId, Promise<SessionId>>()
   private navigationGeneration = 0
+  private readonly lifetime = new AbortController()
 
   /**
    * @param ctx - Client root Context.
@@ -110,14 +130,35 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     return attempt
   }
 
+  openSession(sessionId: SessionId): void {
+    this.sessions.open(sessionId)
+    this.ctx.layout.selectPanel(null)
+  }
+
+  async openWorkspace(workspaceId: WorkspaceId, beforeOpen?: (sessionId: SessionId) => void): Promise<void> {
+    const navigation = AbortSignal.any([this.ctx.layout.beginNavigation(), this.lifetime.signal])
+    const isCurrent = (): boolean => !navigation.aborted
+    const sessionId = await this.connectWorkspace(workspaceId)
+    if (!isCurrent()) return
+    beforeOpen?.(sessionId)
+    if (isCurrent()) this.openSession(sessionId)
+  }
+
+  async forkSession(sessionId: SessionId): Promise<void> {
+    const navigation = AbortSignal.any([this.ctx.layout.beginNavigation(), this.lifetime.signal])
+    const childId = await this.sessions.fork({ sessionId, increaseTitle: true })
+    if (!navigation.aborted) this.openSession(childId)
+  }
+
   startSession(workspaceId?: WorkspaceId): void {
     const generation = ++this.navigationGeneration
+    const navigation = AbortSignal.any([this.ctx.layout.beginNavigation(), this.lifetime.signal])
     const attempt = workspaceId === undefined
       ? this.sessions.create()
       : this.connectWorkspace(workspaceId)
     void attempt.then(
       (sessionId) => {
-        if (generation === this.navigationGeneration) this.sessions.open(sessionId)
+        if (generation === this.navigationGeneration && !navigation.aborted) this.openSession(sessionId)
       },
       (reason: unknown) => { console.warn('new session failed:', reason) },
     )
@@ -147,9 +188,8 @@ class UiWorkspaceService extends Service implements UiWorkspace {
 
   private watchNavigation(): () => void {
     let initial: 'waiting' | 'connecting' | 'done' = 'waiting'
-    let disposed = false
     const reconcile = (): void => {
-      if (disposed) return
+      if (this.lifetime.signal.aborted) return
       if (this.clearArchivedCurrent()) return
       if (initial !== 'waiting') return
       const workspace = this.workspaces.list.getSnapshot()
@@ -163,7 +203,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
       const generation = ++this.navigationGeneration
       void this.sessions.create().then(
         (sessionId) => {
-          if (disposed) return
+          if (this.lifetime.signal.aborted) return
           if (generation === this.navigationGeneration
             && this.sessions.list.getSnapshot().current === undefined) {
             this.sessions.open(sessionId)
@@ -171,7 +211,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
           initial = 'done'
         },
         (reason: unknown) => {
-          if (disposed) return
+          if (this.lifetime.signal.aborted) return
           if (generation !== this.navigationGeneration) return
           initial = 'waiting'
           console.warn('initial unscoped session creation failed:', reason)
@@ -182,7 +222,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     const disposeSessions = this.sessions.list.subscribe(reconcile)
     reconcile()
     return () => {
-      disposed = true
+      this.lifetime.abort()
       disposeSessions()
       disposeWorkspaces()
     }

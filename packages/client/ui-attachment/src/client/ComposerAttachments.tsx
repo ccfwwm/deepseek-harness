@@ -1,48 +1,37 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
-  ComposerAttachment, ComposerAttachmentsProps,
+  ComposerAttachment, ComposerAttachmentsProps, ComposerImageAttachment,
 } from '@deepseek-ai/dsh-client-ui-conversation/client'
-import { IconDataOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconCloseFill14 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { AttachmentRail } from '../AttachmentRail.tsx'
 import type { AttachmentRailItem } from '../AttachmentRail.tsx'
 import { DropOverlay } from '../DropOverlay.tsx'
+import { FileCard } from '../FileCard.tsx'
 import { ImageLightbox } from '../ImageLightbox.tsx'
-import { attachmentRailLabels, dropOverlayLabels, lightboxLabels } from './labels.ts'
+import { attachmentRailLabels, dropOverlayLabels, fileCardLabels, lightboxLabels } from './labels.ts'
 import css from './ComposerAttachments.module.css'
 
 /** Rail item retaining its browser-owned attachment for callbacks. */
 interface ComposerRailItem extends AttachmentRailItem {
-  attachment: Extract<ComposerAttachment, { kind: 'image' }>
+  attachment: ComposerAttachment
 }
 
-type ComposerFileAttachment = Extract<ComposerAttachment, { kind: 'file' }>
-
-/** Draft-image rail, document drop target, and original-image preview slot entry. */
+/** Draft image previews, pending-file cards, drop target, and original-image preview. */
 export function ComposerAttachments({
-  attachments, canAcceptDrop, onAddImages, onAddFiles, onRemoveImage, onRemoveAttachment, dropLimits, t,
+  attachments, canAcceptDrop, onAddFiles, onRemoveAttachment, uploads, onRetryFile, dropLimits, t,
 }: ComposerAttachmentsProps) {
-  const removeAttachment = onRemoveAttachment ?? onRemoveImage
-  const imageAttachments = useMemo(
-    () => attachments.filter((attachment): attachment is Extract<ComposerAttachment, { kind: 'image' }> => attachment.kind === 'image'),
-    [attachments],
-  )
-  const fileAttachments = useMemo(
-    () => attachments.filter((attachment): attachment is ComposerFileAttachment => attachment.kind === 'file'),
-    [attachments],
-  )
-  const [preview, setPreview] = useState<Extract<ComposerAttachment, { kind: 'image' }> | null>(null)
+  const [preview, setPreview] = useState<ComposerImageAttachment | null>(null)
   const [dragActive, setDragActive] = useState(false)
   const dragDepth = useRef(0)
   const closePreview = useCallback(() => { setPreview(null) }, [])
-
   useEffect(() => {
-    if (preview !== null && !imageAttachments.some(attachment => attachment.id === preview.id)) setPreview(null)
-  }, [imageAttachments, preview])
+    if (preview !== null && !attachments.some(attachment => attachment.id === preview.id)) setPreview(null)
+  }, [attachments, preview])
 
   useEffect(() => {
     const fileTransfer = (event: globalThis.DragEvent): DataTransfer | null => {
       const dataTransfer = event.dataTransfer
-      if (dataTransfer === null || (!dataTransfer.types.includes('Files') && !dataTransfer.types.includes('text/uri-list') && !dataTransfer.types.includes('text/html') && !dataTransfer.types.includes('application/x-zerowall-attachment'))) return null
+      if (dataTransfer === null || !dataTransfer.types.includes('Files')) return null
       return dataTransfer
     }
     const reset = (): void => {
@@ -74,42 +63,7 @@ export function ComposerAttachments({
       if (dataTransfer === null) return
       event.preventDefault()
       reset()
-      if (!canAcceptDrop) return
-      const serialized = dataTransfer.getData('application/x-zerowall-attachment')
-      if (serialized) {
-        try {
-          const value = JSON.parse(serialized) as { attachmentId?: unknown; sessionId?: unknown }
-          if (typeof value.attachmentId === 'string') {
-            window.dispatchEvent(new CustomEvent('zerowall:attachment-readd', { detail: { attachmentId: value.attachmentId, sessionId: typeof value.sessionId === 'string' ? value.sessionId : undefined } }))
-            return
-          }
-        } catch {
-          // Continue with normal file/URL handling for malformed external data.
-        }
-      }
-      const files = [...dataTransfer.files]
-      if (files.length > 0) {
-        const images = files.filter(file => file.type.startsWith('image/'))
-        const documents = files.filter(file => !file.type.startsWith('image/'))
-        if (images.length > 0) onAddImages(images)
-        if (documents.length > 0) onAddFiles?.(documents)
-        return
-      }
-      const rawUri = dataTransfer.getData('text/uri-list').split(/\r?\n/u).find(value => value.trim() !== '' && !value.startsWith('#'))?.trim()
-        ?? (() => {
-          const html = dataTransfer.getData('text/html')
-          const match = html.match(/<img[^>]+src=["']([^"']+)["']/iu)
-          return match?.[1]
-        })()
-      if (!rawUri) return
-      void fetch(rawUri).then((response) => {
-        if (!response.ok) throw new Error(`image drag fetch failed: ${response.status}`)
-        return response.blob()
-      }).then((blob) => {
-        const name = rawUri.split(/[/?#]/u).filter(Boolean).pop() || 'dropped-image'
-        const extension = blob.type === 'image/jpeg' ? '.jpg' : blob.type === 'image/webp' ? '.webp' : '.png'
-        onAddImages([new File([blob], name.includes('.') ? name : `${name}${extension}`, { type: blob.type || 'image/png' })])
-      }).catch(() => undefined)
+      if (canAcceptDrop) onAddFiles([...dataTransfer.files])
     }
     document.addEventListener('dragenter', onDragEnter)
     document.addEventListener('dragover', onDragOver)
@@ -123,15 +77,12 @@ export function ComposerAttachments({
       document.removeEventListener('drop', onDrop)
       window.removeEventListener('dragend', reset)
     }
-  }, [canAcceptDrop, onAddFiles, onAddImages])
+  }, [canAcceptDrop, onAddFiles])
 
-  const railItems = useMemo<ComposerRailItem[]>(() => imageAttachments.map(attachment => ({
+  const railItems = useMemo<ComposerRailItem[]>(() => attachments.map(attachment => ({
     id: attachment.id,
-    previewUrl: attachment.previewUrl,
-    alt: attachment.file.name || t('image.pending'),
-    removeLabel: t('image.remove', { name: attachment.file.name }),
     attachment,
-  })), [imageAttachments, t])
+  })), [attachments])
 
   return (
     <>
@@ -141,27 +92,53 @@ export function ComposerAttachments({
           labels={dropOverlayLabels(t, canAcceptDrop, dropLimits)}
         />
       )}
-      {(railItems.length > 0 || fileAttachments.length > 0) && (
+      {railItems.length > 0 && (
         <div className={css.rail}>
-          {railItems.length > 0 && <AttachmentRail
+          <AttachmentRail
             items={railItems}
             labels={attachmentRailLabels(t)}
-            onOpen={(item) => { setPreview(item.attachment) }}
-            onRemove={(item) => { removeAttachment(item.attachment.id) }}
-          />}
-          {fileAttachments.length > 0 && <div className={css.files} role="list" aria-label={t('file.pending')}>
-            {fileAttachments.map(file => <div className={css.file} role="listitem" key={file.id}>
-              <span className={css.fileIcon} aria-hidden><IconDataOutline16 /></span>
-              <span className={css.fileBody}>
-                <span className={css.fileName} title={file.file.name}>{file.file.name || t('file.unnamed')}</span>
-                {file.prepared.parseStatus !== undefined && file.prepared.parseStatus !== 'idle' && <span className={css.fileStatus} role="status">
-                  {file.prepared.parseStatus === 'queued' ? '等待解析' : file.prepared.parseStatus === 'running' ? '解析中' : file.prepared.parseStatus === 'done' ? '解析完成' : `解析失败${file.prepared.parseError ? `：${file.prepared.parseError}` : ''}`}
-                </span>}
-                {(file.prepared.parseStatus === 'queued' || file.prepared.parseStatus === 'running') && <span className={css.fileProgress} aria-hidden><span style={{ width: `${Math.max(6, Math.min(100, file.prepared.parseProgress ?? 10))}%` }} /></span>}
-              </span>
-              <button type="button" className={css.fileRemove} aria-label={t('file.remove', { name: file.file.name })} onClick={() => { removeAttachment(file.id) }}>×</button>
-            </div>)}
-          </div>}
+            renderItem={(item) => {
+              const attachment = item.attachment
+              if (attachment.kind === 'file') {
+                const upload = uploads[attachment.id]
+                return (
+                  <FileCard
+                    name={attachment.file.name || t('file.label')}
+                    bytes={attachment.file.size}
+                    state={upload === undefined || upload.status === 'uploading'
+                      ? 'uploading'
+                      : upload.status === 'ready' ? 'ready' : 'error'}
+                    {...upload?.status === 'uploading' && upload.total !== undefined && upload.total > 0
+                      ? { progress: upload.loaded / upload.total }
+                      : {}}
+                    labels={fileCardLabels(t, attachment.file.name)}
+                    onRemove={() => { onRemoveAttachment(attachment.id) }}
+                    onRetry={() => { onRetryFile(attachment.id) }}
+                  />
+                )
+              }
+              return (
+                <div className={css.imageItem}>
+                  <button
+                    type="button"
+                    className={css.thumbnail}
+                    title={t('image.openOriginal')}
+                    onClick={() => { setPreview(attachment) }}
+                  >
+                    <img src={attachment.previewUrl} alt={attachment.file.name || t('image.pending')} />
+                  </button>
+                  <button
+                    type="button"
+                    className={css.remove}
+                    aria-label={t('image.remove', { name: attachment.file.name })}
+                    onClick={() => { onRemoveAttachment(attachment.id) }}
+                  >
+                    <IconCloseFill14 size={12} />
+                  </button>
+                </div>
+              )
+            }}
+          />
         </div>
       )}
       {preview !== null && (

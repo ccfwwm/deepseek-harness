@@ -18,6 +18,10 @@ Ordinary file intake coupled browser admission to document extraction. The Compo
 
 Session-controller tests assert prompt-coupled echo retirement. Attachment component tests assert that a pending file renders without local or remote parsing labels. The ZeroWall file plugin tests cover original-byte persistence, lazy first-read extraction, PDF extraction after admission, and workspace materialization.
 
+## Alternatives considered
+
+Blocking file admission on extraction delays the local echo and couples upload success to parser availability. Original-byte admission keeps extraction independently retryable.
+
 ## Consequences
 
 - File persistence may still fail after the echo first renders; the existing abandon path removes that echo while retaining the draft.

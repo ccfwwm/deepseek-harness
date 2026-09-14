@@ -5,6 +5,13 @@ export const NS = 'chat'
 
 /** Simplified Chinese dictionary and key-set source of truth. */
 export const zh = {
+  'attachment.preview': '预览附件',
+  'attachment.parsed': '查看解析结果',
+  'attachment.copy': '复制附件',
+  'attachment.queued': '等待解析',
+  'attachment.running': '解析中',
+  'attachment.done': '解析完成',
+  'attachment.failed': '解析失败',
   'view.chat': '对话',
   'number.groupSeparator': ',',
   'duration.compactSeconds': '{seconds}秒',
@@ -117,6 +124,13 @@ export type ChatKey = keyof typeof zh
 
 /** English dictionary, checked against the Chinese key set. */
 export const en = {
+  'attachment.preview': 'Preview attachment',
+  'attachment.parsed': 'View parsed content',
+  'attachment.copy': 'Copy attachment',
+  'attachment.queued': 'Queued for parsing',
+  'attachment.running': 'Parsing',
+  'attachment.done': 'Parsing complete',
+  'attachment.failed': 'Parsing failed',
   'view.chat': 'Chat',
   'number.groupSeparator': ',',
   'duration.compactSeconds': '{seconds}s',

@@ -271,7 +271,6 @@ export function ConversationRoot({
   )
   const hero = sessionId === undefined
     || (shellPhase === 'blank' && (openState === 'open' || summaryBlank === true))
-  const noWorkspaceHero = hero && sessionWorkspace === undefined
   const zone: InputZone | undefined =
     session === undefined || inputState === undefined ? undefined : { session, input: inputState }
 
@@ -326,7 +325,7 @@ export function ConversationRoot({
   // A raised block is the same inert posture with the blocker's own reason:
   // one disabled textarea, never a second tree. The no-workspace state wins
   // when both hold — picking a workspace is the earlier prerequisite.
-  const blocked = !inert && composerBlock !== undefined && !noWorkspaceHero
+  const blocked = !inert && composerBlock !== undefined
   const inputBar = renderSlot('conversation.composer.bar', {
     variant: hero ? 'hero' : 'composer',
     ...(inert

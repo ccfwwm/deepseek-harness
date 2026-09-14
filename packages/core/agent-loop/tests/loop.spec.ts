@@ -529,7 +529,7 @@ describe('agent loop', () => {
     await waitForIdle(ctx, agent)
 
     const request = adapter.requests[0]
-    expect(systemOf(request)).toBe('You are an AI agent powered by DeepSeek Harness.\n\nYou are a test agent on mock.\n\nUse the noop tool wisely.')
+    expect(systemOf(request)).toBe('You are an AI agent running inside ZeroWall Science Desktop.\n\nYou are a test agent on mock.\n\nUse the noop tool wisely.')
     expect(request!.tools?.map(t => t.name)).toEqual(['noop'])
   })
 
@@ -546,13 +546,14 @@ describe('agent loop', () => {
     send(agent, 'hi')
     await waitForIdle(ctx, agent)
 
-    expect(systemOf(adapter.requests[0])).toBe('You are an AI agent powered by DeepSeek Harness.\n\nWorking in /work/space.')
+    expect(systemOf(adapter.requests[0])).toBe('You are an AI agent running inside ZeroWall Science Desktop.\n\nWorking in /work/space.')
   })
 
   it('contains a strict-variable render failure: the turn errors, the loop keeps serving turns', async () => {
-    // A missing cwd variable must fail one turn without preventing a later valid turn.
+    // A missing registered value must fail one turn without preventing a later valid turn.
     const adapter = new MockAdapter([textResponse('ok after rescue')])
-    const ctx = await harness(adapter, 'In {{cwd}}.')
+    const ctx = await harness(adapter, 'In {{required_path}}.')
+    ctx.systemPrompt.variable('required_path', () => undefined)
     const errors: Error[] = []
     ctx.on('agent/error', ({ error }) => {
       if (error instanceof Error) errors.push(error)
@@ -564,7 +565,7 @@ describe('agent loop', () => {
 
     expect(adapter.requests).toHaveLength(0) // the request was never sent
     expect(errors.map(error => error.message)).toEqual([
-      'prompt variable "{{cwd}}" has no value for this assembly (section "deployment:persona-prefix")',
+      'prompt variable "{{required_path}}" has no value for this assembly (section "deployment:persona-prefix")',
     ])
     const turnEnd = agent.session.snapshotEvents().find(e => e.type === 'turn/end')
     expect(turnEnd?.type === 'turn/end' && turnEnd.data.reason.kind).toBe('error')
@@ -572,17 +573,17 @@ describe('agent loop', () => {
       ? turnEnd.data.reason.error.message
       : '').toContain('no value for this assembly')
 
-    // The loop survived: a waterfall listener rescues {{cwd}} and the SAME
+    // The loop survived: a waterfall listener supplies the value and the SAME
     // agent completes a real model turn.
     ctx.on('system-prompt/assemble', async (assembly, _context, next) => {
-      assembly.variables['cwd'] = '/rescued'
+      assembly.variables['required_path'] = '/rescued'
       return next()
     })
     send(agent, 'again')
     await waitForIdle(ctx, agent)
 
     expect(adapter.requests).toHaveLength(1)
-    expect(systemOf(adapter.requests[0])).toBe('You are an AI agent powered by DeepSeek Harness.\n\nIn /rescued.')
+    expect(systemOf(adapter.requests[0])).toBe('You are an AI agent running inside ZeroWall Science Desktop.\n\nIn /rescued.')
     const turnEnds = agent.session.snapshotEvents().filter(e => e.type === 'turn/end')
     expect(turnEnds).toHaveLength(2)
     expect(turnEnds[1]?.type === 'turn/end' && turnEnds[1].data.reason.kind).toBe('completed')
@@ -612,7 +613,7 @@ describe('agent loop', () => {
 
     expect(adapter.requests).toHaveLength(1)
     expect(adapter.requests[0]!.model).toBe('mock')
-    expect(systemOf(adapter.requests[0])).toBe('You are an AI agent powered by DeepSeek Harness.\n\nYou run on mock.')
+    expect(systemOf(adapter.requests[0])).toBe('You are an AI agent running inside ZeroWall Science Desktop.\n\nYou run on mock.')
   })
 
   it('sends no system message when system-prompt/assemble short-circuits with an empty assembly', async () => {
@@ -654,7 +655,7 @@ describe('agent loop', () => {
       send(agent, 'second')
       await secondIdle
       expect(adapter.requests).toHaveLength(2)
-      expect(systemOf(adapter.requests[1])).toBe('You are an AI agent powered by DeepSeek Harness.')
+      expect(systemOf(adapter.requests[1])).toBe('You are an AI agent running inside ZeroWall Science Desktop.')
       expect(adapter.requests[1]?.messages.map(message => message.role)).toEqual(['system', 'user', 'assistant', 'user'])
       const replacement = agent.session.snapshotEvents().findLast(event => event.type === 'system/message')
       expect(replacement).toMatchObject({

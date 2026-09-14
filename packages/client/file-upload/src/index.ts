@@ -3,7 +3,7 @@
 import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { FileAttachmentRef } from '@deepseek-ai/dsh-attachment'
+import type { AttachmentIdType, FileAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import type { CommandFileReceiptResolver } from '@deepseek-ai/dsh-commands'
 import { scopeOf } from '@deepseek-ai/dsh-scope'
@@ -109,6 +109,26 @@ export class FileUploads extends TypertRemoteService {
       data: request.data,
       ...(request.name === undefined ? {} : { name: request.name }),
     }))
+  }
+
+  /**
+   * Stage an existing user file again for a retry without copying its bytes.
+   * @param agent - receiving Agent resolved by the Remote scope.
+   * @param attachmentId - file identity already admitted in this Session.
+   * @returns a fresh receipt scoped to the same Session.
+   */
+  @Remote('restage')
+  restage(agent: Agent, attachmentId: AttachmentIdType): Promise<FileUploadValue> {
+    this.assertOrdinaryAgent(agent)
+    for (const message of agent.session.deriveMessages()) {
+      if (message.role !== 'user') continue
+      for (const block of message.content) {
+        if (block.type === 'file' && block.attachment.attachmentId === attachmentId) {
+          return this.commit(agent, async () => block.attachment)
+        }
+      }
+    }
+    throw new RemoteError('session/attachment-invalid' as never, 'File is not referenced by this session.', { reason: 'ATTACHMENT_NOT_REFERENCED' } as never)
   }
 
   /**

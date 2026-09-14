@@ -20,6 +20,7 @@ import type {} from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 // Type-only: pulls the SlotRegistry service merge (ctx.slots).
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 // Type-only: pulls the Session root standard-hook merge.
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type { WorkspaceBrowserInjected, WorkspaceContextAction, WorkspacePickerInjected } from './contract/slots.ts'
@@ -60,7 +61,7 @@ const NS = 'workspace'
  * declaration through `slots.inject()` instead of assuming order.
  */
 export const inject = [
-  'slots', 'sessions', 'workspaces', 'locale', 'remote', 'remote.directoryPicker',
+  'slots', 'sessions', 'workspaces', 'locale', 'remote', 'remote.directoryPicker', 'layout',
 ]
 
 /**
@@ -130,11 +131,14 @@ export function apply(ctx: Context): void {
       },
     },
   ]
+  const openSession: WorkspaceBrowserInjected['open'] = (sessionId) => {
+    uiWorkspace.openSession(sessionId)
+  }
   const browserInjected = (): WorkspaceBrowserInjected => ({
     // Explicit group actions keep their target; a top-level action creates an
     // independent unscoped Session.
     startSession: (workspaceId) => { uiWorkspace.startSession(workspaceId) },
-    open: (sessionId) => { sessions.open(sessionId) },
+    open: openSession,
     searchSessions,
     searchResultLimit: sessions.searchResultLimit,
     renameSession: async (sessionId, title) => {
@@ -146,8 +150,7 @@ export function apply(ctx: Context): void {
       if (!result.ok) throw new Error(result.error.message)
     },
     forkSession: (sessionId) => {
-      sessions.fork({ sessionId, increaseTitle: true })
-        .then((childId) => { sessions.open(childId) })
+      uiWorkspace.forkSession(sessionId)
         .catch(() => {
           // Fork or child-rename failure keeps the current selection.
         })

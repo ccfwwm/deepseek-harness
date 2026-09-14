@@ -156,6 +156,8 @@ const processBoundTests = [
 ]
 
 export default defineConfig({
+  esbuild: { jsx: 'automatic' },
+  server: { fs: { allow: [fileURLToPath(new URL('..', import.meta.url))] } },
   plugins: [pathsPlugin(), standardDecoratorPlugin()],
   test: {
     setupFiles: ['./scripts/test-proxy-environment.ts', './scripts/test-invariants.ts'],
@@ -166,6 +168,8 @@ export default defineConfig({
     // Node stability; process-bound suites stay separate for inventory control.
     projects: [
       {
+        esbuild: { jsx: 'automatic' },
+        server: { fs: { allow: [fileURLToPath(new URL('..', import.meta.url))] } },
         plugins: [pathsPlugin(), standardDecoratorPlugin()],
         test: {
           name: 'thread-safe',
@@ -184,6 +188,7 @@ export default defineConfig({
         },
       },
       {
+        esbuild: { jsx: 'automatic' },
         plugins: [pathsPlugin(), standardDecoratorPlugin()],
         test: {
           name: 'process-bound',

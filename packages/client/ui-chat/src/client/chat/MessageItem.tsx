@@ -1,8 +1,8 @@
-import { memo, useEffect, useMemo, useState } from 'react'
+import { Fragment, memo, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { PendingSubmission } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { MessageImageSource } from '@deepseek-ai/dsh-client-ui-conversation/client'
-import { Button, IconArchiveOutline20, IconBrowseOutline16, IconCodeOutline16, IconCopyOutline16, IconDataOutline16, IconFolderClose16, IconRefreshOutline16, JsonBlock, projectUserText, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconCopyOutline16, IconCodeOutline16, IconRefreshOutline16, fileExtension, FileTypeIcon, fileSizeText, JsonBlock, projectUserText, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChatFileAttachment, ChatNodeOwnerProps, ChatNodeViewProps, ChatViewSlotProps } from '../contract/slots.ts'
 import type { ModelRetryNode, TurnErrorNode, UserMessageNode } from '../contract/snapshot.ts'
 import { CompactionItem } from './CompactionItem.tsx'
@@ -11,6 +11,7 @@ import { MessageIconActions } from './MessageIconActions.tsx'
 import css from './MessageItem.module.css'
 
 type UserImage = Extract<UserMessageNode['content'][number], { type: 'image' }>
+
 type MutableChatFileAttachment = { -readonly [Key in keyof ChatFileAttachment]: ChatFileAttachment[Key] }
 
 function stringField(value: Record<string, unknown>, key: string): string | undefined {
@@ -95,76 +96,31 @@ function fileAttachmentFromBlock(block: unknown): ChatFileAttachment | undefined
   if (parseError !== undefined) attachment.parseError = parseError
   return attachment
 }
+type PresentedAttachment =
+  | { readonly type: 'image'; readonly image: MessageImageSource }
+  | { readonly type: 'file'; readonly file: ChatFileAttachment }
 
 function contentParts(content: readonly unknown[]): {
   text: string
-  images: { attachment: UserImage['attachment'] }[]
-  files: ChatFileAttachment[]
+  attachments: PresentedAttachment[]
   rest: unknown[]
 } {
   const texts: string[] = []
-  const images: { attachment: UserImage['attachment'] }[] = []
-  const files: ChatFileAttachment[] = []
+  const attachments: PresentedAttachment[] = []
   const rest: unknown[] = []
   for (const block of content) {
     const b = block as { type?: string; text?: string; attachment?: unknown }
     if (b.type === 'text' && typeof b.text === 'string') texts.push(b.text)
     else if (b.type === 'image' && b.attachment !== undefined) {
-      images.push({ attachment: (b as UserImage).attachment })
+      attachments.push({ type: 'image', image: { attachment: (b as UserImage).attachment } })
     }
     else {
       const file = fileAttachmentFromBlock(block)
-      if (file !== undefined) files.push(file)
+      if (file !== undefined) attachments.push({ type: 'file', file })
       else rest.push(block)
     }
   }
-  return { text: texts.join(''), images, files, rest }
-}
-
-function fileIconFor(file: ChatFileAttachment): ReactNode {
-  const extension = file.name.split('.').pop()?.toLocaleLowerCase() ?? ''
-  if (file.mediaType.includes('zip') || file.mediaType.includes('compressed') || ['zip', '7z', 'rar', 'tar', 'gz'].includes(extension)) return <IconArchiveOutline20 size={22} />
-  if (file.mediaType.includes('json') || file.mediaType.includes('javascript') || ['ts', 'tsx', 'js', 'jsx', 'py', 'rs', 'go'].includes(extension)) return <IconCodeOutline16 size={22} />
-  if (file.mediaType.startsWith('image/') || ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(extension)) return <IconBrowseOutline16 size={22} />
-  if (file.mediaType.includes('spreadsheet') || file.mediaType.includes('excel') || ['xls', 'xlsx', 'csv'].includes(extension)) return <IconDataOutline16 size={22} />
-  if (file.mediaType.includes('presentation') || ['ppt', 'pptx', 'key'].includes(extension)) return <IconFolderClose16 size={22} />
-  return <IconDataOutline16 size={22} />
-}
-
-function FileCards({ files, sessionId, openAttachment, openParsedAttachment, copyAttachment }: {
-  files: readonly ChatFileAttachment[]
-  sessionId?: string
-  openAttachment?: ((attachment: ChatFileAttachment) => void) | undefined
-  openParsedAttachment?: ((attachment: ChatFileAttachment) => void) | undefined
-  copyAttachment?: ((attachment: ChatFileAttachment) => void) | undefined
-}): ReactNode {
-  if (files.length === 0) return null
-  return <div className={css.fileCards} role="list" aria-label="附件">
-    {files.map(file => <div className={css.fileCard} role="listitem" key={file.attachmentId} draggable onDragStart={(event) => {
-      event.dataTransfer.effectAllowed = 'copy'
-      event.dataTransfer.setData('application/x-zerowall-attachment', JSON.stringify({ attachmentId: file.attachmentId, name: file.name, mediaType: file.mediaType, sessionId }))
-      event.dataTransfer.setData('text/plain', file.name)
-    }}>
-      <button type="button" className={css.fileOpen} onClick={() => openAttachment?.(file)} disabled={openAttachment === undefined} title="预览附件">
-        <span className={css.fileIcon} aria-hidden>{fileIconFor(file)}</span>
-        <span className={css.fileName}>{file.name}</span>
-      </button>
-      <button type="button" className={css.fileOpen} onClick={() => openParsedAttachment?.(file)} disabled={openParsedAttachment === undefined} title="查看解析结果">
-        <span className={css.fileIcon} aria-hidden>↗</span>
-      </button>
-      <button type="button" className={css.fileCopy} onClick={() => copyAttachment?.(file)} disabled={copyAttachment === undefined} title="复制附件" aria-label="复制附件">
-        <IconCopyOutline16 />
-      </button>
-      {file.parseStatus !== undefined && file.parseStatus !== 'idle' && (
-        <div className={`${css.fileStatus} ${file.parseStatus === 'failed' ? css.fileStatusFailed : ''}`} role="status">
-          {file.parseStatus === 'queued' ? '等待解析' : file.parseStatus === 'running' ? '解析中' : file.parseStatus === 'done' ? '解析完成' : `解析失败${file.parseError ? `：${file.parseError}` : ''}`}
-        </div>
-      )}
-      {(file.parseStatus === 'running' || file.parseStatus === 'queued') && <div className={css.fileProgress} role="status" aria-label="附件解析中">
-        <span style={{ width: `${Math.max(6, Math.min(100, file.parseProgress ?? 12))}%` }} />
-      </div>}
-    </div>)}
-  </div>
+  return { text: texts.join(''), attachments, rest }
 }
 
 function retrySeconds(milliseconds: number): number {
@@ -310,8 +266,8 @@ function TurnMaxTokensItem({ t }: {
 
 /** Right-aligned bubble shared by user and steering rows. */
 function UserStyleBubble({
-  content, sessionId, renderMessageImages, openAttachment, openParsedAttachment,
-  copyAttachment, actions, pending = false, echo = false, referenceLabels = [], previewImages, t,
+  content, renderMessageImages, actions, pending = false, echo = false, referenceLabels = [], skillNames = [],
+  previewAttachments, sessionId, openAttachment, openParsedAttachment, copyAttachment, t,
 }: {
   content: readonly unknown[]
   sessionId?: string
@@ -327,12 +283,15 @@ function UserStyleBubble({
   echo?: boolean
   /** Exact session mention labels associated by the adjacent recall node. */
   referenceLabels?: readonly string[]
-  /** Local submission-echo previews replacing the content-derived image group. */
-  previewImages?: readonly MessageImageSource[]
+  /** Skill names the step's `skill-invocation` injections loaded for this message. */
+  skillNames?: readonly string[]
+  /** Local submission-echo attachments replacing the content-derived attachment sequence. */
+  previewAttachments?: readonly PresentedAttachment[]
   t: ChatViewSlotProps['t']
 }): ReactNode {
-  const { text, images: contentImages, files, rest } = contentParts(content)
-  const images = previewImages ?? contentImages
+  const { text, attachments: contentAttachments, rest } = contentParts(content)
+  const attachments = previewAttachments ?? contentAttachments
+  const compactImages = attachments.length > 1
   const truncated = (total: number): string => t('json.truncated', { total })
   const showBubble = text !== '' || rest.length > 0
   return (
@@ -342,16 +301,45 @@ function UserStyleBubble({
       data-submission-echo={echo || undefined}
     >
       <div className={css.userStack}>
-        {renderMessageImages({ images, align: 'end' })}
-        <FileCards
-          files={files}
-          {...sessionId === undefined ? {} : { sessionId }}
-          openAttachment={openAttachment}
-          openParsedAttachment={openParsedAttachment}
-          copyAttachment={copyAttachment}
-        />
+        {attachments.length > 0 && (
+          <div className={css.attachmentRow} data-message-attachments>
+            {attachments.map((attachment, index) => attachment.type === 'image'
+              ? (
+                <Fragment key={`image:${index}`}>
+                  {renderMessageImages({
+                    images: [attachment.image],
+                    align: 'end',
+                    compact: compactImages,
+                  })}
+                </Fragment>
+              )
+              : (
+                <span key={`file:${index}`} className={css.fileCard} title={attachment.file.name} draggable onDragStart={(event) => {
+                  event.dataTransfer.effectAllowed = 'copy'
+                  event.dataTransfer.setData('application/x-zerowall-attachment', JSON.stringify({ ...attachment.file, sessionId }))
+                  event.dataTransfer.setData('text/plain', attachment.file.name)
+                }}>
+                  <button type="button" className={css.fileOpen} title={t('attachment.preview')} disabled={openAttachment === undefined} onClick={() => openAttachment?.(attachment.file)}>
+                    <FileTypeIcon path={attachment.file.name} className={css.fileIcon} />
+                    <span className={css.fileContent}>
+                      <span className={css.fileName}>{attachment.file.name}</span>
+                      <span className={css.fileMeta}>
+                        {[fileExtension(attachment.file.name).toUpperCase().slice(0, 8), fileSizeText(attachment.file.bytes)]
+                          .filter(Boolean).join(' ')}
+                      </span>
+                    </span>
+                  </button>
+                  <button type="button" className={css.fileOpen} title={t('attachment.parsed')} disabled={openParsedAttachment === undefined} onClick={() => openParsedAttachment?.(attachment.file)}><IconCodeOutline16 /></button>
+                  <button type="button" className={css.fileCopy} title={t('attachment.copy')} aria-label={t('attachment.copy')} disabled={copyAttachment === undefined} onClick={() => copyAttachment?.(attachment.file)}><IconCopyOutline16 /></button>
+                  {attachment.file.parseStatus !== undefined && attachment.file.parseStatus !== 'idle' && (
+                    <span className={css.fileStatus} role="status">{t(`attachment.${attachment.file.parseStatus}`)}{attachment.file.parseStatus === 'failed' && attachment.file.parseError ? `: ${attachment.file.parseError}` : ''}</span>
+                  )}
+                </span>
+              ))}
+          </div>
+        )}
         {showBubble && <div className={css.bubble}>
-          {projectUserText(text, referenceLabels)}
+          {projectUserText(text, referenceLabels, skillNames)}
           {rest.map((block, i) => <JsonBlock key={i} label={t('message.extraBlock')} payload={block} truncatedLabel={truncated} />)}
         </div>}
         {referenceLabels.length > 0 && (
@@ -410,26 +398,30 @@ export function PendingSubmissionBubble({ submission, renderMessageImages, t }: 
 }): ReactNode {
   const content = useMemo(
     () => [
-      ...(submission.files ?? []).map((file, index) => ({ type: 'file', attachment: { attachmentId: `pending:${index}`, name: file.name, mediaType: file.mediaType, bytes: 0 } })),
       ...(submission.text === '' ? [] : [{ type: 'text', text: submission.text }]),
     ],
-    [submission.files, submission.text],
+    [submission.text],
   )
-  const previewImages = useMemo<readonly MessageImageSource[]>(
-    () => submission.images.map(image => ({
-      preview: {
-        url: image.previewUrl,
-        ...(image.name === undefined ? {} : { name: image.name }),
-        ...(image.width === undefined ? {} : { width: image.width }),
-        ...(image.height === undefined ? {} : { height: image.height }),
-      },
-    })),
-    [submission.images],
+  const previewAttachments = useMemo<readonly PresentedAttachment[]>(
+    () => submission.attachments.map(attachment => attachment.type === 'image'
+      ? {
+        type: 'image',
+        image: {
+          preview: {
+            url: attachment.value.previewUrl,
+            ...(attachment.value.name === undefined ? {} : { name: attachment.value.name }),
+            ...(attachment.value.width === undefined ? {} : { width: attachment.value.width }),
+            ...(attachment.value.height === undefined ? {} : { height: attachment.value.height }),
+          },
+        },
+      }
+      : { type: 'file', file: { ...attachment.value, mediaType: 'application/octet-stream' } }),
+    [submission.attachments],
   )
   return (
     <UserStyleBubble
       content={content}
-      previewImages={previewImages}
+      previewAttachments={previewAttachments}
       renderMessageImages={renderMessageImages}
       pending={submission.placement === 'steering'}
       echo
@@ -461,6 +453,7 @@ export const UserMessageNodeView = memo(function UserMessageNodeView({
       openParsedAttachment={openParsedAttachment}
       copyAttachment={copyAttachment}
       {...data.referenceLabels === undefined ? {} : { referenceLabels: data.referenceLabels }}
+      {...data.skillNames === undefined ? {} : { skillNames: data.skillNames }}
       t={t}
       actions={text => (
         <MessageIconActions

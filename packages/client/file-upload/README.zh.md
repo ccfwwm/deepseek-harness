@@ -34,6 +34,8 @@ kind: "package-reference"
 
 本包没有 Cordis 配置字段。`Blob` 在专用 Worker 内通过 XMLHttpRequest 发送，因此服务可以报告浏览器上传进度，并在浏览器提供总量时一并报告。`ReadableStream` 会转移给该 Worker，再增量传入 Fetch；进度只报告已消费字节，不包含总量。`AbortSignal` 会终止专用 Worker，或传递给页面自己提供的载体。精确字节与 fixture Blob 输入使用生成的 Remote。
 
+重试已提交文件时，调用 `ctx.remote.fileUploads.restage(sessionId, attachmentId)` 并提交新回执。Host 仅允许当前 Session 派生历史中用户消息已引用的文件；复用已存储字节，拒绝其他会话或尚未引用的文件。
+
 -----
 
 <a id="understand-the-implementation"></a>

@@ -55,6 +55,7 @@ afterEach(() => {
 // so one harness's selection cannot rehydrate into the next.
 beforeEach(() => {
   localStorage.clear()
+  if (typeof PointerEvent === 'undefined') vi.stubGlobal('PointerEvent', MouseEvent)
 })
 
 const SID = 's1' as SessionId

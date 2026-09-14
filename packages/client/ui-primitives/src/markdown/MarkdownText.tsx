@@ -19,11 +19,11 @@ import {
   collectReferenceTargets, createReferenceTargets, renderBlocks, renderFootnoteSection,
   wrapBlockChildren,
 } from './render.tsx'
-import type { MarkdownFileMentions, MarkdownLabels, MarkdownRenderContext, ReferenceTargets } from './render.tsx'
+import type { MarkdownFileMentions, MarkdownLabels, MarkdownPathImages, MarkdownRenderContext, ReferenceTargets } from './render.tsx'
 import 'katex/dist/katex.min.css'
 import css from './MarkdownText.module.css'
 
-export type { MarkdownCodeLabels, MarkdownFileMentions, MarkdownLabels } from './render.tsx'
+export type { MarkdownCodeLabels, MarkdownFileMentions, MarkdownLabels, MarkdownPathImages } from './render.tsx'
 
 /** Safe defaults for framework-free consumers and plugin previews. Host UI
  * normally supplies localized labels, but a missing label object must never
@@ -38,6 +38,7 @@ function renderSettled(
   text: string,
   labels: MarkdownLabels,
   fileMentions: MarkdownFileMentions | undefined,
+  pathImages: MarkdownPathImages | undefined,
 ): ReactNode[] {
   const root = parseGfmWithMath(text)
   const targets = createReferenceTargets()
@@ -46,6 +47,7 @@ function renderSettled(
     streaming: false,
     labels,
     fileMentions,
+    pathImages,
     targets,
     footnoteOrder: [],
     footnoteCounts: new Map(),
@@ -114,6 +116,7 @@ class StreamingRenderer {
         streaming: true,
         labels: this.labels,
         fileMentions: undefined,
+        pathImages: undefined,
         targets: frameTargets,
         footnoteOrder: this.frozenFootnoteOrder,
         footnoteCounts: this.frozenFootnoteCounts,
@@ -132,6 +135,7 @@ class StreamingRenderer {
       streaming: true,
       labels: this.labels,
       fileMentions: undefined,
+      pathImages: undefined,
       targets: frameTargets,
       footnoteOrder: [...this.frozenFootnoteOrder],
       footnoteCounts: new Map(this.frozenFootnoteCounts),
@@ -158,19 +162,22 @@ class StreamingRenderer {
  * `labels` forwards localized fence and footnote chrome — pass a
  * reference-stable object (memoized per locale revision), because a new
  * identity discards the streaming render cache mid-message. `fileMentions`
- * links inline-code tokens its resolver recognizes as real files; this is
- * the single streaming gate — it applies to settled renders only, because a
+ * links inline-code tokens its resolver recognizes as real files, and
+ * `pathImages` rewrites image destinations that are local file paths into
+ * displayable URLs its resolver vouches for; both vocabularies are the
+ * single streaming gate — they apply to settled renders only, because a
  * streaming message's vocabulary is not final and frozen cached elements
  * must not bake in handlers that could go stale.
  * @returns A GFM document with TeX math rendered through KaTeX; raw HTML,
  * relative links, and unsafe protocols are disabled, while absolute HTTP(S)
  * images render directly.
  */
-export const MarkdownText = memo(function MarkdownText({ text, streaming = false, labels, fileMentions }: {
+export const MarkdownText = memo(function MarkdownText({ text, streaming = false, labels, fileMentions, pathImages }: {
   text: string
   streaming?: boolean
   labels?: MarkdownLabels
   fileMentions?: MarkdownFileMentions | undefined
+  pathImages?: MarkdownPathImages | undefined
 }) {
   const resolvedLabels = labels ?? DEFAULT_MARKDOWN_LABELS
   const streamRef = useRef<StreamingRenderer | null>(null)
@@ -178,13 +185,13 @@ export const MarkdownText = memo(function MarkdownText({ text, streaming = false
   const children = useMemo(() => {
     if (!streaming) {
       streamRef.current = null
-      return renderSettled(text, resolvedLabels, fileMentions)
+      return renderSettled(text, resolvedLabels, fileMentions, pathImages)
     }
     if (streamRef.current === null || streamLabelsRef.current !== resolvedLabels) {
       streamRef.current = new StreamingRenderer(resolvedLabels)
       streamLabelsRef.current = resolvedLabels
     }
     return streamRef.current.render(text)
-  }, [text, streaming, resolvedLabels, fileMentions])
+  }, [text, streaming, resolvedLabels, fileMentions, pathImages])
   return <div className={css.markdown}>{children}</div>
 })

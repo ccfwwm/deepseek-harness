@@ -4,6 +4,8 @@ import type { AttachmentStore, ImageAttachmentRef, ImageRequestPolicy, RequestIm
 import { createUserMessage, ToolCallId, CONTEXT_WINDOW_EXCEEDED_CODE, EMPTY_RESPONSE_CODE, createMessage } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, StreamChunk } from '@deepseek-ai/dsh-llm'
 import type { AssistantMessage, AssistantMessageEvent, Usage } from '@earendil-works/pi-ai'
+import { transformMessages } from '@earendil-works/pi-ai/api/transform-messages'
+import { getBuiltinModels } from '@earendil-works/pi-ai/providers/all'
 import { toPiContext } from '../src/context.ts'
 import { toPiReplayState } from '../src/replay.ts'
 import { mapStopReason, mapUsage, toStreamChunks } from '../src/stream.ts'
@@ -331,7 +333,7 @@ describe('toPiContext', () => {
     })
   })
 
-  it('splits mixed user text + tool results and folds history system messages', () => {
+  it('splits mixed user text + tool results and lifts a leading system message into systemPrompt', () => {
     const context = toPiContext({
       provider: 'deepseek',
       model: 'm',
@@ -349,7 +351,8 @@ describe('toPiContext', () => {
         }),
       ],
     })
-    expect(context.messages.map(message => message.role)).toEqual(['user', 'user', 'toolResult'])
+    expect(context.systemPrompt).toBe('rule')
+    expect(context.messages.map(message => message.role)).toEqual(['user', 'toolResult'])
   })
 
   it('skips plugin-added (unknown) blocks in assistant content', () => {
@@ -415,61 +418,43 @@ describe('toPiContext', () => {
     })
   })
 
-  it('round-trips the complete OpenAI Responses reasoning item through durable replay', () => {
-    const reasoningItem = {
-      id: 'rs_123',
-      type: 'reasoning',
-      encrypted_content: 'encrypted-payload',
-      summary: [{ type: 'summary_text', text: 'compact summary' }],
-      content: [{ type: 'reasoning_text', text: 'private reasoning' }],
-    }
-    const signature = JSON.stringify(reasoningItem)
+  it.each(['high', ''])('preserves provider thinking level %j through durable projection and replay', (providerThinkingLevel) => {
     const state = toPiReplayState(assistant({
-      api: 'openai-responses',
-      provider: 'openai',
-      model: 'gpt-5.6-sol',
-      content: [{ type: 'thinking', thinking: 'private reasoning', thinkingSignature: signature }],
+      api: 'anthropic-messages',
+      provider: 'anthropic',
+      model: 'claude-opus-5',
+      providerThinkingLevel,
+      content: [{ type: 'text', text: 'done' }],
     }))
+    expect(state).toEqual({
+      response: {
+        kind: 'pi-ai',
+        version: 2,
+        api: 'anthropic-messages',
+        provider: 'anthropic',
+        model: 'claude-opus-5',
+        providerThinkingLevel,
+        stopReason: 'stop',
+      },
+      blocks: [{ type: 'text' }],
+    })
+    const replayState: unknown = JSON.parse(JSON.stringify(state))
+    const onDegrade = vi.fn()
     const context = toPiContext({
-      provider: 'openai',
-      model: 'gpt-5.6-sol',
+      provider: 'anthropic',
+      model: 'claude-opus-5',
       messages: [createMessage({
         role: 'assistant',
-        content: [{ type: 'reasoning', text: 'private reasoning' }],
-        source: { kind: 'model', provider: 'openai', model: 'gpt-5.6-sol', replayState: state },
+        content: [{ type: 'text', text: 'done' }],
+        source: { kind: 'model', provider: 'anthropic', model: 'claude-opus-5', replayState },
       })],
+    }, undefined, onDegrade)
+    expect(context.messages[0]).toMatchObject({
+      api: 'anthropic-messages',
+      providerThinkingLevel,
+      content: [{ type: 'text', text: 'done' }],
     })
-
-    const replayed = context.messages[0] as AssistantMessage
-    expect(replayed.api).toBe('openai-responses')
-    expect(replayed.content[0]).toMatchObject({
-      type: 'thinking',
-      thinking: 'private reasoning',
-      thinkingSignature: signature,
-    })
-    expect(JSON.parse((replayed.content[0] as { thinkingSignature: string }).thinkingSignature)).toEqual(reasoningItem)
-  })
-
-  it('maps unsigned Chat Completions reasoning to the reasoning_text field', () => {
-    const state = toPiReplayState(assistant({
-      api: 'openai-completions',
-      content: [{ type: 'thinking', thinking: 'private reasoning' }],
-    }))
-    const context = toPiContext({
-      provider: 'deepseek',
-      model: 'deepseek-v4-flash',
-      messages: [createMessage({
-        role: 'assistant',
-        content: [{ type: 'reasoning', text: 'private reasoning' }],
-        source: { kind: 'model', provider: 'deepseek', model: 'deepseek-v4-flash', replayState: state },
-      })],
-    })
-
-    expect((context.messages[0] as AssistantMessage).content[0]).toEqual({
-      type: 'thinking',
-      thinking: 'private reasoning',
-      thinkingSignature: 'reasoning_text',
-    })
+    expect(onDegrade).not.toHaveBeenCalled()
   })
 
   it('replays all native block kinds when optional metadata is absent', () => {
@@ -507,6 +492,8 @@ describe('toPiContext', () => {
     })
     expect(context.messages[0]).not.toHaveProperty('responseModel')
     expect(context.messages[0]).not.toHaveProperty('responseId')
+    expect(state.response).not.toHaveProperty('providerThinkingLevel')
+    expect(context.messages[0]).not.toHaveProperty('providerThinkingLevel')
   })
 
   it('degrades unsupported replay-state versions to provider-neutral history', () => {
@@ -669,6 +656,8 @@ describe('toPiContext', () => {
     ['unknown stop reason', { ...validReplay, response: { ...validResponse, stopReason: 'pause' } }, 'unknown stopReason'],
     ['non-string response model', { ...validReplay, response: { ...validResponse, responseModel: 1 } }, 'responseModel must be a string'],
     ['non-string response id', { ...validReplay, response: { ...validResponse, responseId: 1 } }, 'responseId must be a string'],
+    ['non-string provider thinking level', { ...validReplay, response: { ...validResponse, providerThinkingLevel: 1 } }, 'providerThinkingLevel must be a string'],
+    ['null provider thinking level', { ...validReplay, response: { ...validResponse, providerThinkingLevel: null } }, 'providerThinkingLevel must be a string'],
     ['missing blocks', { response: validResponse }, 'blocks must be an array'],
     ['non-array blocks', { ...validReplay, blocks: 'text' }, 'blocks must be an array'],
     ['number block', { ...validReplay, blocks: [1] }, 'block 0 must be an object'],
@@ -683,6 +672,48 @@ describe('toPiContext', () => {
 })
 
 describe('toStreamChunks', () => {
+  it.each([
+    ['claude-haiku-4-5', 'claude-haiku-4-5-20251001'],
+    ['claude-fable-5', 'claude-opus-5'],
+    ['claude-opus-5', 'claude-opus-5'],
+  ])('replays Anthropic request %s with native response model %s', async (requestedModel, returnedModel) => {
+    const native = assistant({
+      api: 'anthropic-messages', provider: 'anthropic', model: returnedModel,
+      providerThinkingLevel: 'high',
+      content: [{ type: 'thinking', thinking: 'reason', thinkingSignature: 'signed' }],
+    })
+    const chunks = await collect(toStreamChunks(feed(
+      { type: 'done', reason: 'stop', message: native },
+    ), undefined, undefined, requestedModel))
+    const finish = chunks.find(chunk => chunk.type === 'finish')
+    const replayState: unknown = JSON.parse(JSON.stringify(finish?.replayState))
+    expect(replayState).toMatchObject({ response: { model: requestedModel } })
+    if (requestedModel !== returnedModel) {
+      expect(replayState).toMatchObject({ response: { responseModel: returnedModel } })
+    }
+    const onDegrade = vi.fn()
+    const context = toPiContext({
+      provider: 'anthropic', model: requestedModel,
+      messages: [createMessage({
+        role: 'assistant', content: [{ type: 'reasoning', text: 'reason' }],
+        source: { kind: 'model', provider: 'anthropic', model: requestedModel, replayState },
+      })],
+    }, undefined, onDegrade)
+    expect(onDegrade).not.toHaveBeenCalled()
+    expect(context.messages[0]).toMatchObject({
+      api: 'anthropic-messages', model: returnedModel, providerThinkingLevel: 'high',
+      content: native.content,
+    })
+    const catalog = getBuiltinModels('anthropic')
+    const requested = catalog.find(model => model.id === requestedModel)
+    const returned = catalog.find(model => model.id === returnedModel)
+    if (requested === undefined || returned === undefined) throw new Error('missing Anthropic catalog model')
+    expect(transformMessages(context.messages, returned)[0]).toMatchObject({ content: native.content })
+    expect(transformMessages(context.messages, requested)[0]).toMatchObject({
+      content: requestedModel === returnedModel ? native.content : [{ type: 'text', text: 'reason' }],
+    })
+  })
+
   const partialWithToolCall = assistant({
     content: [{ type: 'toolCall', id: 'call-1', name: 'f', arguments: {} }],
   })

@@ -1,4 +1,3 @@
-import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import { describe, expect, it, vi } from 'vitest'
 import { AttachmentId, ImageVariantId } from '@deepseek-ai/dsh-attachment'
 import type {

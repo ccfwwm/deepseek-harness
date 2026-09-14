@@ -79,10 +79,9 @@ function turnProcessLayout(
 
 /** Subscribe, apply Turn-process visibility, and dispatch one stable Context key. */
 export const ChatNodeSeat = memo(function ChatNodeSeat({
-  nodeKey, historyIncomplete, compactTranscript,
-  selectedCallId, cwd, openFile, inspectCall, forkAt,
-  renderMessageImages, openAttachment, openParsedAttachment, copyAttachment,
-  sessionId, fileMentions, retryTurn, useChat, useStore, actions, renderSlot, t,
+  nodeKey, useChat, historyIncomplete, compactTranscript,
+  sessionId, cwd, openFile, inspectCall, forkAt, retryTurn, openAttachment, openParsedAttachment, copyAttachment,
+  loadImage, renderMessageImages, fileMentions, useStore, actions, renderSlot, t,
 }: ChatNodeSeatProps) {
   const node = useChat(snapshot => snapshot.nodes.get(nodeKey))
   const processSignature = useChat((snapshot) => {
@@ -181,12 +180,12 @@ export const ChatNodeSeat = memo(function ChatNodeSeat({
   const owner = useMemo<ChatNodeOwnerProps | null>(() => node === undefined
     ? null
     : {
-      selectedCallId,
       sessionId,
       cwd,
       openFile,
       inspectCall,
       forkAt,
+      loadImage,
       renderMessageImages,
       openAttachment,
       openParsedAttachment,
@@ -195,8 +194,8 @@ export const ChatNodeSeat = memo(function ChatNodeSeat({
       ...(canRetryTurn ? { retryTurn } : {}),
       turnProcess,
     }, [
-    node, selectedCallId, sessionId, cwd, openFile, inspectCall, forkAt,
-    canRetryTurn, renderMessageImages, openAttachment, openParsedAttachment, copyAttachment, fileMentions, retryTurn, turnProcess,
+    node, sessionId, cwd, openFile, inspectCall, forkAt, canRetryTurn, retryTurn, openAttachment, openParsedAttachment, copyAttachment,
+    loadImage, renderMessageImages, fileMentions, turnProcess,
   ])
   if (routedNode === undefined || owner === null) return null
   const location = routedNode.location

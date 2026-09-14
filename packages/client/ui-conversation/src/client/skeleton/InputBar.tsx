@@ -14,7 +14,7 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties, KeyboardEvent, MouseEvent, ReactNode } from 'react'
+import type { ChangeEvent, CSSProperties, KeyboardEvent, MouseEvent, ReactNode } from 'react'
 import clsx from 'clsx'
 import {
   IconPaperclipOutline16, IconPlusOutline16, IconWarningOutline16, Toast, Tooltip,
@@ -32,6 +32,7 @@ import type { ComposerBarProps } from '../contract/slots.ts'
 import { ComposerContentEditable } from '../input/editor/ComposerContentEditable.tsx'
 import { DecoratorPortals } from '../input/editor/DecoratorPortals.tsx'
 import { registerComposerKeymap } from '../input/editor/keymap.ts'
+import { resolveSubmitMode } from '../input/submission-policy.ts'
 import { attachmentErrorText, imageSizeText } from '../image-labels.ts'
 import { ContextMeter } from './ContextMeter.tsx'
 import { PermissionSelect } from './PermissionSelect.tsx'
@@ -40,15 +41,17 @@ import css from './InputBar.module.css'
 export type InputBarProps = ComposerBarProps
 
 export const InputBar = memo(function InputBar({
-  useSession, useInput, inputActions, keyboard, addImages, addFiles, removeImage, draftImages,
-  resolveSubmitMode, toggleCommandMenu, stop, command, t,
-  renderSlot, useNotices, useLexicon, useMenuLauncher,
+  useSession, useInput, inputActions, keyboard, addFiles, removeAttachment, resolveDraftAttachments,
+  retryFileUpload,
+  toggleCommandMenu, stop, command, t,
+  renderSlot, useBusyEnter, useFileUploads, useNotices, useLexicon, useMenuLauncher,
   useProjection, sessionId, variant, disabled: inert = false, blocked,
   workspacePickerOpen = false, onRequestWorkspace,
   placeholder, accessory,
 }: InputBarProps) {
   const input = useInput(s => s)
   const notice = useNotices(s => s)
+  const busyEnter = useBusyEnter(s => s)
   void useLexicon // hook seat stays bound by the inject compartment; text-ref decoration rides the shell's editor transforms
   const commandMenuOpen = useMenuLauncher(source => source === 'command')
   const promptError = useSession(s => s.promptError) ?? null
@@ -66,14 +69,16 @@ export const InputBar = memo(function InputBar({
   const draft = input?.draft ?? ''
   const editor = keyboard?.editor ?? null
   const attachments = useMemo(
-    () => input === undefined || draftImages === undefined ? [] : draftImages(input.imageIds),
-    [draftImages, input?.imageIds],
-  )
-  const imageAttachments = useMemo(
-    () => attachments.filter(attachment => attachment.kind === 'image'),
-    [attachments],
+    () => input === undefined || resolveDraftAttachments === undefined ? [] : resolveDraftAttachments(input.attachmentIds),
+    [resolveDraftAttachments, input?.attachmentIds],
   )
   const empty = draft.trim() === '' && attachments.length === 0
+  const uploads = useFileUploads(snapshot => snapshot)
+  // Send waits for every picked file: uploading and failed drafts both hold
+  // the gate (a failed upload is retried or removed, never silently dropped).
+  const uploadsPending = attachments.some(
+    attachment => attachment.kind === 'file' && uploads[attachment.id]?.status !== 'ready',
+  )
   // Transient error banner (machine notices, image-intake rejections, and
   // prompt failures): the seq keys the Toast so an identical repeated message
   // restarts the hold-then-fade cycle instead of reusing the faded one.
@@ -143,16 +148,17 @@ export const InputBar = memo(function InputBar({
   // and keyboard users can reach the recovery action.
   const workspaceTrigger = inert && !removed && onRequestWorkspace !== undefined
   const editorDisabled = removed || (locked && !workspaceTrigger)
-  const editable = live && (!locked || workspaceTrigger) && !machineBusy
-  const canSteerQueue = !locked && !machineBusy && !commandMenuOpen && empty && running && subagent === null
+  const editable = live && !workspaceTrigger && !locked && !machineBusy
+  const steeringAvailable = subagent === null || subagent.address.mode === 'continuable'
+  const canSteerQueue = !locked && !machineBusy && !commandMenuOpen && empty && running && steeringAvailable
     && input.queue.some(row => row.placement === 'queued')
 
   useEffect(() => {
     if (input === undefined || inputActions === undefined) return
-    if (attachments.length !== input.imageIds.length) {
-      inputActions.pruneImages(attachments.map(attachment => attachment.id))
+    if (attachments.length !== input.attachmentIds.length) {
+      inputActions.pruneAttachments(attachments.map(attachment => attachment.id))
     }
-  }, [attachments, input?.imageIds, inputActions])
+  }, [attachments, input?.attachmentIds, inputActions])
 
   // Scroll the draft scrollport the minimum that brings the selection focus
   // into view — the browser's own behavior for typing, performed for the
@@ -225,52 +231,19 @@ export const InputBar = memo(function InputBar({
     return () => { el.removeEventListener('wheel', onWheel) }
   }, [])
 
-  // Intake pre-check: an addition that would break
-  // a projected limit is refused as a whole batch, announced immediately, and
-  // never enters the rail — no more submit-time failure rolling the rail
-  // back. The host enforces the same limits at submit for callers that bypass
+  // Intake pre-check: an addition that would break a projected image limit is
+  // refused as a whole batch, announced immediately, and never enters the
+  // rail. Only the image subset is limit-checked: generic files carry no
+  // client-side size or count limit and upload as soon as they are picked.
+  // The host enforces the same image limits at submit for callers that bypass
   // this composer.
   const intakeFiles = useCallback((files: readonly File[]): void => {
-    if (files.length === 0) return
-    if (addFiles === undefined) {
-      // Do not route ordinary files through the legacy image callback: that
-      // would surface a misleading image-MIME rejection and can discard the
-      // file. Older compositions get an explicit capability error instead.
-      showToast(t('file.unavailable'))
-      return
-    }
-    void addFiles(files).then((failure) => {
-      if (failure !== null) showToast(failure)
-    }).catch((error: unknown) => {
-      showToast(error instanceof Error ? error.message : String(error))
-    })
-  }, [addFiles, showToast, t])
-
-  useEffect(() => {
-    const onFiles = (event: Event): void => {
-      const files = (event as CustomEvent<{ files?: unknown }>).detail?.files
-      if (!Array.isArray(files)) return
-      const accepted = files.filter((file): file is File => typeof File !== 'undefined' && file instanceof File)
-      if (accepted.length > 0) intakeFiles(accepted)
-    }
-    window.addEventListener('zerowall:attachment-files', onFiles)
-    return () => { window.removeEventListener('zerowall:attachment-files', onFiles) }
-  }, [intakeFiles])
-
-  const intakeImages = useCallback((files: readonly File[]): void => {
-    if (files.length === 0) return
-    const imageTypes = imageLimits?.mediaTypes ?? ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
-    const images = files.filter(file => (imageTypes as readonly string[]).includes(file.type))
-    const documents = files.filter(file => !(imageTypes as readonly string[]).includes(file.type))
-    if (documents.length > 0) {
-      intakeFiles(documents)
-    }
-    if (images.length === 0 || addImages === undefined) return
+    if (subagent !== null || addFiles === undefined || files.length === 0) return
     const rejected = ((): string | null => {
       if (imageLimits !== undefined) {
-        // Format precedes limits: a batch with
-        // a non-image must announce the format problem, not a count or size
-        // it could never pass anyway — addImages rejects it authoritatively.
+        const mediaTypes = imageLimits.mediaTypes as readonly string[]
+        const images = files.filter(file => mediaTypes.includes(file.type))
+        const imageAttachments = attachments.filter(attachment => attachment.kind === 'image')
         if (imageAttachments.length + images.length > imageLimits.maxImagesPerMessage) {
           return t('image.tooMany', { count: imageLimits.maxImagesPerMessage })
         }
@@ -283,19 +256,30 @@ export const InputBar = memo(function InputBar({
           return t('image.totalTooLarge', { size: imageSizeText(imageLimits.maxMessageImageBytes) })
         }
       }
-      return addImages(images)
+      return addFiles(files)
     })()
     if (rejected !== null) showToast(rejected)
-  }, [addFiles, addImages, imageAttachments, imageLimits, intakeFiles, showToast, t])
+  }, [subagent, addFiles, attachments, imageLimits, showToast, t])
 
-  const canAcceptDrop = !locked && !machineBusy && (addImages !== undefined || addFiles !== undefined)
+  const canAcceptDrop = subagent === null && !locked && !machineBusy && addFiles !== undefined
+
+  const onPickFiles = (e: ChangeEvent<HTMLInputElement>): void => {
+    const picked = e.target.files === null ? [] : [...e.target.files]
+    // Reset so picking the same file again re-fires the change event.
+    e.target.value = ''
+    if (picked.length > 0) intakeFiles(picked)
+  }
 
   // The keymap handlers read live bar state through this ref so the editor
   // registration survives re-renders without re-arming per keystroke.
   const gate = useRef({
-    locked, machineBusy, canSteerQueue, running, subagent, resolveSubmitMode, intakeImages,
+    locked, machineBusy, canSteerQueue, running, steeringAvailable, busyEnter,
+    intakeFiles, uploadsPending, showToast, t,
   })
-  gate.current = { locked, machineBusy, canSteerQueue, running, subagent, resolveSubmitMode, intakeImages }
+  gate.current = {
+    locked, machineBusy, canSteerQueue, running, steeringAvailable, busyEnter,
+    intakeFiles, uploadsPending, showToast, t,
+  }
 
   useEffect(() => {
     if (editor === null || keyboard === undefined) return
@@ -316,13 +300,18 @@ export const InputBar = memo(function InputBar({
           keyboard.steerQueue()
           return
         }
-        keyboard.submit(g.resolveSubmitMode(
+        if (g.uploadsPending) {
+          g.showToast(g.t('file.stillUploading'))
+          return
+        }
+        keyboard.submit(resolveSubmitMode(
+          g.busyEnter,
           g.running,
           accelerated ? 'accelerated' : 'enter',
-          g.subagent === null,
+          g.steeringAvailable,
         ))
       },
-      intakeFiles: (files) => { gate.current.intakeImages(files) },
+      intakeFiles: (files) => { gate.current.intakeFiles(files) },
       pasteText: (text) => {
         if (gate.current.machineBusy || gate.current.locked) return
         keyboard.paste(text)
@@ -354,19 +343,33 @@ export const InputBar = memo(function InputBar({
   }
 
   // An ordinary running session keeps Stop while the composer is empty or
-  // owner-blocked; an actionable draft gets the existing Queue action. A
-  // continuable child keeps Send primary and exposes Stop independently.
+  // owner-blocked; an actionable draft gets the busy Send action, delivered
+  // through the same mode plain Enter resolves to. The label names that mode
+  // only when the click would deliver a plain message right now — an enabled
+  // button (no pending upload) over a non-empty draft that is neither a
+  // claimed command nor a `/` line headed for adjudication — so it never
+  // describes a delivery the click cannot or does not perform; every other
+  // state keeps plain Send. A continuable child keeps Send primary and
+  // exposes Stop independently.
   const primaryStops = running && subagent === null && (empty || blocked !== undefined)
+  // Disabled native buttons may omit mouseleave; their tooltip must close from state.
+  const primaryDisabled = primaryStops ? stop === undefined : empty || disabled || machineBusy || uploadsPending
   const interruptible = running && continuable
-  const primaryLabel = primaryStops ? t('input.stop') : t('input.send')
+  const primarySubmitMode = resolveSubmitMode(busyEnter, running, 'enter', steeringAvailable)
+  const plainMessageDraft = !empty && input?.phase === 'plain' && !draft.trimStart().startsWith('/')
+  const primaryLabel = primaryStops
+    ? t('input.stop')
+    : running && steeringAvailable && !disabled && !uploadsPending && plainMessageDraft
+      ? t(primarySubmitMode === 'steer' ? 'input.send.steer' : 'input.send.queue')
+      : t('input.send')
   const onPrimary = (): void => {
     if (primaryStops) {
       stopNow()
       return
     }
-    if (inputActions === undefined) return // absent machine: the button is disabled
-    /* v8 ignore next -- defensive: the primary button is disabled while empty||disabled, so a click cannot reach the false arm. */
-    if (!empty && !disabled && !machineBusy) inputActions.submit()
+    if (keyboard === undefined) return // absent machine: the button is disabled
+    /* v8 ignore next -- defensive: the primary button is disabled for empty, disabled, and pending-upload states. */
+    if (!empty && !disabled && !machineBusy && !uploadsPending) keyboard.submit(primarySubmitMode)
   }
 
   // The Access seat: the projection-fed permission chip (renders nothing
@@ -442,10 +445,10 @@ export const InputBar = memo(function InputBar({
         {renderSlot('conversation.input.attachments', {
           attachments,
           canAcceptDrop,
-          onAddImages: intakeImages,
           onAddFiles: intakeFiles,
-          onRemoveImage: (id) => { removeImage?.(id) },
-          onRemoveAttachment: (id) => { removeImage?.(id) },
+          onRemoveAttachment: (id) => { removeAttachment?.(id) },
+          uploads,
+          onRetryFile: (id) => { retryFileUpload?.(id) },
           dropLimits: imageLimits === undefined ? undefined : {
             count: imageLimits.maxImagesPerMessage,
             size: imageSizeText(imageLimits.maxImageBytes),
@@ -474,7 +477,7 @@ export const InputBar = memo(function InputBar({
               onKeyDown={workspaceTrigger ? onWorkspaceKeyDown : undefined}
               style={hint === null ? undefined : { '--dsh-composer-hint': JSON.stringify(hint) } as CSSProperties}
             />
-            {empty && !claimActive && (
+            {draft === '' && attachments.length === 0 && !claimActive && (
               <div aria-hidden className={css.placeholder} data-composer-placeholder>
                 {placeholderText}
               </div>
@@ -488,22 +491,16 @@ export const InputBar = memo(function InputBar({
               ref={fileInputRef}
               type="file"
               multiple
+              disabled={subagent !== null || locked || machineBusy || addFiles === undefined}
               hidden
-              onChange={(event) => {
-                const files = Array.from(event.currentTarget.files ?? [])
-                const images = files.filter(file => file.type.startsWith('image/'))
-                const documents = files.filter(file => !file.type.startsWith('image/'))
-                if (images.length > 0) intakeImages(images)
-                if (documents.length > 0) intakeFiles?.(documents)
-                event.currentTarget.value = ''
-              }}
+              onChange={onPickFiles}
             />
             <Tooltip label={t('input.attachments')} side="top" delayMs={500}>
               <button
                 type="button"
                 className={css.add}
                 aria-label={t('input.attachments')}
-                disabled={locked || machineBusy || (addImages === undefined && addFiles === undefined)}
+                disabled={subagent !== null || locked || machineBusy || addFiles === undefined}
                 onMouseDown={keepFocus}
                 onClick={() => { fileInputRef.current?.click() }}
               >
@@ -539,7 +536,7 @@ export const InputBar = memo(function InputBar({
             {sessionId === undefined ? null : renderSlot('conversation.input.model', { locked: modelSeatLocked })}
             <ContextMeter useProjection={useProjection} t={t} />
             {interruptible && (
-              <Tooltip label={t('input.stop')} side="top" delayMs={500}>
+              <Tooltip label={t('input.stop')} side="top" delayMs={500} disabled={stop === undefined}>
                 <button
                   type="button"
                   className={css.primary}
@@ -554,12 +551,12 @@ export const InputBar = memo(function InputBar({
                 </button>
               </Tooltip>
             )}
-            <Tooltip label={primaryLabel} side="top" delayMs={500}>
+            <Tooltip label={primaryLabel} side="top" delayMs={500} disabled={primaryDisabled}>
               <button
                 type="button"
                 className={css.primary}
                 aria-label={primaryLabel}
-                disabled={primaryStops ? stop === undefined : empty || disabled || machineBusy}
+                disabled={primaryDisabled}
                 onMouseDown={keepFocus}
                 onClick={onPrimary}
               >

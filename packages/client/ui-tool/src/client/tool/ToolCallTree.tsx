@@ -12,16 +12,14 @@ function callName(node: ToolCallBlock): string {
 
 /** One atomic call dispatched through the Tool-owned keyed slot. */
 const ToolCall = memo(function ToolCall({
-  renderSlot, callId, toolName, block, sessionId, renderMessageImages, openAttachment,
-  openFile, selected, cwd, home, inspectCall, t, children,
-}: Pick<ToolTreeProps, 'renderSlot' | 'openFile' | 'cwd' | 'inspectCall' | 't'> & {
+  renderSlot, callId, toolName, block, openFile, cwd, home, inspectCall, loadImage, t, children,
+  sessionId, renderMessageImages, openAttachment,
+}: Pick<ToolTreeProps,
+  'renderSlot' | 'openFile' | 'cwd' | 'inspectCall' | 'loadImage' | 't' | 'sessionId' | 'renderMessageImages' | 'openAttachment'
+> & {
   callId: string
   toolName: string
   block: ToolCallBlock
-  sessionId?: string | undefined
-  renderMessageImages: ToolTreeProps['renderMessageImages']
-  openAttachment?: ToolTreeProps['openAttachment']
-  selected: boolean
   home?: string | undefined
   children?: ReactNode
 }) {
@@ -35,14 +33,14 @@ const ToolCall = memo(function ToolCall({
     openFile,
     cwd,
     home,
+    loadImage,
     inspect: () => { inspectCall(callId) },
-  }), [callId, toolName, block, sessionId, renderMessageImages, openAttachment, openFile, cwd, home, inspectCall])
+  }), [callId, toolName, block, openFile, cwd, home, loadImage, inspectCall, sessionId, renderMessageImages, openAttachment])
   return (
     <div
       className={css.callRow}
       data-chat-anchor-key={`call:${callId}`}
       data-chat-call-id={callId}
-      data-selected={selected || undefined}
     >
       {renderSlot('tool.call.toolview', owner, {
         entryKey: toolName,
@@ -54,9 +52,8 @@ const ToolCall = memo(function ToolCall({
 })
 
 const ToolCallBranch = memo(function ToolCallBranch({
-  renderSlot, block, selectedCallId, cwd, home, openFile, inspectCall,
-  sessionId, renderMessageImages, openAttachment, t,
-}: Pick<ToolTreeProps, 'renderSlot' | 'selectedCallId' | 'cwd' | 'openFile' | 'inspectCall' | 't' | 'sessionId' | 'renderMessageImages' | 'openAttachment'> & {
+  renderSlot, block, cwd, home, openFile, inspectCall, loadImage, t, sessionId, renderMessageImages, openAttachment,
+}: Pick<ToolTreeProps, 'renderSlot' | 'cwd' | 'openFile' | 'inspectCall' | 'loadImage' | 't' | 'sessionId' | 'renderMessageImages' | 'openAttachment'> & {
   block: ToolCallBlock
   home?: string | undefined
 }) {
@@ -70,10 +67,10 @@ const ToolCallBranch = memo(function ToolCallBranch({
       renderMessageImages={renderMessageImages}
       openAttachment={openAttachment}
       openFile={openFile}
-      selected={block.callId === selectedCallId}
       cwd={cwd}
       home={home}
       inspectCall={inspectCall}
+      loadImage={loadImage}
       t={t}
     >
       {block.subCalls.length > 0 ? (
@@ -83,7 +80,6 @@ const ToolCallBranch = memo(function ToolCallBranch({
               key={child.callId}
               renderSlot={renderSlot}
               block={child}
-              selectedCallId={selectedCallId}
               cwd={cwd}
               home={home}
               openFile={openFile}
@@ -91,6 +87,7 @@ const ToolCallBranch = memo(function ToolCallBranch({
               renderMessageImages={renderMessageImages}
               openAttachment={openAttachment}
               inspectCall={inspectCall}
+              loadImage={loadImage}
               t={t}
             />
           ))}
@@ -107,8 +104,7 @@ const ToolCallBranch = memo(function ToolCallBranch({
  * @returns the Tool call tree.
  */
 export function ToolCallTree({
-  renderSlot, node, selectedCallId, cwd, openFile, inspectCall, useHostInfo,
-  sessionId, renderMessageImages, openAttachment, t,
+  renderSlot, node, cwd, openFile, inspectCall, loadImage, useHostInfo, t, sessionId, renderMessageImages, openAttachment,
 }: ToolTreeProps) {
   const home = useHostInfo(info => info.home)
   const block = node.data.root
@@ -116,7 +112,6 @@ export function ToolCallTree({
     <ToolCallBranch
       renderSlot={renderSlot}
       block={block}
-      selectedCallId={selectedCallId}
       cwd={cwd}
       home={home}
       openFile={openFile}
@@ -124,6 +119,7 @@ export function ToolCallTree({
       renderMessageImages={renderMessageImages}
       openAttachment={openAttachment}
       inspectCall={inspectCall}
+      loadImage={loadImage}
       t={t}
     />
   )

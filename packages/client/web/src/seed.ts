@@ -15,6 +15,7 @@ import * as ClientStore from '@deepseek-ai/dsh-client-store'
 import * as UiSlots from '@deepseek-ai/dsh-client-ui-slots'
 import * as UiPrimitives from '@deepseek-ai/dsh-client-ui-primitives'
 import * as Zod from 'zod'
+import * as UiDockkit from '@deepseek-ai/dsh-client-ui-dockkit'
 import type { PlatformModule } from './platform.ts'
 
 /**
@@ -35,5 +36,6 @@ export function getStaticModules(): Record<string, unknown> {
     '@deepseek-ai/dsh-client-ui-slots': UiSlots,
     '@deepseek-ai/dsh-client-ui-primitives': UiPrimitives,
     'zod': Zod,
+    '@deepseek-ai/dsh-client-ui-dockkit': UiDockkit,
   } satisfies Record<PlatformModule, unknown>
 }

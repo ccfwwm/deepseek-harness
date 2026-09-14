@@ -34,6 +34,8 @@ Mount the package before a consumer that injects `fileUpload`, then call `ctx.fi
 
 The package has no Cordis configuration fields. A `Blob` uses XMLHttpRequest inside a dedicated Worker so the service can report browser upload progress, including the total when the browser provides it. A `ReadableStream` transfers to that Worker and feeds Fetch incrementally; progress reports consumed bytes without a total. An `AbortSignal` terminates the dedicated Worker or reaches a page-owned carrier. Exact bytes and fixture Blob inputs use the generated Remote.
 
+To retry a submitted file, call `ctx.remote.fileUploads.restage(sessionId, attachmentId)` and submit its new receipt. The Host permits only files referenced by user messages in that Session's current derived history. It reuses the stored bytes and rejects foreign or unreferenced files.
+
 -----
 
 <a id="understand-the-implementation"></a>

@@ -1,5 +1,7 @@
 /** Installed PDF.js parses and draws a deterministic fixture using a real worker thread. */
 import { Worker as Thread, type Transferable } from 'node:worker_threads'
+import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { getDocument, PDFWorker } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { renderPdfPage } from '../src/client/pdf/document.ts'
@@ -8,7 +10,7 @@ import { pdfFixture } from './pdf-fixture.ts'
 describe('PDF.js real-library smoke', () => {
   it('parses two pages and draws their distinct vector colors in a real worker', async () => {
     const thread = new Thread(new URL('./pdf-worker.fixture.mjs', import.meta.url), {
-      workerData: { workerUrl: import.meta.resolve('pdfjs-dist/legacy/build/pdf.worker.mjs') },
+      workerData: { workerUrl: pathToFileURL(createRequire(import.meta.url).resolve('pdfjs-dist/legacy/build/pdf.worker.mjs')).href },
     })
     const ready = Promise.withResolvers<undefined>()
     const failed = Promise.withResolvers<never>()

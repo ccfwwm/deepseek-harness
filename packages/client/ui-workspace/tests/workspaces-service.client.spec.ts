@@ -244,11 +244,11 @@ describe('UiWorkspaceService', () => {
     })
     const created = Promise.withResolvers<SessionId>()
     b.sessions.create.mockReturnValue(created.promise)
-    const opening = vi.spyOn(b.uiWorkspace, 'openWorkspace')
     b.uiWorkspace.startSession(wid('alpha'))
     b.layout.selectPanel('panel-a' as MainPanelId)
     created.resolve(sid('late'))
-    await opening.mock.results[0]!.value
+    await created.promise
+    await flush()
     expect(b.sessions.open).not.toHaveBeenCalled()
     expect(b.selectPanel).toHaveBeenCalledExactlyOnceWith('panel-a')
     expect(b.sessions.list.getSnapshot().current).toBe(sid('current'))
