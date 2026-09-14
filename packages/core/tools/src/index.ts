@@ -212,6 +212,12 @@ export interface ToolOutputDefinition {
 
 /** A registered tool: its schema plus the execution function. */
 export interface ToolDefinition extends ToolSchema {
+  /**
+   * Whether this definition is sent to the model. `false` keeps a Host-only
+   * routing target registered for composite tools without paying prompt/schema
+   * cost or letting the model select the transport detail directly.
+   */
+  readonly modelVisible?: boolean
   /** Mandatory canonical output declaration. */
   readonly output: ToolOutputDefinition
   /**
@@ -973,8 +979,10 @@ export class ToolRuntime extends Service {
     const view = this.view(scope)
     const mode = this.modeFor(scope)
     if (mode === 'native') {
-      const schemas = [...view.visible.values()].map(definition => this.schemaOf(definition, false))
-      return { schemas, knownNames: [...view.knownNames] }
+      const schemas = [...view.visible.values()]
+        .filter(definition => definition.modelVisible !== false)
+        .map(definition => this.schemaOf(definition, false))
+      return { schemas, knownNames: schemas.map(schema => schema.name) }
     }
     // Validate the runtime language BEFORE projecting schemas: schemaOf reads
     // run_code's language-aware description/parameters getters, whose own
@@ -982,7 +990,9 @@ export class ToolRuntime extends Service {
     // renderer-table rejection the canonical assembly-time error for a
     // language with no SDK renderer.
     this.requireCodeRuntime(mode)
-    const schemas = [...view.visible.values()].map(definition => this.schemaOf(definition, false))
+    const schemas = [...view.visible.values()]
+      .filter(definition => definition.modelVisible !== false)
+      .map(definition => this.schemaOf(definition, false))
     if (mode === 'ptc') {
       return {
         schemas: schemas.filter(schema => schema.name === RUN_CODE_NAME),
@@ -1038,6 +1048,9 @@ export class ToolRuntime extends Service {
     if (timeoutMs !== undefined
       && (!Number.isFinite(timeoutMs) || timeoutMs <= 0)) {
       throw new TypeError(`tool "${name}" timeoutMs must be a positive finite number`)
+    }
+    if (definition.modelVisible !== undefined && typeof definition.modelVisible !== 'boolean') {
+      throw new TypeError(`tool "${name}" modelVisible must be a boolean when provided`)
     }
     // Reserved unconditionally: any agent may select a code mode for itself,
     // so a name free to take under the deployment default would become a
@@ -1223,13 +1236,15 @@ export class ToolRuntime extends Service {
    * @returns one deep-cloned schema per visible tool.
    */
   schemas(scope?: ScopeKey): ToolSchema[] {
-    return [...this.view(scope).visible.values()].map(definition => this.schemaOf(definition, true))
+    return [...this.view(scope).visible.values()]
+      .filter(definition => definition.modelVisible !== false)
+      .map(definition => this.schemaOf(definition, true))
   }
 
   /** Project visible callable tools onto the generated PTC mode SDK contract. */
   private sdkSchemas(scope?: ScopeKey): ToolSdkSchema[] {
     return [...this.view(scope).visible.values()]
-      .filter(definition => definition.name !== RUN_CODE_NAME)
+      .filter(definition => definition.name !== RUN_CODE_NAME && definition.modelVisible !== false)
       .map((definition): ToolSdkSchema => {
         const output = snapshotJsonValue(definition.output.schema)
         /* v8 ignore next -- registration already validated and retained this schema as lossless JSON. */

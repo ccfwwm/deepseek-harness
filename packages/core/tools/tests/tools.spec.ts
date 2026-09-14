@@ -87,6 +87,17 @@ describe('ToolRuntime', () => {
     expect('timeoutMs' in (schema as object)).toBe(false)
   })
 
+  it('keeps Host-only routing tools executable while excluding them from model schemas', async () => {
+    const ctx = await setup()
+    ctx.tools.register({ ...echoTool, name: 'internal-echo', modelVisible: false })
+
+    expect(ctx.tools.get('internal-echo')).toBeDefined()
+    expect(ctx.tools.schemas().map(tool => tool.name)).not.toContain('internal-echo')
+    expect((await ctx.systemPrompt.assemble()).tools.map(tool => tool.name)).not.toContain('internal-echo')
+    await expect(ctx.tools.execute({ signal: testToolSignal, callId: ToolCallId('internal'), name: 'internal-echo', arguments: { text: 'ok' } }))
+      .resolves.toMatchObject({ isError: false, value: 'ok' })
+  })
+
   it('executes a tool and returns its content', async () => {
     const ctx = await setup()
     ctx.tools.register(echoTool)

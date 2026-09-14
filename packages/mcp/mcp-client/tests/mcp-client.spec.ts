@@ -233,6 +233,24 @@ describe('syncTools', () => {
     expect(ctx.tools.get(schema.name)).toBeUndefined()
   })
 
+  it('registers a Host-only MCP route without exposing its schema to the model', async () => {
+    const client = createMockClient([{ name: 'r_files', inputSchema: { type: 'object' } }])
+    await syncTools(client as never, ctx, {
+      ...defaultOpts,
+      serverName: 'rmcp',
+      modelToolFilter: rawName => rawName !== 'r_files',
+    }, new Map())
+
+    expect(ctx.tools.get('mcp__rmcp__r_files')).toBeDefined()
+    expect(ctx.tools.schemas().map(tool => tool.name)).not.toContain('mcp__rmcp__r_files')
+    await ctx.tools.execute({ signal: testToolSignal, callId: ToolCallId('host-files'), name: 'mcp__rmcp__r_files', arguments: { action: 'catalog' } })
+    expect(client.callTool).toHaveBeenCalledWith(
+      { name: 'r_files', arguments: { action: 'catalog' } },
+      undefined,
+      expect.objectContaining({ timeout: defaultOpts.toolCallTimeoutMs }),
+    )
+  })
+
   it('compresses only schema annotations, preserving keyword-named properties and literal objects', async () => {
     const literal = { title: 'Title', description: '  verbatim\n text  ', default: 1, examples: ['example'] }
     const inputSchema = {

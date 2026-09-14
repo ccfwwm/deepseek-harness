@@ -146,6 +146,11 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
       const projected = projectionFilter(config.serverName)
       return (projected === undefined || projected(rawName)) && (enabledTools === undefined || enabledTools.has(rawName))
     },
+    // The resident r_files facade owns local workspace validation, Manifest
+    // downloads, and binary handling. Keep its remote transport target
+    // registered for nested Host dispatch while omitting the duplicate schema
+    // from every model request.
+    modelToolFilter: rawName => !(config.serverName === 'rmcp' && rawName === 'r_files'),
   }
   // The initial sync uses 'throw' when failOnStartupError is configured, so
   // a registration conflict propagates to the startup-await path. Re-syncs

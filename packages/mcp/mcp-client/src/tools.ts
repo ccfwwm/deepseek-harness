@@ -36,6 +36,8 @@ export interface ToolBridgeOptions {
   toolCallTimeoutMs: number
   /** Optional model-facing filter. */
   toolFilter?: ((rawName: string) => boolean) | undefined
+  /** Optional presentation filter for registered Host-only routing targets. */
+  modelToolFilter?: ((rawName: string) => boolean) | undefined
 }
 
 /** Host-resolved route details used by Biomni execution tools. */
@@ -186,6 +188,7 @@ export async function syncTools(
         compactSchema(tool.inputSchema),
         supportedOutputSchema(tool.outputSchema),
         tool.execution?.taskSupport === 'required',
+        opts.modelToolFilter?.(tool.name) ?? true,
         opts,
       ))
     }
@@ -528,6 +531,7 @@ function createDefinition(
   parameters: Record<string, unknown>,
   structuredSchema: JsonSchemaNode | undefined,
   taskRequired: boolean,
+  modelVisible: boolean,
   opts: ToolBridgeOptions,
 ): ToolDefinition {
   const projections = new WeakMap<ToolExecution, PreparedProjection>()
@@ -535,6 +539,14 @@ function createDefinition(
     name: publicName,
     description,
     parameters,
+    modelVisible,
+    isConcurrencySafe: rawName === 'r_files'
+      ? (args: unknown) => {
+        if (args === null || typeof args !== 'object' || Array.isArray(args)) return false
+        const action = (args as { action?: unknown }).action
+        return typeof action === 'string' && /(?:^catalog$|list|read|manifest|resolve|inspect|status)/iu.test(action)
+      }
+      : undefined,
     output: createOutput(rawName, structuredSchema),
     execute: createExecutor(client, ctx, rawName, taskRequired, opts, projections),
     finalizeContent(exec: Readonly<ToolExecution>, result: Readonly<ToolExecutionResult>) {
