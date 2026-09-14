@@ -180,6 +180,16 @@ describe('SettingsRoot trigger', () => {
 })
 
 describe('SettingsPanel chrome seats', () => {
+  it('keeps the modal outside the sidebar trigger subtree', () => {
+    const { view } = mount({ wide: false })
+    openPanel()
+    const dialog = screen.getByRole('dialog')
+    expect(view.container.contains(dialog)).toBe(false)
+    expect(dialog.parentElement?.parentElement).toBe(document.body)
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
   it('names the dialog via aria-labelledby pointing at the header seat node', () => {
     mount()
     openPanel()

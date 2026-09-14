@@ -16,4 +16,6 @@ Skipping type checking hides consumer incompatibilities. Retrying a file by arbi
 
 ## Consequences
 
+Settings renders its modal through a body portal. A nested modal inherits the collapsed sidebar footer's opacity and stacking context, allowing the conversation to cover it. The portal retains React slot ownership while isolating modal painting; tests assert its body parent and removal on close.
+
 Retries preserve authorization and attachment identity without copying file bytes. Explicit request-series boundaries retain their prompt cards. Local tests cover Host requests, file restaging, attachment intake, history navigation, and browser controls.
