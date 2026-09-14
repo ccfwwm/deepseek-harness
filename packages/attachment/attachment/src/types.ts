@@ -31,6 +31,55 @@ export interface ImageAttachmentRef {
   }
 }
 
+/**
+ * Durable, serializable reference to one verbatim stored file. Files are
+ * stored byte-for-byte with no normalization; `attachmentId` is the sha256
+ * digest of exactly those bytes.
+ */
+export interface FileAttachmentRef {
+  /** Optional extraction metadata provided by the deployment file parser. */
+  parser?: string
+  status?: string
+  textChars?: number
+  preview?: string
+  content?: string
+  pageCount?: number
+  sheetCount?: number
+  warning?: string
+
+  /** Opaque content-addressed storage identifier; never a filesystem path or bearer URL. */
+  attachmentId: AttachmentId
+  /** Sanitized display filename, also the stored object's leaf name. */
+  name: string
+  /** Exact byte length. */
+  bytes: number
+}
+
+/** Base64-encoded file upload accompanying one wire request. */
+export interface EncodedFileAttachment {
+  /** Canonical base64 encoding of the file bytes. */
+  data: string
+  /** Optional display name; it is never interpreted as a path. */
+  name?: string
+}
+
+/** Request to durably commit one file verbatim. */
+export interface SaveFileAttachment {
+  data: Uint8Array
+  /** Optional browser/provider display name; it is never interpreted as a path. */
+  name?: string
+}
+
+/** Request to durably commit one file from bounded byte chunks. */
+export interface SaveFileStreamAttachment {
+  /** Exact file bytes in order; providers must not retain the complete sequence in memory. */
+  data: AsyncIterable<Uint8Array>
+  /** Optional cancellation for source reads and storage writes. */
+  signal?: AbortSignal
+  /** Optional browser/provider display name; it is never interpreted as a path. */
+  name?: string
+}
+
 /** Deployment-resolved limits used by upload admission and request buffering. */
 export interface ImageAttachmentLimits {
   maxImageBytes: number
@@ -55,7 +104,7 @@ export interface EncodedImageAttachment {
 /**
  * Browser-submitted prompt content accepted by Host prompt endpoints; the
  * accepting Host promotes image parts to durable references through
- * `admitPromptContent` before any message is created, so a wire caller can
+ * `ctx.attachments.admitPromptContent()` before any message is created, so a wire caller can
  * never cite an attachment it did not upload.
  */
 export type PromptContentPart =
@@ -66,29 +115,17 @@ export type PromptContentPart =
     readonly data: string
     readonly name?: string
   }
-  | {
-    readonly type: 'file'
-    readonly attachmentId: string
-    readonly name: string
-    readonly mediaType: string
-    readonly bytes: number
-    readonly sha256: string
-    readonly storageStatus: 'stored'
-    readonly parser?: string
-    readonly status?: string
-    readonly textChars?: number
-    readonly preview?: string
-    /** Complete extracted text, kept separate from the original bytes. */
-    readonly content?: string
-    readonly pageCount?: number
-    readonly sheetCount?: number
-    readonly warning?: string
-  }
 
-/** Host-admitted prompt content with each uploaded image replaced by its durable reference. */
+/** Host prompt content whose file receipts are resolved and whose image bytes await admission. */
+export type AttachmentAdmissionPart =
+  | PromptContentPart
+  | { readonly type: 'file'; readonly attachment: FileAttachmentRef }
+
+/** Host-admitted prompt content with every attachment represented by its durable reference. */
 export type AdmittedPromptContentPart =
   | { readonly type: 'text'; readonly text: string }
   | { readonly type: 'image'; readonly attachment: ImageAttachmentRef }
+  | { readonly type: 'file'; readonly attachment: FileAttachmentRef }
 
 /** Request to validate and durably commit one image. */
 export interface SaveImageAttachment {

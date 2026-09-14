@@ -235,7 +235,9 @@ export class PiAiAdapter extends LlmAdapter {
     const profiles = this.config.profiles()
     if (this.snapshot?.profiles === profiles) return this.snapshot
     const models: MutableModels = createModels(this.config.auth)
-    for (const profile of profiles.values()) models.setProvider(profile.piProvider)
+    for (const profile of profiles.values()) {
+      if (profile.piProvider !== undefined) models.setProvider(profile.piProvider)
+    }
     this.snapshot = { profiles, models }
     return this.snapshot
   }
@@ -251,7 +253,10 @@ export class PiAiAdapter extends LlmAdapter {
 
   /** The configured descriptor for one exact route/model pair within one snapshot. */
   private modelOf(snapshot: PiAiSnapshot, provider: string, model: string): Model<Api> {
-    this.profileOf(snapshot, provider)
+    const profile = this.profileOf(snapshot, provider)
+    const failure = profile.modelErrors.get(model)
+      ?? (profile.piProvider === undefined ? profile.catalogError : undefined)
+    if (failure !== undefined) throw new LlmError(failure, 'INVALID_CONFIG')
     const resolved = snapshot.models.getModel(provider, model)
     if (resolved === undefined) {
       throw new LlmError(`pi-ai provider "${provider}" has no configured model "${model}"`, 'UNKNOWN_MODEL')
@@ -443,7 +448,10 @@ export class PiAiAdapter extends LlmAdapter {
         models: probeModel,
         namesCredential: probeProfile.apiKeyEnv !== undefined,
       })
-      for (const entry of candidate.profiles.values()) probeModels.setProvider(entry.provider === provider ? rebuilt : entry.piProvider)
+      for (const entry of candidate.profiles.values()) {
+        const selected = entry.provider === provider ? rebuilt : entry.piProvider
+        if (selected !== undefined) probeModels.setProvider(selected)
+      }
       const probeSnapshot: PiAiSnapshot = { profiles: candidate.profiles, models: probeModels }
       let finished = false
       const options = {
@@ -496,7 +504,7 @@ export class PiAiAdapter extends LlmAdapter {
     const profiles = new Map(snapshot.profiles)
     profiles.set(provider, candidateProfile)
     const candidateModels: MutableModels = createModels(this.config.auth)
-    for (const entry of profiles.values()) candidateModels.setProvider(entry.piProvider)
+    for (const entry of profiles.values()) if (entry.piProvider !== undefined) candidateModels.setProvider(entry.piProvider)
     return { profiles, models: candidateModels }
   }
 
@@ -564,7 +572,7 @@ export class PiAiAdapter extends LlmAdapter {
         // Harness-owned and therefore win collisions.
         headers: requestHeaders(profile.headers),
       })
-      const iterator = toStreamChunks(events, model.contextWindow, options.signal)[Symbol.asyncIterator]()
+      const iterator = toStreamChunks(events, model.contextWindow, options.signal, model.id)[Symbol.asyncIterator]()
       let exhausted = false
       try {
         while (true) {

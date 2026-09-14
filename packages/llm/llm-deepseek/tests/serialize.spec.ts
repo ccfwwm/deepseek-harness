@@ -1,3 +1,4 @@
+import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import { describe, expect, it, vi } from 'vitest'
 import { AttachmentId, ImageVariantId } from '@deepseek-ai/dsh-attachment'
 import type { ImageAttachmentRef, ImageMediaType, RequestImageAttachment } from '@deepseek-ai/dsh-attachment'
@@ -84,8 +85,8 @@ describe('serializeMessages', () => {
       content: [{
         type: 'file',
         attachment: {
-          attachmentId: 'file-sha256:doc', name: '说明.docx', mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-          bytes: 10, sha256: 'doc', parser: 'docx', status: 'parsed', textChars: 7, preview: '附件正文内容',
+          attachmentId: AttachmentId('file-sha256:doc'), name: '说明.docx',
+          bytes: 10, parser: 'docx', status: 'parsed', textChars: 7, preview: '附件正文内容',
         },
       }],
       source: { kind: 'plugin', plugin: 'test' },
@@ -261,6 +262,23 @@ describe('serializeRequest', () => {
     const wire = serializeRequest(request({ messages: history, system: 'be helpful' }))
     expect(wire.messages[0]).toEqual({ role: 'system', content: 'be helpful' })
     expect(wire.messages[1]).toEqual({ role: 'user', content: 'hi' })
+  })
+
+  it('serializes a leading system message byte-for-byte like the same prompt passed as options.system', async () => {
+    const systemMessage = createMessage({
+      role: 'system',
+      content: [{ type: 'text', text: 'be helpful' }],
+      source: { kind: 'plugin', plugin: '@deepseek-ai/dsh-system-prompt' },
+    })
+    const tools = [{ name: 'f', description: 'F', parameters: { type: 'object', properties: {} } }]
+    const fromHistory = serializeRequest(request({ messages: [systemMessage, ...history], tools }))
+    const fromOption = serializeRequest(request({ messages: history, system: 'be helpful', tools }))
+    expect(fromHistory.messages[0]).toEqual({ role: 'system', content: 'be helpful' })
+    expect(JSON.stringify(fromHistory)).toBe(JSON.stringify(fromOption))
+    const images = imageOptions([])
+    const imageHistory = await serializeRequestWithImages(request({ messages: [systemMessage, ...history], tools }), images)
+    const imageOption = await serializeRequestWithImages(request({ messages: history, system: 'be helpful', tools }), images)
+    expect(JSON.stringify(imageHistory)).toBe(JSON.stringify(imageOption))
   })
 
   it('maps sampling params and stop sequences', () => {

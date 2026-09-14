@@ -52,9 +52,9 @@ export interface ReconnectConfig {
 /** Defaults shared by the Config schema and {@link resolveReconnectPolicy}. */
 export const RECONNECT_DEFAULTS: Required<ReconnectConfig> = Object.freeze({
   enabled: true,
-  initialDelayMs: 500,
-  maxDelayMs: 30_000,
-  maxAttempts: 10,
+  initialDelayMs: 5_000,
+  maxDelayMs: 60_000,
+  maxAttempts: 2,
 })
 
 // The SDK's stdio transport owns two two-second termination grace periods.
@@ -306,7 +306,7 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
       },
     )
     try {
-      await generation.connect(createTransport(config))
+      await generation.connect(createTransport(config), { timeout: 120_000 })
       if (hasClosed()) {
         attemptSettled = true
         generationDown(generation)

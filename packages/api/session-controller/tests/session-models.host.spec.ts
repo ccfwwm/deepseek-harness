@@ -1,3 +1,4 @@
+import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 /**
  * Session Controller model-directory and selection behavior: dynamic provider grouping,
  * provider-local catalog failures, logged-selection restoration without stale
@@ -98,7 +99,7 @@ async function harness(logged?: {
 }> {
   const ctx = new Context()
   await ctx.plugin(SessionStore)
-  await ctx.plugin(SystemPrompt, { persona: '' })
+  await ctx.plugin(SystemPrompt, { personaPrefix: '' })
   await ctx.plugin(LlmRuntime)
   await ctx.plugin(AgentRegistry)
   ctx.llm.registerAdapter(['deepseek-official'], new CatalogAdapter('DeepSeek', [
@@ -282,50 +283,23 @@ describe('Web session model selection', () => {
     await ctx.fiber.dispose()
   })
 
-  it('preserves parsed file metadata and content in the admitted user message', async () => {
+  it('preserves Host parser metadata after resolving a session-bound file receipt', async () => {
     const { ctx, agent, sessionId } = await harness()
     const followup = vi.fn()
     Object.assign(agent, { followup })
     const remote = createSessionTestRemote(ctx, {
-      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
-      cwd: '/tmp',
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }), cwd: '/tmp',
     })
-
-    const result = await remote.prompt(promptRequest({
-      sessionId,
-      mode: 'queue' as const,
-      content: [{
-        type: 'file' as const,
-        attachmentId: 'file-sha256:parsed',
-        name: 'paper.pdf',
-        mediaType: 'application/pdf',
-        bytes: 10,
-        sha256: 'parsed',
-        storageStatus: 'stored' as const,
-        parser: 'pdfjs',
-        status: 'parsed',
-        textChars: 22,
-        preview: 'card preview',
-        content: 'complete parsed document body',
-      }],
-    }))
+    const file = { attachmentId: AttachmentId('sha256:parsed'), name: 'paper.pdf', bytes: 10 }
+    vi.spyOn(ctx.fileUploads, 'resolve').mockReturnValue(file)
+    const enriched = { ...file, parser: 'pdfjs', status: 'parsed', textChars: 29, preview: 'card preview', content: 'complete parsed document body' }
+    const enrichNative = vi.fn().mockResolvedValue(enriched)
+    ctx.provide('zerowallFiles', { enrichNative } as never)
+    const result = await remote.prompt(promptRequest({ sessionId, mode: 'queue', content: [{ type: 'file', receiptId: 'test-receipt' as import('../src/types.ts').PromptContentPart & never }] }))
     expect(result.ok).toBe(true)
-    expect((followup.mock.calls[0]?.[0] as UserMessage).content).toEqual([{
-      type: 'file',
-      attachment: {
-        attachmentId: 'file-sha256:parsed',
-        name: 'paper.pdf',
-        mediaType: 'application/pdf',
-        bytes: 10,
-        sha256: 'parsed',
-        storageStatus: 'stored',
-        parser: 'pdfjs',
-        status: 'parsed',
-        textChars: 22,
-        preview: 'card preview',
-        content: 'complete parsed document body',
-      },
-    }])
+    expect(ctx.fileUploads.resolve).toHaveBeenCalledWith(agent, 'test-receipt')
+    expect(enrichNative).toHaveBeenCalledWith(String(agent.session.id), file)
+    expect((followup.mock.calls[0]?.[0] as UserMessage).content).toEqual([{ type: 'file', attachment: enriched }])
     await ctx.fiber.dispose()
   })
 
@@ -351,7 +325,7 @@ describe('Web session model selection', () => {
       id: 'summary', role: 'user', source: { kind: 'plugin', plugin: 'compact' },
       content: [{ type: 'text', text: 'image summarized' }],
     } as never, {
-      surfaceOp: { op: 'replace', start: imageEvent.seq, end: imageEvent.seq },
+      surfaceOp: { op: 'replace', startSeq: imageEvent.seq, endSeq: imageEvent.seq },
       sourceEventSeqs: [imageEvent.seq],
     })
     ;(agent.inbox.nextTurn as UserMessage[]).push({
@@ -978,7 +952,7 @@ describe('Web session model selection', () => {
     const savedRef = {
       attachmentId: 'saved-image', mediaType: 'image/png' as const, bytes: 1, width: 1, height: 1,
     }
-    ctx.provide('attachments', {
+    ctx.provide('attachments', Object.setPrototypeOf({
       saveImages: () => {
         if (saveMode === 'error') return Promise.reject(new Error('image store offline'))
         if (saveMode === 'remote') {
@@ -986,7 +960,7 @@ describe('Web session model selection', () => {
         }
         return Promise.resolve([savedRef])
       },
-    } as never)
+    }, AttachmentStore.prototype) as never)
     const followup = vi.fn()
     Object.assign(agent, { followup })
     const remote = createSessionTestRemote(ctx, {

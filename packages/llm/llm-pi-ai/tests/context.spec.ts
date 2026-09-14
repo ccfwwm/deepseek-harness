@@ -1,3 +1,4 @@
+import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import { describe, expect, it, vi } from 'vitest'
 import { AttachmentId, ImageVariantId } from '@deepseek-ai/dsh-attachment'
 import type {
@@ -79,8 +80,8 @@ describe('pi-ai request context conversion', () => {
     const context = toPiContext(request([user([{
       type: 'file',
       attachment: {
-        attachmentId: 'file-sha256:doc', name: '说明.docx', mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        bytes: 10, sha256: 'doc', parser: 'docx', status: 'parsed', textChars: 7, preview: '附件正文内容',
+        attachmentId: AttachmentId('file-sha256:doc'), name: '说明.docx',
+        bytes: 10, parser: 'docx', status: 'parsed', textChars: 7, preview: '附件正文内容',
       },
     }])]))
     expect(context.messages).toEqual([{
@@ -95,8 +96,8 @@ describe('pi-ai request context conversion', () => {
     const context = toPiContext(request([user([{
       type: 'file',
       attachment: {
-        attachmentId: 'file-sha256:complete', name: 'paper.pdf', mediaType: 'application/pdf',
-        bytes: 10, sha256: 'complete', parser: 'pdfjs', status: 'parsed', textChars: 18,
+        attachmentId: AttachmentId('file-sha256:complete'), name: 'paper.pdf',
+        bytes: 10, parser: 'pdfjs', status: 'parsed', textChars: 18,
         preview: 'card preview', content: 'complete parsed document body',
       },
     }])]))
@@ -494,4 +495,79 @@ describe('pi-ai request context conversion', () => {
     )).toThrow(/assistant image output/)
   })
 
+})
+
+describe('pi-ai system prompt source', () => {
+  const base = { provider: 'openai', model: 'gpt-4.1' }
+  const leading = history('system', [{ type: 'text', text: 'lead ' }, { type: 'text', text: 'rule' }])
+  const question = user([{ type: 'text', text: 'hi' }])
+
+  it.each<{ label: string; content: ContentBlock[] }>([
+    { label: 'image-only', content: [{ type: 'image', attachment: ref }] },
+    { label: 'text and image', content: [{ type: 'text', text: 'rule' }, { type: 'image', attachment: ref }] },
+    {
+      label: 'nested image',
+      content: [{
+        type: 'tool-result',
+        toolCallId: ToolCallId('system-image'),
+        content: [{ type: 'image', attachment: ref }],
+      }],
+    },
+  ])('rejects a leading system $label on both conversion paths', async ({ content }) => {
+    const options: GenerateOptions = { ...base, messages: [history('system', content), question] }
+    const error = {
+      code: 'UNSUPPORTED_CONTENT',
+      message: 'pi-ai cannot represent an image in an in-history system message',
+    }
+    expect(() => toPiContext(options)).toThrow(error.message)
+    const readImageRequest = vi.fn()
+    await expect(toPiContext(options, imageContext(projectionStore(readImageRequest)))).rejects.toMatchObject(error)
+    expect(readImageRequest).not.toHaveBeenCalled()
+  })
+
+  it('maps a leading system message to systemPrompt on both conversion paths', async () => {
+    const options: GenerateOptions = { ...base, messages: [leading, question] }
+    const expected = {
+      systemPrompt: 'lead rule',
+      messages: [{ role: 'user', content: 'hi', timestamp: 0 }],
+    }
+    expect(toPiContext(options)).toEqual(expected)
+    await expect(toPiContext(options, imageContext(attachments))).resolves.toEqual(expected)
+    const fromOption: GenerateOptions = { ...base, system: 'lead rule', messages: [question] }
+    expect(toPiContext(options)).toEqual(toPiContext(fromOption))
+    expect(await toPiContext(options, imageContext(attachments)))
+      .toEqual(await toPiContext(fromOption, imageContext(attachments)))
+  })
+
+  it('sends no systemPrompt for an empty leading system message on both conversion paths', async () => {
+    const options: GenerateOptions = { ...base, messages: [history('system', []), question] }
+    const expected = { messages: [{ role: 'user', content: 'hi', timestamp: 0 }] }
+    expect(toPiContext(options)).toEqual(expected)
+    await expect(toPiContext(options, imageContext(attachments))).resolves.toEqual(expected)
+  })
+
+  it('folds a non-leading system message into a user message on both conversion paths', async () => {
+    const options: GenerateOptions = { ...base, messages: [question, leading] }
+    const expected = {
+      messages: [
+        { role: 'user', content: 'hi', timestamp: 0 },
+        { role: 'user', content: 'lead rule', timestamp: 0 },
+      ],
+    }
+    expect(toPiContext(options)).toEqual(expected)
+    await expect(toPiContext(options, imageContext(attachments))).resolves.toEqual(expected)
+  })
+
+  it('lets options.system win over a leading system message, which then folds, on both conversion paths', async () => {
+    const options: GenerateOptions = { ...base, system: 'direct', messages: [leading, question] }
+    const expected = {
+      systemPrompt: 'direct',
+      messages: [
+        { role: 'user', content: 'lead rule', timestamp: 0 },
+        { role: 'user', content: 'hi', timestamp: 0 },
+      ],
+    }
+    expect(toPiContext(options)).toEqual(expected)
+    await expect(toPiContext(options, imageContext(attachments))).resolves.toEqual(expected)
+  })
 })
