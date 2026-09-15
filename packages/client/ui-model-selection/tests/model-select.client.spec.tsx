@@ -54,6 +54,25 @@ function state(overrides: Partial<ModelDirectoryState> = {}): ModelDirectoryStat
 afterEach(cleanup)
 
 describe('ModelSelect reasoning effort', () => {
+  it('retries an initial catalog error when opening the menu', () => {
+    const directory = createSnapshotStore(state({ current: null, groups: [], status: 'error', error: 'Timed out' }))
+    const load = vi.fn()
+    render(<ModelSelect locked={false} available directory={directory} load={load} select={vi.fn()} t={t} />)
+    fireEvent.click(screen.getByRole('button', { name: '选择模型' }))
+    expect(load).toHaveBeenCalledOnce()
+    expect(screen.queryByText('正在加载模型…')).toBeNull()
+  })
+
+  it('refreshes metadata when retrying a cached provider failure', () => {
+    const directory = createSnapshotStore(state({ failures: [{ id: 'offline', name: 'Offline', message: 'Timed out' }] }))
+    const sync = vi.fn().mockResolvedValue(undefined)
+    render(<ModelSelect locked={false} available directory={directory} load={vi.fn()} sync={sync} select={vi.fn()} t={t} />)
+    fireEvent.click(screen.getByRole('button', { name: /选择模型，当前/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /模型/ }))
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    expect(sync).toHaveBeenCalledOnce()
+  })
+
   it('renders effort names without descriptions and submits the effort as part of the session selection', async () => {
     const directory = createSnapshotStore<ModelDirectoryState>(state())
     const select = vi.fn(async (selection: ModelSelection) => {
