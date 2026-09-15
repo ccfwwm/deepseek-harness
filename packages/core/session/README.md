@@ -11,8 +11,6 @@ English | [中文](README.zh.md)
 
 `dsh-session` records every model-visible fact in an append-only session log and derives model history from that record. Consumers can inspect, replay, fork, and flush sessions while preserving historical events; compaction hides superseded entries from the active conversation without deleting them. Sessions remain in memory unless a persistence backend is added, and durability checkpoints wait for configured backends. Choose this package wherever an agent needs a reconstructable session record; it does not call models.
 
-The ZeroWall build retains `zerowall/capabilities/selection` as log-only historical metadata after removing the capability-menu plugin. Reads preserve its payload and sequence without restoring its tool policy or adding model context. The generated event catalog carries this compatibility into bundled persistence readers; runtime mutation of the exported set cannot update an inlined copy.
-
 ## Table of Contents
 
 - [Use this package](#use-this-package)
@@ -30,6 +28,8 @@ The ZeroWall build retains `zerowall/capabilities/selection` as log-only histori
 Mount `dsh-session` wherever a session must exist. It creates and holds event-sourced `Session` instances in memory; durable storage is layered on by a persistence plugin that subscribes to the `session/event` feed.
 
 ### Create and inspect sessions
+
+The ZeroWall build retains `zerowall/capabilities/selection` as log-only historical metadata after removing the capability-menu plugin. Reads preserve its payload and sequence without restoring its tool policy or adding model context. The generated event catalog carries this compatibility into bundled persistence readers; runtime mutation of the exported set cannot update an inlined copy.
 
 `ctx.sessions.create()` builds a live session bound to the calling fiber; `get(id)` and `list()` find sessions, and `fork()` creates a child session from a stable prefix of a live one.
 

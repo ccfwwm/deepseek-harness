@@ -1148,3 +1148,22 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 ```
 
 来源：[`packages/web/web-search-deepseek/src/provider.ts:83`](../packages/web/web-search-deepseek/src/provider.ts)
+
+### `zerowall/*`
+
+<a id="zerowallcapabilitiesselection--log-only"></a>
+
+#### `zerowall/capabilities/selection` — log-only
+
+```ts persistence-catalog
+/**
+ * Retired capability-menu selection metadata. Readers preserve the record
+ * without projecting a message or reapplying its tool policy. Continuing
+ * the session uses the currently configured tools and MCP policy.
+ */
+'zerowall/capabilities/selection': { tools: string[]; disabled: string[]; onDemand?: string[] }
+```
+
+此旧元数据保留在日志中，不恢复能力管理工具策略，也不生成模型消息。继续会话采用当前配置。
+
+来源：[`packages/core/session/src/legacy-zerowall.ts:9`](../packages/core/session/src/legacy-zerowall.ts)

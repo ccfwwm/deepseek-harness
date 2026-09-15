@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-15-zerowall-history-admission.md
+2026-09-15-zerowall-history-admission.md: efa88eb8d3a05f7ba8c5ef682f4f6fde50916a14
+2026-09-15-zerowall-history-admission.zh.md: 69245ee3bd81f45b8adfb700038692417d238397
