@@ -184,7 +184,7 @@ async function bench(locale: 'zh' | 'en' = 'zh') {
     seat: () => seats.get('conversation.input.model')!,
     hostCurrent: () => selected,
     setHostCurrent: (selection: ModelSelection) => { defaultSelection = selection },
-    setProjected: (id: SessionId, value: ModelSelectionProjection) => { projections.get(id)?.set(value) },
+    setProjected: (id: SessionId, value: ModelSelectionProjection | undefined) => { projections.get(id)?.set(value) },
     address: (id: SessionId) => { addressed.add(id) },
     setRoutable: (next: boolean) => { routable = next },
     rejectNextSelection: () => { rejectNextSelection = true },
@@ -343,6 +343,24 @@ describe('ui-model-selection dual entry', () => {
     expect(b.modelRequests).toContainEqual({ check: true, refresh: true, background: true })
   })
 
+  it('shows catalog models before a cold session projection and adopts its later selection', async () => {
+    const b = await bench()
+    b.mint('cold')
+    b.setProjected(sid('cold'), undefined)
+    const face = b.seat().inject!(sid('cold'))
+    face.load()
+    await vi.waitFor(() => {
+      expect(face.directory.getSnapshot()).toMatchObject({
+        status: 'ready', current: { model: 'deepseek-v4-flash' },
+      })
+      expect(face.directory.getSnapshot().groups.length).toBeGreaterThan(0)
+    })
+    b.setProjected(sid('cold'), {
+      lastUsed: null, next: { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+    })
+    expect(face.directory.getSnapshot().current?.model).toBe('deepseek-v4-pro')
+  })
+
   it('keeps the durable projected selection while the eager catalog reconnects', async () => {
     const b = await bench()
     b.mint('s1')
@@ -415,7 +433,7 @@ describe('ui-model-selection dual entry', () => {
     b.remote.emit('settings/document-updated', ['llm-deepseek', 1])
     await Promise.resolve()
     await Promise.resolve()
-    expect(b.blockOf('s1')?.reason).toBe(zh['blocked.composer'])
+    await vi.waitFor(() => { expect(b.blockOf('s1')?.reason).toBe(zh['blocked.composer']) })
     await vi.waitFor(() => { expect(b.calls.models).toBeGreaterThanOrEqual(3) })
 
     // Recovering clears it without a reload of the surface.
@@ -423,7 +441,7 @@ describe('ui-model-selection dual entry', () => {
     b.remote.emit('llm/adapters-updated', [])
     await Promise.resolve()
     await Promise.resolve()
-    expect(b.blockOf('s1')).toBeUndefined()
+    await vi.waitFor(() => { expect(b.blockOf('s1')).toBeUndefined() })
     await vi.waitFor(() => { expect(b.calls.models).toBeGreaterThanOrEqual(4) })
   })
 

@@ -72,6 +72,8 @@ declare module '@deepseek-ai/cordis' {
 export interface Config {
   /** Override platform desktop-opener detection. */
   readonly nativeOpen?: boolean
+  /** Per-provider model discovery deadline in milliseconds. */
+  readonly modelCatalogTimeoutMs?: number
 }
 
 /** Host integrations replaceable by direct unit tests. */
@@ -101,6 +103,7 @@ export class SessionController extends TypertRemoteService {
 
   static Config: z<Config> = z.object({
     nativeOpen: z.boolean(),
+    modelCatalogTimeoutMs: z.natural().min(1).max(120_000).default(15_000),
   })
 
   private readonly agents: ApiSessionAgentController
@@ -114,6 +117,7 @@ export class SessionController extends TypertRemoteService {
   private readonly promotions = new Set<Promise<void>>()
   /** One low-resource automatic probe per Host process, shared by every browser/reconnect. */
   private startupModelProbe: Promise<ModelCatalog> | undefined
+  private readonly modelCatalogTimeoutMs: number
 
   /**
    * @param ctx - Host context containing the Session capability assembly.
@@ -122,6 +126,7 @@ export class SessionController extends TypertRemoteService {
    */
   constructor(ctx: Context, config: Config, internals: SessionControllerInternals = {}) {
     super(ctx, 'sessionController', { namespace: 'session' })
+    this.modelCatalogTimeoutMs = config.modelCatalogTimeoutMs ?? 15_000
     installModelSelectionProjection(ctx)
     this.agents = new ApiSessionAgentController(ctx)
     this.commands = new SessionCommandController(ctx, this.agents, undefined)
@@ -280,14 +285,15 @@ export class SessionController extends TypertRemoteService {
     readonly provider?: string
     readonly model?: string
   }): Promise<ModelCatalog> {
-    if (request?.background !== true) return buildModelCatalog(this.ctx, undefined, request)
+    const metadataOptions = { metadataTimeoutMs: this.modelCatalogTimeoutMs }
+    if (request?.background !== true) return buildModelCatalog(this.ctx, undefined, { ...request, ...metadataOptions })
     if (this.startupModelProbe !== undefined) {
       // A later browser or reconnect receives the current metadata plus the
       // persisted health produced by the first probe. It never starts a new
       // inference fan-out, even if provider metadata invalidated the catalog.
       return this.startupModelProbe.then(
-        () => buildModelCatalog(this.ctx),
-        () => buildModelCatalog(this.ctx),
+        () => buildModelCatalog(this.ctx, undefined, metadataOptions),
+        () => buildModelCatalog(this.ctx, undefined, metadataOptions),
       )
     }
     const { background: _background, ...options } = request
@@ -296,6 +302,7 @@ export class SessionController extends TypertRemoteService {
     // even when an embedded transport drops those events.
     const operation = buildModelCatalog(this.ctx, undefined, {
       ...options,
+      ...metadataOptions,
       concurrency: BACKGROUND_PROBE_CONCURRENCY,
     })
     this.startupModelProbe = operation

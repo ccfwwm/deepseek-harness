@@ -96,7 +96,7 @@ export interface ChatNodeOwnerProps {
   /** Open or copy an admitted file attachment from a transcript row. */
   openAttachment?: ((attachment: ChatFileAttachment) => void) | undefined
   openParsedAttachment?: ((attachment: ChatFileAttachment) => void) | undefined
-  copyAttachment?: ((attachment: ChatFileAttachment) => void) | undefined
+  copyAttachment?: ((attachment: ChatFileAttachment) => void | Promise<boolean>) | undefined
   fileMentions: (owner: TurnTailOwnerProps) => MarkdownFileMentions | undefined
   /** Re-submit the original user content after a terminal model failure. */
   retryTurn?: (turn: number) => Promise<void>

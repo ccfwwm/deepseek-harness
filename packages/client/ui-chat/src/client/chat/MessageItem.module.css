@@ -29,7 +29,7 @@
 
 .fileCard {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) repeat(3, 36px);
+  grid-template-columns: minmax(0, 1fr) repeat(2, 32px);
   align-items: center;
   min-height: 68px;
   overflow: hidden;
@@ -99,13 +99,20 @@
 }
 
 .fileIcon {
-  display: grid;
+  flex-shrink: 0;
   width: 28px;
-  height: 32px;
-  place-items: center;
+  height: 28px;
+}
+
+.fileContent { display: grid; min-width: 0; gap: 2px; }
+.fileCopyFeedback {
+  grid-column: 1 / -1;
+  padding: 4px 8px;
   border-radius: 6px;
-  color: var(--dsw-alias-state-business-primary);
-  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 12%, transparent);
+  background: var(--dsw-specific-bubble);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  text-align: right;
 }
 
 .fileBody {
@@ -432,13 +439,14 @@
 }
 
 .fileCard {
-  display: inline-flex;
-  flex: 0 0 240px;
+  display: grid;
+  flex: 0 1 320px;
   align-items: center;
-  gap: 10px;
-  width: 240px;
+  gap: 4px;
+  width: 320px;
+  max-width: 100%;
   min-height: 64px;
-  padding: 8px 12px;
+  padding: 4px 8px;
   border: 0.5px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.12));
   border-radius: 16px;
   background: var(--dsw-specific-input-major, transparent);

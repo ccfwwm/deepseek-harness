@@ -191,6 +191,7 @@ export function ModelSelect(
   const show = (): void => {
     setPane('root')
     setOpen(true)
+    if (state.status === 'idle' || state.status === 'error') reload()
   }
 
   const runCatalogAction = (key: string, operation: () => Promise<void>): void => {
@@ -382,13 +383,13 @@ export function ModelSelect(
               {state.error !== null && lastActionRef.current === 'load' && (
                 <div className={css.error}>
                   <span>{t('error.action', { message: state.error })}</span>
-                  <button type="button" className={css.retry} onClick={reload}>{t('retry')}</button>
+                  <button type="button" className={css.retry} onClick={() => { runCatalogAction('sync', syncCatalog) }}>{t('retry')}</button>
                 </div>
               )}
               {state.failures.map(failure => (
                 <div className={css.warning} key={failure.id}>
                   <span>{t('warning.groupLoad', { name: failure.name, message: failure.message })}</span>
-                  <button type="button" className={css.retry} onClick={reload}>{t('retry')}</button>
+                  <button type="button" className={css.retry} onClick={() => { runCatalogAction('sync', syncCatalog) }}>{t('retry')}</button>
                 </div>
               ))}
               <div className={clsx(css.groups, 'scrollable')}>

@@ -48,6 +48,7 @@ The Session object also carries local submission echoes: `session.beginSubmissio
 | Field | Default | Meaning |
 |---|---:|---|
 | `nativeOpen` | platform-detected | Whether Session workspace paths can be handed to a native desktop opener |
+| `modelCatalogTimeoutMs` | 15000 | Per-provider model discovery deadline; failures leave other providers usable |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-api-session-controller) is the exhaustive source for accepted fields and their JSDoc.
 

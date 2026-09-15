@@ -19,6 +19,8 @@ export interface ModelCatalogOptions {
   readonly check?: boolean
   /** Per-probe timeout. */
   readonly timeoutMs?: number
+  /** Maximum wait for each provider's advisory model list. */
+  readonly metadataTimeoutMs?: number
   /** Maximum model probes running at once. */
   readonly concurrency?: number
   /** Bypass the current Host-generation cache for an explicit user refresh. */
@@ -73,7 +75,7 @@ export async function buildModelCatalog(
   if (options.check !== true) {
     if (options.refresh !== true && cache.value !== undefined) return cache.value
     if (cache.metadataInflight !== undefined) return cache.metadataInflight
-    const operation = buildModelCatalogUncached(ctx, defaultSelection, {}).then(value => mergeHealth(value, cache.health))
+    const operation = buildModelCatalogUncached(ctx, defaultSelection, options).then(value => mergeHealth(value, cache.health))
     cache.metadataInflight = operation
     try {
       const value = await operation
@@ -132,7 +134,7 @@ async function checkAllModels(
   const cache = catalogCacheFor(ctx)
   const generation = cache.generation
   const base = options.refresh === true || cache.value === undefined
-    ? mergeHealth(await buildModelCatalogUncached(ctx, defaultSelection, {}), cache.health)
+    ? mergeHealth(await buildModelCatalogUncached(ctx, defaultSelection, { ...options, check: false }), cache.health)
     : cache.value
   if (generation !== cache.generation) return cache.value ?? base
   // Keep the last known row states visible while probes run. The caller owns
@@ -320,14 +322,14 @@ async function buildModelCatalogUncached(
   const providers = ctx.llm.listProviders()
   const catalog = await Promise.all(providers.map(async (provider) => {
     try {
-      const models = await ctx.llm.listModels(provider.id)
+      const models = await probeWithTimeout(() => ctx.llm.listModels(provider.id), options.metadataTimeoutMs ?? 15_000)
       const entries = await mapWithConcurrency(models, options.concurrency ?? DEFAULT_PROBE_CONCURRENCY, async model =>
         modelEntry(ctx, provider.id, model, options))
       return { kind: 'group' as const, group: { id: provider.id, name: provider.name, models: entries } }
     } catch (error) {
       return {
         kind: 'failure' as const,
-        failure: { id: provider.id, name: provider.name, message: safeMessage(error) },
+        failure: { id: provider.id, name: provider.name, message: redact(safeMessage(error)) },
       }
     }
   }))

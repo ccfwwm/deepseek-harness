@@ -48,6 +48,7 @@ Session 对象还承载本地提交回显：`session.beginSubmission` 在调用�
 | 字段 | 默认值 | 含义 |
 |---|---:|---|
 | `nativeOpen` | 平台探测 | 是否能把 Session 工作区路径交给原生桌面打开器 |
+| `modelCatalogTimeoutMs` | 15000 | 各提供方模型发现的等待时限；失败不影响其他提供方 |
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-api-session-controller)是所有受支持字段及其 JSDoc 的完整来源。
 

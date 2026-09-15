@@ -295,8 +295,13 @@ export function ChatView({
   const openParsedAttachment = useCallback((attachment: ChatFileAttachment): void => {
     window.dispatchEvent(new CustomEvent('zerowall:attachment-open', { detail: { ...attachmentDetail(attachment), view: 'parsed' } }))
   }, [attachmentDetail])
-  const copyAttachment = useCallback((attachment: ChatFileAttachment): void => {
-    window.dispatchEvent(new CustomEvent('zerowall:attachment-copy', { detail: attachmentDetail(attachment) }))
+  const copyAttachment = useCallback((attachment: ChatFileAttachment): Promise<boolean> => {
+    return new Promise((resolve) => {
+      const timer = window.setTimeout(() => resolve(false), 45_000)
+      const complete = (success: boolean) => { window.clearTimeout(timer); resolve(success) }
+      const event = new CustomEvent('zerowall:attachment-copy', { cancelable: true, detail: { ...attachmentDetail(attachment), complete } })
+      if (window.dispatchEvent(event)) complete(false)
+    })
   }, [attachmentDetail])
   const runningTurnStart = useMemo(() => runningTurnStartTime(timeline), [timeline])
 

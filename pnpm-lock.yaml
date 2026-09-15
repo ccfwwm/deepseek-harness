@@ -3114,6 +3114,9 @@ importers:
 
   packages/client/ui-model-selection:
     devDependencies:
+      '@deepseek-ai/schemastery':
+        specifier: workspace:^
+        version: link:../../../vendor/schemastery
       '@deepseek-ai/cordis':
         specifier: workspace:^
         version: link:../../../vendor/cordis

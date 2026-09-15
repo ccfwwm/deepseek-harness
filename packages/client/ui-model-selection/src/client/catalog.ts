@@ -27,7 +27,24 @@ export class ModelCatalogDirectory {
   private backgroundInflight: Promise<ModelCatalog> | undefined
 
   /** @param session - Session Remote namespace carrying the Host-generation catalog. */
-  constructor(private readonly session: Pick<ClientRemote['session'], 'modelCatalog'>) {}
+  constructor(
+    private readonly session: Pick<ClientRemote['session'], 'modelCatalog'>,
+    private readonly metadataTimeoutMs = 30_000,
+  ) {}
+
+  private async metadata(request?: { refresh: boolean }): ReturnType<ClientRemote['session']['modelCatalog']> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      return await Promise.race([
+        this.session.modelCatalog(request),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('Model catalog request timed out. Please retry.')), this.metadataTimeoutMs)
+        }),
+      ])
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }
 
   /**
    * Return the current generation's catalog, sharing its one in-flight load.
@@ -45,7 +62,7 @@ export class ModelCatalogDirectory {
     // Load metadata first so the selector becomes usable immediately. Health
     // probes are deliberately scheduled by the owning service and merged one
     // model at a time; a slow provider must not block model switching.
-    const operation = this.session.modelCatalog().then((response) => {
+    const operation = this.metadata().then((response) => {
       if (!response.ok) {
         throw new Error(`${response.error.code}: ${response.error.message}`)
       }
@@ -205,7 +222,7 @@ export class ModelCatalogDirectory {
     const generation = this.generation
     const version = ++this.requestVersion
     if (key !== undefined) this.targetVersions.set(key, version)
-    const operation = this.session.modelCatalog(request).then((response) => {
+    const operation = (request.check === true ? this.session.modelCatalog(request) : this.metadata({ refresh: true })).then((response) => {
       if (!response.ok) throw new Error(`${response.error.code}: ${response.error.message}`)
       const currentTarget = key === undefined || this.targetVersions.get(key) === version
       if (generation === this.generation && currentTarget) {

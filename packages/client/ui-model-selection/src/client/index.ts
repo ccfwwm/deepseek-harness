@@ -14,6 +14,7 @@
 import type { ModelSelection } from '@deepseek-ai/dsh-api-session-controller/types'
 import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import z from '@deepseek-ai/schemastery'
 import type { CommandUiContract, SelectOption } from '@deepseek-ai/dsh-client-ui-commands/client'
 // Type-only: pulls the ui-conversation SlotMap merge (the input.model seat).
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -118,13 +119,16 @@ const NS = 'model'
 /** Required services: the contribution registry, the seat's slot registry, locale, and the service's own faces. */
 export const inject = ['commandUi', 'locale', 'sessions', 'slots', 'remote', 'remote.session']
 
+/** Browser metadata request deadline; inference probes retain their own policy. */
+export const Config = z.object({ metadataTimeoutMs: z.natural().min(1).max(180_000).default(30_000) })
+
 /**
  * Client plugin body: mount ModelDirectoryResolver, register the `model` dictionaries,
  * then register the /model popup contribution and the composer model seat
  * over the service.
  * @param ctx - client root context.
  */
-export function apply(ctx: ClientContext): void {
+export function apply(ctx: ClientContext, config: { metadataTimeoutMs?: number } = {}): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-model-selection: dictionaries')
 
   // Non-slot faces (the command description, the popup option builder) read
@@ -133,7 +137,7 @@ export function apply(ctx: ClientContext): void {
 
   // The composer-block reason is this plugin's own copy, read at raise time so
   // a locale change reaches the next publish.
-  ctx.plugin(ModelDirectoryResolver, { blockReason: () => t('blocked.composer') })
+  ctx.plugin(ModelDirectoryResolver, { blockReason: () => t('blocked.composer'), metadataTimeoutMs: config.metadataTimeoutMs ?? 30_000 })
 
   // Entry 1: the /model popupSelect over the shared directory.
   ctx.inject(['commandUi', 'modelDirectories'], (scope: ClientContext) => {

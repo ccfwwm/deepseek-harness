@@ -16,6 +16,23 @@ function directory(models: () => Promise<unknown>): ModelCatalogDirectory {
 }
 
 describe('ModelCatalogDirectory', () => {
+  it('exposes a timeout and accepts retry without a late request replacing it', async () => {
+    vi.useFakeTimers()
+    try {
+      const pending = Promise.withResolvers<unknown>()
+      const models = vi.fn().mockReturnValueOnce(pending.promise).mockResolvedValue({ ok: true, value: catalog('retry') })
+      const subject = new ModelCatalogDirectory({ modelCatalog: models } as never, 30)
+      const failed = expect(subject.load()).rejects.toThrow('timed out')
+      await vi.advanceTimersByTimeAsync(31)
+      await failed
+      expect(subject.store.getSnapshot().status).toBe('error')
+      await subject.load()
+      pending.resolve({ ok: true, value: catalog('late') })
+      await Promise.resolve()
+      expect(subject.store.getSnapshot().value?.default.model).toBe('retry')
+    } finally { vi.useRealTimers() }
+  })
+
   it('preserves completed health across metadata refresh and retries only unresolved rows', async () => {
     const base = catalog('one')
     const initial: ModelCatalog = { ...base, groups: [{ ...base.groups[0]!, models: [...base.groups[0]!.models, { id: 'two', name: 'two' }] }] }

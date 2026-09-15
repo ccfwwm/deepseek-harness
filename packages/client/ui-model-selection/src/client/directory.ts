@@ -226,7 +226,7 @@ export class ModelDirectory {
       })
       return
     }
-    if (catalog.status !== 'ready' || catalog.value === null || projected === undefined) {
+    if (catalog.status !== 'ready' || catalog.value === null) {
       if (this.resolved) {
         if (catalog.status === 'error') {
           this.store.update((state) => {
@@ -250,7 +250,10 @@ export class ModelDirectory {
       })
       return
     }
-    const current = this.optimisticSelection ?? projected.next ?? catalog.value.default
+    // The Host catalog is session-independent. A fresh/cold session may not
+    // have received its projection yet; show the default and available models
+    // now, then adopt the durable selection when its projection arrives.
+    const current = this.optimisticSelection ?? projected?.next ?? projected?.lastUsed ?? catalog.value.default
     this.resolved = true
     this.store.set({
       current,

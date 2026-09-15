@@ -29,6 +29,8 @@ Mount this plugin alongside `ui-conversation` and the commands package; the comp
 
 ### Model and effort
 
+The shared Host catalog supplies choices before a cold Session's selection projection arrives; the later projection replaces the provisional default. `metadataTimeoutMs` defaults to 30000 and bounds browser metadata requests. Errors remain retryable, and provider failure retries explicitly refresh the catalog. Health probes keep their separate timeout policy.
+
 Models stay grouped by provider. The composer menu shows model and effort names only. The `/model` popup shows provider names and catalog descriptions; it localizes the two built-in DeepSeek descriptions and leaves external provider descriptions verbatim. The popup applies the selected model's default effort; the composer can then choose any advertised effort. An adapter without reasoning metadata leaves the Effort row absent; there is no arbitrary effort input.
 
 ### Unroutable sessions

@@ -2,7 +2,7 @@ import { Fragment, memo, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { PendingSubmission } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { MessageImageSource } from '@deepseek-ai/dsh-client-ui-conversation/client'
-import { Button, IconCopyOutline16, IconCodeOutline16, IconRefreshOutline16, fileExtension, FileTypeIcon, fileSizeText, JsonBlock, projectUserText, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconCopyOutline16, IconCheckOutline16, IconBrowseOutline16, IconRefreshOutline16, fileExtension, FileTypeIcon, fileSizeText, JsonBlock, projectUserText, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChatFileAttachment, ChatNodeOwnerProps, ChatNodeViewProps, ChatViewSlotProps } from '../contract/slots.ts'
 import type { ModelRetryNode, TurnErrorNode, UserMessageNode } from '../contract/snapshot.ts'
 import { CompactionItem } from './CompactionItem.tsx'
@@ -11,6 +11,23 @@ import { MessageIconActions } from './MessageIconActions.tsx'
 import css from './MessageItem.module.css'
 
 type UserImage = Extract<UserMessageNode['content'][number], { type: 'image' }>
+
+function AttachmentCopyButton({ file, copy, label }: { file: ChatFileAttachment; copy: ChatNodeOwnerProps['copyAttachment']; label: ChatViewSlotProps['t'] }) {
+  const [state, setState] = useState<'idle' | 'copying' | 'copied' | 'failed'>('idle')
+  useEffect(() => {
+    if (state !== 'copied' && state !== 'failed') return
+    const timer = window.setTimeout(() => setState('idle'), 4000)
+    return () => window.clearTimeout(timer)
+  }, [state])
+  const text = state === 'idle' ? label('attachment.copy') : state === 'copied' ? label('copied') : state === 'failed' ? label('attachment.copyFailed') : label('attachment.copying')
+  return <>
+    <button type="button" className={css.fileCopy} title={text} aria-label={text} disabled={copy === undefined || state === 'copying'} onClick={() => {
+      setState('copying')
+      void Promise.resolve().then(async () => (await copy?.(file)) === true).then(success => setState(success ? 'copied' : 'failed'), () => setState('failed'))
+    }}>{state === 'copied' ? <IconCheckOutline16 /> : <IconCopyOutline16 />}</button>
+    {state !== 'idle' && <span className={css.fileCopyFeedback} role="status">{text}</span>}
+  </>
+}
 
 type MutableChatFileAttachment = { -readonly [Key in keyof ChatFileAttachment]: ChatFileAttachment[Key] }
 
@@ -329,8 +346,8 @@ export function UserStyleBubble({
                       </span>
                     </span>
                   </button>
-                  <button type="button" className={css.fileOpen} title={t('attachment.parsed')} disabled={openParsedAttachment === undefined} onClick={() => openParsedAttachment?.(attachment.file)}><IconCodeOutline16 /></button>
-                  <button type="button" className={css.fileCopy} title={t('attachment.copy')} aria-label={t('attachment.copy')} disabled={copyAttachment === undefined} onClick={() => copyAttachment?.(attachment.file)}><IconCopyOutline16 /></button>
+                  <button type="button" className={css.fileCopy} title={t('attachment.parsed')} aria-label={t('attachment.parsed')} disabled={openParsedAttachment === undefined} onClick={() => openParsedAttachment?.(attachment.file)}><IconBrowseOutline16 /></button>
+                  <AttachmentCopyButton file={attachment.file} copy={copyAttachment} label={t} />
                   {attachment.file.parseStatus !== undefined && attachment.file.parseStatus !== 'idle' && (
                     <span className={css.fileStatus} role="status">{t(`attachment.${attachment.file.parseStatus}`)}{attachment.file.parseStatus === 'failed' && attachment.file.parseError ? `: ${attachment.file.parseError}` : ''}</span>
                   )}

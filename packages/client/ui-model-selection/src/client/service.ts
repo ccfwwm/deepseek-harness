@@ -49,10 +49,10 @@ export class ModelDirectoryResolver extends Service {
    * @param ctx - owning root context (the service registers itself as `models`).
    * @param config - the bound translator for this plugin's own dictionary.
    */
-  constructor(ctx: Context, config: { blockReason: () => string }) {
+  constructor(ctx: Context, config: { blockReason: () => string; metadataTimeoutMs?: number }) {
     super(ctx, 'modelDirectories')
     this.blockReason = config.blockReason
-    this.catalog = new ModelCatalogDirectory(ctx.remote.session)
+    this.catalog = new ModelCatalogDirectory(ctx.remote.session, config.metadataTimeoutMs)
     let connection: ConnectionHandle | undefined
     let generationDisposer: (() => void) | undefined
     let connectionRetry: ReturnType<typeof setTimeout> | undefined
@@ -78,10 +78,7 @@ export class ModelDirectoryResolver extends Service {
       this.catalog.resetGeneration()
       void this.catalog.load()
         .then(() => { this.scheduleBackgroundCheck() })
-        .catch(() => {
-          this.startupGeneration = undefined
-          this.retryStartupLoad()
-        })
+        .catch(() => { /* A ready Host failure stays visible until explicit retry or reconnect. */ })
       for (const directory of this.live.directories.values()) directory.resetConnected()
     }
     const startGeneration = (): void => {
@@ -145,10 +142,7 @@ export class ModelDirectoryResolver extends Service {
         this.startupGeneration = generation
         void this.catalog.load()
           .then(() => { this.scheduleBackgroundCheck() })
-          .catch(() => {
-            this.startupGeneration = undefined
-            this.retryStartupLoad()
-          })
+          .catch(() => { /* The generation is ready; leave its error available for explicit retry. */ })
       }
     }, 1000)
     this.cancelScheduledCheck = () => clearTimeout(timer)

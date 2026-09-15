@@ -162,6 +162,27 @@ function currentSelection(ctx: Context, sessionId: SessionId) {
 }
 
 describe('Web session model selection', () => {
+  it('isolates a hung provider, retains healthy models, and recovers after refresh', async () => {
+    const { ctx } = await harness()
+    const pending = Promise.withResolvers<readonly LlmModelInfo[]>()
+    ctx.llm.registerAdapter(['slow'], new class extends CatalogAdapter {
+      override listModels() { return pending.promise }
+    }('Slow Provider', []))
+    try {
+      const selection = { provider: 'deepseek-official', model: 'deepseek-chat' }
+      const first = await buildModelCatalog(ctx, selection, { metadataTimeoutMs: 20 })
+      expect(first.groups.some(group => group.id === 'deepseek-official')).toBe(true)
+      expect(first.failures.find(group => group.id === 'slow')?.message).toContain('timed out')
+      pending.resolve([{ provider: 'slow', id: 'recovered', name: 'Recovered' }])
+      const next = await buildModelCatalog(ctx, selection, { refresh: true, metadataTimeoutMs: 20 })
+      expect(next.groups.find(group => group.id === 'slow')?.models[0]?.id).toBe('recovered')
+      expect(next.failures.some(group => group.id === 'slow')).toBe(false)
+    } finally {
+      pending.resolve([])
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('validates an ordered image batch before persisting any member', async () => {
     const { ctx, agent, sessionId } = await harness()
     const validateImage = vi.fn((_input: { data: Uint8Array }) => Promise.resolve())
