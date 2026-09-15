@@ -75,6 +75,26 @@ describe('native V3 event admission at EOF', () => {
     expect(() => scanLog(bytes)).toThrow('format v3 contains unknown event type')
   })
 
+  it('preserves retired ZeroWall capability metadata without the removed plugin and can append', async () => {
+    const legacy = {
+      type: 'zerowall/capabilities/selection', seq: 1, time: 2,
+      data: { tools: ['read'], disabled: [], onDemand: ['python'] },
+    }
+    const bytes = Buffer.from(prefix + JSON.stringify(legacy) + '\n')
+    const path = await store(bytes)
+    const reader = await ctx.sessionPersistence.open(id, 'read')
+    try { expect((await reader.read()).events).toEqual([start, legacy]) }
+    finally { await reader.close() }
+    expect(await readFile(path)).toEqual(bytes)
+    const writer = await ctx.sessionPersistence.open(id, 'write')
+    try {
+      await writer.append([{
+        type: 'turn/end', seq: SessionSeq(2), time: 3, data: { turn: 1, reason: { kind: 'completed' } },
+      }])
+    } finally { await writer.close() }
+    expect((await readFile(path)).subarray(0, bytes.length)).toEqual(bytes)
+  })
+
   it.each(obsoleteTypes.flatMap(type => ['', '{not json\n', 'null\n'].map(corruption => ({ type, corruption }))))(
     'scan, read and write refuse required $type after "$corruption" without changing bytes or inode', async ({ type, corruption }) => {
       const bytes = Buffer.from(prefix + corruption + JSON.stringify(obsoleteEvent(type)) + '\n')
