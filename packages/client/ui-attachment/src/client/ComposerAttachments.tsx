@@ -16,6 +16,14 @@ interface ComposerRailItem extends AttachmentRailItem {
   attachment: ComposerAttachment
 }
 
+const SIDEBAR_FILE_DRAG = 'application/x-zerowall-sidebar-file'
+
+interface SidebarFileDrag {
+  url: string
+  name: string
+  type?: string
+}
+
 /** Draft image previews, pending-file cards, drop target, and original-image preview. */
 export function ComposerAttachments({
   attachments, canAcceptDrop, onAddFiles, onRemoveAttachment, uploads, onRetryFile, dropLimits, t,
@@ -31,8 +39,18 @@ export function ComposerAttachments({
   useEffect(() => {
     const fileTransfer = (event: globalThis.DragEvent): DataTransfer | null => {
       const dataTransfer = event.dataTransfer
-      if (dataTransfer === null || !dataTransfer.types.includes('Files')) return null
+      if (dataTransfer === null || (!dataTransfer.types.includes('Files') && !dataTransfer.types.includes(SIDEBAR_FILE_DRAG))) return null
       return dataTransfer
+    }
+    const sidebarFile = (dataTransfer: DataTransfer): SidebarFileDrag | null => {
+      if (!dataTransfer.types.includes(SIDEBAR_FILE_DRAG)) return null
+      try {
+        const value = JSON.parse(dataTransfer.getData(SIDEBAR_FILE_DRAG)) as Partial<SidebarFileDrag>
+        if (typeof value.url !== 'string' || typeof value.name !== 'string') return null
+        return typeof value.type === 'string'
+          ? { url: value.url, name: value.name, type: value.type }
+          : { url: value.url, name: value.name }
+      } catch { return null }
     }
     const reset = (): void => {
       dragDepth.current = 0
@@ -63,7 +81,19 @@ export function ComposerAttachments({
       if (dataTransfer === null) return
       event.preventDefault()
       reset()
-      if (canAcceptDrop) onAddFiles([...dataTransfer.files])
+      if (!canAcceptDrop) return
+      const sidebar = sidebarFile(dataTransfer)
+      if (sidebar !== null) {
+        void fetch(sidebar.url).then((response) => {
+          if (!response.ok) throw new Error(`Unable to read ${sidebar.name}`)
+          return response.blob()
+        }).then((blob) => {
+          const type = sidebar.type ?? blob.type ?? 'application/octet-stream'
+          onAddFiles([new File([blob], sidebar.name, { type })])
+        }).catch(() => { /* the host will surface ordinary upload errors */ })
+      } else {
+        onAddFiles([...dataTransfer.files])
+      }
     }
     document.addEventListener('dragenter', onDragEnter)
     document.addEventListener('dragover', onDragOver)
