@@ -9,6 +9,7 @@ import z from '@deepseek-ai/schemastery'
 import { freezeMessage } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { Session, SessionEvent, SessionSeq, ToolResultMessage } from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-agent'
 // Type-only: the `compaction/*` SessionEventMap merges (the shadow-price event).
 import type {} from '@deepseek-ai/dsh-compaction'
 // Type-only: the `ctx.tokenMeter` Context merge for the declared injection.
@@ -47,6 +48,7 @@ export class ToolResultPruner extends Service {
   static inject = ['tokenMeter']
 
   static Config: z<ToolResultPruneConfig> = z.object({
+    autoBeforeRequest: z.boolean().default(true),
     thresholdChars: z.number().step(1).min(1).default(DEFAULTS.thresholdChars),
     headChars: z.number().step(1).min(0).default(DEFAULTS.headChars),
     tailChars: z.number().step(1).min(0).default(DEFAULTS.tailChars),
@@ -58,6 +60,18 @@ export class ToolResultPruner extends Service {
   constructor(ctx: Context, config: ToolResultPruneConfig = {}) {
     super(ctx, 'toolResultPruner')
     this.config = resolveConfig(config)
+    if (this.config.autoBeforeRequest) {
+      ctx.on('agent/pre-step', async ({ agent }, next) => {
+        const result = this.pruneSession(agent.session)
+        if (result.pruned.length > 0) {
+          ctx.logger.info(
+            `tool-result pruning (before-request): ${result.pruned.length} result(s), `
+            + `${result.charsRemoved} character(s) removed`,
+          )
+        }
+        return next()
+      })
+    }
   }
 
   /**

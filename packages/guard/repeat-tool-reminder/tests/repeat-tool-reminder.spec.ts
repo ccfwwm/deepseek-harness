@@ -55,6 +55,22 @@ const guardSource = (tool: string, count: number) => ({
 })
 
 describe('threshold escalation', () => {
+  it('blocks unchanged results at blockAfter while allowing a changed result to reset progress', async () => {
+    const ctx = await harness({ thresholds: [2], blockAfter: 3 })
+    const adapter = new MockAdapter([
+      toolCallResponse('c1', 'probe', { q: 'same' }),
+      toolCallResponse('c2', 'probe', { q: 'same' }),
+      toolCallResponse('c3', 'probe', { q: 'same' }),
+      textResponse('done'),
+    ])
+    ctx.llm.registerAdapter(['mock'], adapter)
+    const agent = await ctx.agentLoop.create(SessionId('block-unchanged'), { provider: 'mock', model: 'mock' })
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await waitForIdle(ctx, agent)
+    expect(agent.session.snapshotEvents().filter(event => event.type === 'tool/call')).toHaveLength(3)
+    expect(reminders(agent).some(entry => entry.text.includes('consecutive_calls: 3'))).toBe(true)
+  })
+
   it('reminds gently at the first default threshold (3) and in detail at the second (5)', async () => {
     const ctx = await harness()
     const adapter = new MockAdapter([

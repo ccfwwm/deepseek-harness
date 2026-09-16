@@ -50,6 +50,7 @@ kind: "package-reference"
 | `include` | `[]` | 只跟踪这些工具；空表示所有工具 |
 | `exclude` | `[]` | 绝不跟踪这些工具；对它们的调用既不计数也不重置 |
 | `argumentsPreviewChars` | `500` | 详细提醒中显示多少字符的重复参数 |
+| `blockAfter` | `8` | 当参数和结果指纹连续不变达到此次数后阻止调用 |
 
 无效配置会在启动时以清晰错误失败——空的 `thresholds` 列表、小于 2 的重复次数或重复值——绝不会静默改变行为。生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-repeat-tool-reminder)记录每个受支持的值。
 

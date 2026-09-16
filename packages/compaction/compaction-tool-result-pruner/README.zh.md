@@ -49,6 +49,7 @@ kind: "package-reference"
 
 | 字段 | 默认值 | 含义 |
 |---|---|---|
+| `autoBeforeRequest` | `true` | 在下一次模型请求前修剪当前表层中的工具结果。 |
 | `thresholdChars` | `8192` | 合并文本超过此 Unicode 码点数时修剪。 |
 | `headChars` | `4096` | 保留的开头 Unicode 码点数。 |
 | `tailChars` | `1024` | 保留的末尾 Unicode 码点数。 |

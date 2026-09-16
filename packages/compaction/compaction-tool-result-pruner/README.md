@@ -49,6 +49,7 @@ All settings are optional; the defaults trim any result with more than 8,192 tex
 
 | Field | Default | Meaning |
 |---|---|---|
+| `autoBeforeRequest` | `true` | Trim current-surface tool results before the next model request. |
 | `thresholdChars` | `8192` | Trim when combined text exceeds this many Unicode code points. |
 | `headChars` | `4096` | Leading Unicode code points retained. |
 | `tailChars` | `1024` | Trailing Unicode code points retained. |

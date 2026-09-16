@@ -40,6 +40,8 @@ export interface Config {
    * always compares the FULL canonical string).
    */
   argumentsPreviewChars?: number
+  /** Block identical calls whose result has not changed after this count. Defaults to `8`. */
+  blockAfter?: number
 }
 
 export const Config: z<Config> = z.object({
@@ -47,6 +49,7 @@ export const Config: z<Config> = z.object({
   include: z.array(z.string()).default([]),
   exclude: z.array(z.string()).default([]),
   argumentsPreviewChars: z.number().default(500),
+  blockAfter: z.number().default(8),
 })
 
 /**
@@ -152,6 +155,20 @@ function prependContext(ours: UserMessage, theirs: UserMessage[] | undefined): U
 interface Chain {
   key: string
   count: number
+  resultFingerprint: string
+}
+
+/** Keep the progress key bounded while distinguishing unchanged tool results. */
+function fingerprint(value: unknown): string {
+  let text: string
+  try { text = JSON.stringify(value) ?? String(value) } catch { text = String(value) }
+  const sample = text.length > 512 ? `${text.slice(0, 256)}…${text.slice(-256)}` : text
+  let hash = 2166136261
+  for (let index = 0; index < sample.length; index += 1) {
+    hash ^= sample.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return `${text.length}:${hash >>> 0}`
 }
 
 /**
@@ -168,6 +185,10 @@ export function apply(ctx: Context, config: Config): void {
   const argumentsPreviewChars = config.argumentsPreviewChars as number
   if (!Number.isInteger(argumentsPreviewChars) || argumentsPreviewChars < 1) {
     throw new Error(`repeat-tool-reminder: invalid argumentsPreviewChars ${argumentsPreviewChars} — must be an integer >= 1`)
+  }
+  const blockAfter = config.blockAfter as number
+  if (!Number.isInteger(blockAfter) || blockAfter < 2) {
+    throw new Error(`repeat-tool-reminder: invalid blockAfter ${blockAfter} — must be an integer >= 2`)
   }
 
   const chains = new WeakMap<Agent, Chain>()
@@ -186,33 +207,43 @@ export function apply(ctx: Context, config: Config): void {
    * same pipeline), and a model hammering a denied call is exactly the loop
    * worth breaking.
    */
-  function observe(exec: ToolExecution): UserMessage | undefined {
+  function observe(exec: ToolExecution, result: unknown): { reminder?: UserMessage; blocked: boolean } {
     // A direct `ctx.tools.execute()` caller has no model to remind and no id
     // to key on; only agent-loop calls participate.
-    if (!exec.agent) return undefined
-    if (!tracked(exec.name)) return undefined
+    if (!exec.agent) return { blocked: false }
+    if (!tracked(exec.name)) return { blocked: false }
     const canonical = canonicalize(exec.arguments)
     const key = JSON.stringify([exec.name, canonical])
     const chain = chains.get(exec.agent)
-    const count = chain !== undefined && chain.key === key ? chain.count + 1 : 1
-    chains.set(exec.agent, { key, count })
-    if (!thresholdSet.has(count)) return undefined
+    const resultFingerprint = fingerprint(result)
+    const progressing = chain !== undefined && chain.key === key
+      && chain.resultFingerprint !== resultFingerprint
+    const count = chain !== undefined && chain.key === key && !progressing ? chain.count + 1 : 1
+    chains.set(exec.agent, { key, count, resultFingerprint })
+    const blocked = count >= blockAfter
+    if (!thresholdSet.has(count) && !blocked) return { blocked: false }
     const text = count === thresholds[0]
       ? GENTLE_REMINDER
       : detailedReminder(exec.name, count, previewArguments(canonical, argumentsPreviewChars))
-    return createUserMessage({
+    return { blocked, reminder: createUserMessage({
       content: [{ type: 'text', text }],
       source: { ...PLUGIN_SOURCE, form: 'notice', summary: `${exec.name} × ${count}` },
-    })
+    }) }
   }
 
   // Observe-and-enrich, never veto: count first (state advances regardless of
   // the downstream outcome), DELEGATE so a later listener can still block or
   // replace, then fold the reminder onto whatever came back — additionalContexts
   // rides both decision variants, so a blocked call still gets the nudge.
-  ctx.on('tools/post-execute', async (exec, _result, next): Promise<PostToolDecision> => {
-    const reminder = observe(exec)
+  ctx.on('tools/post-execute', async (exec, result, next): Promise<PostToolDecision> => {
+    const observation = observe(exec, result)
+    const reminder = observation.reminder
     const downstream = await next()
+    if (observation.blocked) {
+      const feedback = [{ type: 'text' as const, text: `[REPEATED_NO_PROGRESS] Repeated tool call blocked after ${blockAfter} unchanged results. Choose a different action or finish the task.` }]
+      if (reminder === undefined) throw new Error('repeat-tool-reminder: blocked observation has no reminder')
+      return { kind: 'block', feedback, additionalContexts: prependContext(reminder, downstream.additionalContexts) }
+    }
     if (!reminder) return downstream
     if (downstream.kind === 'block') {
       return { kind: 'block', feedback: downstream.feedback, additionalContexts: prependContext(reminder, downstream.additionalContexts) }

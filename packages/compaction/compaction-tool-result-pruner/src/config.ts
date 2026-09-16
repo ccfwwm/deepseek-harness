@@ -8,12 +8,14 @@ export const PRUNE_MARKER = '\n\n[... tool result middle pruned ...]\n\n'
 
 /** Low-friction defaults for coding-agent tool output. */
 export const DEFAULTS: ResolvedConfig = deepFreeze({
+  autoBeforeRequest: true,
   thresholdChars: 8192,
   headChars: 4096,
   tailChars: 1024,
 })
 
 const CONFIG_KEYS: ReadonlySet<string> = new Set([
+  'autoBeforeRequest',
   'thresholdChars',
   'headChars',
   'tailChars',
@@ -44,6 +46,7 @@ export function resolveConfig(config: ToolResultPruneConfig = {}): ResolvedConfi
   }
 
   const resolved: ResolvedConfig = {
+    autoBeforeRequest: config.autoBeforeRequest ?? DEFAULTS.autoBeforeRequest,
     thresholdChars: config.thresholdChars ?? DEFAULTS.thresholdChars,
     headChars: config.headChars ?? DEFAULTS.headChars,
     tailChars: config.tailChars ?? DEFAULTS.tailChars,

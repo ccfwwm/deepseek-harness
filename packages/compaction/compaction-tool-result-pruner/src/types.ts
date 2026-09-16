@@ -3,6 +3,8 @@ import type { SessionSeq } from '@deepseek-ai/dsh-session/types'
 
 /** Character-budget policy for deterministic tool-result pruning. */
 export interface ToolResultPruneConfig {
+  /** Prune current tool results before the next model request. Defaults to `true`. */
+  autoBeforeRequest?: boolean
   /** Prune when total text exceeds this many Unicode code points. Defaults to `8192`. */
   thresholdChars?: number
   /** Maximum leading Unicode code points retained. Defaults to `4096`. */
@@ -13,6 +15,7 @@ export interface ToolResultPruneConfig {
 
 /** Validated, detached, deeply immutable pruning configuration. */
 export interface ResolvedConfig {
+  readonly autoBeforeRequest: boolean
   readonly thresholdChars: number
   readonly headChars: number
   readonly tailChars: number
