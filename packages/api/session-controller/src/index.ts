@@ -134,6 +134,9 @@ export class SessionController extends TypertRemoteService {
   private readonly completedDeletions = new Map<SessionId, string>()
   /** One low-resource automatic probe per Host process, shared by every browser/reconnect. */
   private startupModelProbe: Promise<ModelCatalog> | undefined
+  /** Coalesced follow-up for providers whose model catalog becomes ready after startup. */
+  private adapterCatalogRefresh: Promise<void> | undefined
+  private adapterCatalogGeneration = 0
   private readonly modelCatalogTimeoutMs: number
 
   /**
@@ -171,10 +174,10 @@ export class SessionController extends TypertRemoteService {
     ctx.on('session/created', (session) => {
       ctx.emit('api-session/added', this.listState.summaryFor(session))
     })
-    // A provider/settings/credential generation change invalidates the one
-    // Host-generation catalog. The next explicit read performs the new
-    // startup-style check; opening a selector never probes by itself.
-    ctx.on('llm/adapters-updated', () => { invalidateModelCatalog(ctx) })
+    // Dynamic providers may publish an empty route first and discover models
+    // after the one startup probe has already run. Re-check that new catalog
+    // once, at startup concurrency, while coalescing repeated adapter events.
+    ctx.on('llm/adapters-updated', () => { this.refreshUpdatedAdapterCatalog() })
     ctx.on('settings/updated', (namespace: string) => {
       const key = String(namespace)
       if (key.startsWith('llm-')) invalidateModelCatalog(ctx)
@@ -200,6 +203,39 @@ export class SessionController extends TypertRemoteService {
       }
       if (event.type !== 'user/message' || event.data.source.kind !== 'user') return
       ctx.emit('api-session/activity', session.id, event.time)
+    })
+  }
+
+  private refreshUpdatedAdapterCatalog(): void {
+    this.adapterCatalogGeneration += 1
+    invalidateModelCatalog(this.ctx)
+    if (this.startupModelProbe === undefined || this.adapterCatalogRefresh !== undefined) return
+
+    const operation = (async () => {
+      // Registration swaps commonly publish several events in one turn. Let
+      // that synchronous wave settle before capturing the generation to probe.
+      await Promise.resolve()
+      while (true) {
+        const generation = this.adapterCatalogGeneration
+        await this.startupModelProbe?.catch(() => undefined)
+        try {
+          await buildModelCatalog(this.ctx, undefined, {
+            check: true,
+            refresh: true,
+            metadataTimeoutMs: this.modelCatalogTimeoutMs,
+            concurrency: BACKGROUND_PROBE_CONCURRENCY,
+          })
+        } catch (error: unknown) {
+          this.ctx.logger.warn(
+            `session-controller: refreshed model catalog probe failed: ${errorChain(error)}`,
+          )
+        }
+        if (generation === this.adapterCatalogGeneration) return
+      }
+    })()
+    this.adapterCatalogRefresh = operation
+    void operation.finally(() => {
+      if (this.adapterCatalogRefresh === operation) this.adapterCatalogRefresh = undefined
     })
   }
 

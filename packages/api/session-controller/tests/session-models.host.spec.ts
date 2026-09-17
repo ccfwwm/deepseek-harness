@@ -665,17 +665,61 @@ describe('Web session model selection', () => {
     expect(calls).toBe(6)
     expect(maximum).toBe(2)
 
-    // Provider catalog events and reconnecting browser clients may request
-    // the startup check again, but one Host process must never pay twice.
+    // A provider whose catalog becomes ready after startup receives one
+    // coalesced low-resource follow-up check.
     ctx.emit('llm/adapters-updated')
+    ctx.emit('llm/adapters-updated')
+    await vi.waitFor(() => { expect(calls).toBe(12) })
     const repeated = expectValue(await remote.modelCatalog({ check: true, refresh: true, background: true }))
     expect(repeated.groups.find(group => group.id === 'background-check')?.models
       .every(model => model.status === 'available')).toBe(true)
-    expect(calls).toBe(6)
+    expect(calls).toBe(12)
 
     // Explicit user checks remain available after the startup guard.
     await remote.modelCatalog({ check: true, refresh: true })
-    expect(calls).toBe(12)
+    expect(calls).toBe(18)
+    await ctx.fiber.dispose()
+  })
+
+  it('checks models discovered after the startup catalog was empty', async () => {
+    const { ctx } = await harness()
+    let models: readonly LlmModelInfo[] = []
+    const probe = vi.fn(async () => [{ protocol: 'native', ok: true }])
+    const registration = ctx.llm.registerAdapter(['late-catalog'], new class extends LlmAdapter {
+      override providerInfo(provider: string): LlmProviderInfo {
+        return { id: provider, name: 'Late Catalog' }
+      }
+
+      override listModels(): Promise<readonly LlmModelInfo[]> {
+        return Promise.resolve(models)
+      }
+
+      override probeModel = probe
+
+      override probeVision(): Promise<{ status: 'unknown' }> {
+        return Promise.resolve({ status: 'unknown' })
+      }
+
+      override async *stream(_options: GenerateOptions): AsyncIterable<StreamChunk> {
+        // Catalog tests never enter provider streaming.
+      }
+    }())
+    const remote = createSessionTestRemote(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+      cwd: '/tmp',
+    })
+
+    const startup = expectValue(await remote.modelCatalog({ check: true, refresh: true, background: true }))
+    expect(startup.groups.find(group => group.id === 'late-catalog')).toBeUndefined()
+    expect(probe).not.toHaveBeenCalled()
+
+    models = [{ provider: 'late-catalog', id: 'late-free', name: 'Late Free' }]
+    registration.replace(['late-catalog'])
+    await vi.waitFor(() => { expect(probe).toHaveBeenCalledOnce() })
+    const refreshed = expectValue(await remote.modelCatalog())
+    expect(refreshed.groups.find(group => group.id === 'late-catalog')?.models).toEqual([
+      expect.objectContaining({ id: 'late-free', status: 'available' }),
+    ])
     await ctx.fiber.dispose()
   })
 
