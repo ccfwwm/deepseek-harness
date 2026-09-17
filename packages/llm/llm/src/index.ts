@@ -309,15 +309,17 @@ export abstract class LlmAdapter {
       })],
       ...(signal === undefined ? {} : { signal }),
     })) {
-      if (chunk.type !== 'finish') {
-        return [{ protocol: 'native', ok: true, latencyMs: Date.now() - startedAt }]
-      }
+      // Transports may emit usage or block events before a terminal provider
+      // error. A real health probe is successful only after a complete,
+      // non-error finish event; catalog presence or an intermediate event is
+      // not proof that inference completed.
+      if (chunk.type !== 'finish') continue
       if (chunk.reason.kind === 'error' || chunk.reason.kind === 'aborted') {
         return [{ protocol: 'native', ok: false, message: chunk.reason.failure.message, latencyMs: Date.now() - startedAt }]
       }
       return [{ protocol: 'native', ok: true, latencyMs: Date.now() - startedAt }]
     }
-    return [{ protocol: 'native', ok: false, message: 'model produced no stream event', latencyMs: Date.now() - startedAt }]
+    return [{ protocol: 'native', ok: false, message: 'model stream ended without a complete finish event', latencyMs: Date.now() - startedAt }]
   }
 
   /** Probe image input when the adapter can safely construct a provider request outside a conversation. */

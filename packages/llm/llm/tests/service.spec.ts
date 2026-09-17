@@ -190,6 +190,23 @@ describe('LlmRuntime', () => {
     expect(chunks).toEqual(SCRIPT)
   })
 
+  it('requires a successful terminal event before a model probe passes', async () => {
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    ctx.llm.registerAdapter(['probe-error'], new ScriptedAdapter([
+      { type: 'usage', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } },
+      { type: 'finish', reason: { kind: 'error', failure: { code: 'SERVER', message: 'free tier unavailable' } } },
+    ]))
+    ctx.llm.registerAdapter(['probe-ok'], new ScriptedAdapter(SCRIPT))
+
+    await expect(ctx.llm.probeModel('probe-error', 'model')).resolves.toEqual([
+      expect.objectContaining({ protocol: 'native', ok: false, message: 'free tier unavailable' }),
+    ])
+    await expect(ctx.llm.probeModel('probe-ok', 'model')).resolves.toEqual([
+      expect.objectContaining({ protocol: 'native', ok: true }),
+    ])
+  })
+
   it('trusts the immutable message creation boundary for direct calls', async () => {
     const ctx = new Context()
     await ctx.plugin(LlmRuntime)
