@@ -168,3 +168,5 @@ These limits define when this backend is a poor fit or needs special operational
 None.
 
 </details>
+
+Single-session desktop deletion uses an owned release and commit lifecycle; see the [deletion decision](../../../.agents/notes/implemented/feature/2026-09-17-single-session-desktop-deletion.md). It adds no model-visible tools or prompt content.

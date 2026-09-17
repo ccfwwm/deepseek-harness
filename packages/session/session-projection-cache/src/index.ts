@@ -96,6 +96,22 @@ export class SessionProjectionCache extends Service {
 
   private table?: KvTable<SessionId, CheckpointRecord>
   private readonly dirty = new Map<Session, DirtyState>()
+  private readonly generations = new Map<SessionId, number>()
+
+  /**
+   * Invalidate derived state after the owning session has been released.
+   * @param id - session whose queued writes must no longer repopulate this cache.
+   * @returns completion of the ordered durable cache removal.
+   */
+  async forget(id: SessionId): Promise<void> {
+    this.generations.set(id, (this.generations.get(id) ?? 0) + 1)
+    for (const session of this.dirty.keys()) {
+      if (session.id !== id) continue
+      this.markClean(session)
+      this.dirty.delete(session)
+    }
+    await this.requireTable().delete(id)
+  }
 
   constructor(ctx: Context, public config: Config) {
     super(ctx, 'sessionProjectionCache')
@@ -244,6 +260,7 @@ export class SessionProjectionCache extends Service {
    * @returns resolution after durability and event emission.
    */
   async write(session: Session): Promise<void> {
+    const generation = this.generations.get(session.id) ?? 0
     const rows = this.ctx.sessionProjections.checkpoint(session)
     this.markClean(session)
     // Durability barrier: the checkpoint cut was taken above, so flushing
@@ -254,6 +271,7 @@ export class SessionProjectionCache extends Service {
     // already gone; persistence's own retirement drain covers that path and
     // any residual overreach is caught by the cold read's anchored floor.
     if (this.ctx.sessions.get(session.id) === session) await this.ctx.sessions.flush(session)
+    if ((this.generations.get(session.id) ?? 0) !== generation) return
     await this.put(
       session.id,
       identityOf(session.header, session.inheritedEventCount),

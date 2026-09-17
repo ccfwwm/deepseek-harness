@@ -602,6 +602,12 @@ declare module '@deepseek-ai/cordis' {
      */
     'api-session/removed'(sessionId: SessionId): void
     /**
+     * A prepared deletion was rolled back; reopen this session's history only.
+     * @mode emit
+     * @param sessionId - restored durable identity.
+     */
+    'api-session/restored'(sessionId: SessionId): void
+    /**
      * One Agent changed running state.
      * @mode emit
      * @param sessionId - Agent and Session identity.
@@ -633,3 +639,10 @@ declare module '@deepseek-ai/cordis' {
 
 /** JSON-compatible projection value accepted by list consumers. */
 export type SessionProjectionValue = JsonValue
+
+/** Desktop deletion addresses a single ordinary session, never a supplied path. */
+export interface SessionDeleteRequest { readonly sessionId: SessionId }
+/** Host capability held while Electron moves the stored directory to trash. */
+export interface SessionDeletePrepared { readonly token: string; readonly path: string }
+/** Complete or abandon a prepared desktop deletion. */
+export interface SessionDeleteFinish extends SessionDeleteRequest { readonly token: string }

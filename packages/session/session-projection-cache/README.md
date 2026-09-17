@@ -139,3 +139,5 @@ These limits define where the cache needs operational care. They are current pac
 None.
 
 </details>
+
+Single-session desktop deletion uses an owned release and commit lifecycle; see the [deletion decision](../../../.agents/notes/implemented/feature/2026-09-17-single-session-desktop-deletion.md). It adds no model-visible tools or prompt content.

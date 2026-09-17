@@ -598,6 +598,13 @@ export class Session implements SessionFace {
   }
 
   /** `api-session/removed` relay: flag the snapshot while retaining the resident instance. */
+  handleRestored(): void {
+    this.removed = false
+    this.events?.restart()
+    this.notifier.markDirty()
+  }
+
+  /** Mark a committed deletion without reconstructing any other session. */
   handleRemoved(): void {
     this.removed = true
     this.notifier.markDirty()

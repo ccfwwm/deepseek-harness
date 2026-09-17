@@ -1,8 +1,10 @@
 /** Session Remote owner: cold reads, explicit Agent commands, and live control state. */
 
+import { randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
 import { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-settings'
+import type {} from '@deepseek-ai/dsh-session-projection-cache'
 import z from '@deepseek-ai/schemastery'
 import { errorChain } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-client-file-upload'
@@ -26,6 +28,7 @@ import { installModelSelectionProjection } from './model-selection-projection.ts
 import { SessionSkillCatalog } from './skill-catalog.ts'
 import { SessionMediaReferences } from './media-references.ts'
 import type {
+  SessionDeleteRequest, SessionDeletePrepared, SessionDeleteFinish,
   ModelCatalog,
   SessionAttachmentRequest,
   SessionAttachmentValue,
@@ -114,7 +117,21 @@ export class SessionController extends TypertRemoteService {
   private readonly openPath: (path: string, signal: AbortSignal) => Promise<void>
   private readonly revealPath: (path: string, signal: AbortSignal) => Promise<void>
   private readonly canOpenPath: () => boolean
-  private readonly promotions = new Set<Promise<void>>()
+  private readonly deletions = new Map<SessionId, string>()
+  private readonly operations = new Map<SessionId, Set<Promise<unknown>>>()
+
+  private operation<T>(id: SessionId, run: () => Promise<T>): Promise<T> {
+    this.agents.assertAvailable(id)
+    const pending = this.operations.get(id) ?? new Set<Promise<unknown>>()
+    this.operations.set(id, pending)
+    const result = Promise.resolve().then(run)
+    pending.add(result)
+    void result.finally(() => { pending.delete(result); if (!pending.size) this.operations.delete(id) }).catch(() => {})
+    return result
+  }
+
+  private readonly promotions = new Map<Promise<void>, SessionId>()
+  private readonly completedDeletions = new Map<SessionId, string>()
   /** One low-resource automatic probe per Host process, shared by every browser/reconnect. */
   private startupModelProbe: Promise<ModelCatalog> | undefined
   private readonly modelCatalogTimeoutMs: number
@@ -139,7 +156,7 @@ export class SessionController extends TypertRemoteService {
     // Registered before history so reverse-order teardown closes every
     // follower before waiting for already-admitted promotions.
     ctx.effect(() => async () => {
-      await Promise.allSettled([...this.promotions])
+      await Promise.allSettled([...this.promotions.keys()])
     }, 'session-controller.promotions')
     this.history = new SessionHistoryController(ctx, (observation) => { this.promote(observation) })
     this.listState = new ApiSessionList(ctx)
@@ -163,7 +180,7 @@ export class SessionController extends TypertRemoteService {
       if (key.startsWith('llm-')) invalidateModelCatalog(ctx)
     })
     ctx.on('session/disposed', (session) => {
-      ctx.emit('api-session/removed', session.id)
+      if (!this.deletions.has(session.id)) ctx.emit('api-session/removed', session.id)
     })
     ctx.on('agent/status', ({ agent, status }) => {
       ctx.emit('api-session/status', agent.id, status === 'running')
@@ -195,7 +212,7 @@ export class SessionController extends TypertRemoteService {
     })().catch((error: unknown) => {
       this.ctx.logger.error(`session-controller: background activation for "${sessionId}" failed: ${errorChain(error)}`)
     })
-    this.promotions.add(task)
+    this.promotions.set(task, sessionId)
     void task.finally(() => { this.promotions.delete(task) })
   }
 
@@ -218,6 +235,7 @@ export class SessionController extends TypertRemoteService {
     sessionId: SessionId,
     signal?: AbortSignal,
   ): Promise<SessionInspection> {
+    this.agents.assertAvailable(sessionId)
     const attached = this.ctx.sessions.get(sessionId)
     if (attached !== undefined) {
       return Promise.resolve({
@@ -230,14 +248,104 @@ export class SessionController extends TypertRemoteService {
   }
 
   /**
-   * Read all visible Session rows without resuming an Agent.
-   * @param _request - reserved empty list request.
+   * Prepare one local deletion while unrelated agents keep running.
+   * @param request - target durable identity.
+   * @returns a single-use capability and the backend-resolved storage directory.
+   */
+  @Remote('prepareDelete')
+  async prepareDelete(request: SessionDeleteRequest): Promise<SessionDeletePrepared> {
+    const id = request.sessionId
+    this.agents.assertAvailable(id)
+    const token = randomUUID()
+    this.deletions.set(id, token)
+    this.agents.deleting.add(id)
+    try {
+      await Promise.allSettled([
+        ...(this.operations.get(id) ?? []),
+        ...[...this.promotions].filter(([, target]) => target === id).map(([task]) => task),
+      ])
+      const related = new Set<SessionId>([id])
+      let changed = true
+      while (changed) {
+        changed = false
+        for (const session of this.ctx.sessions.list()) {
+          if (session.header.origin === 'subagent' && session.header.parentSession !== undefined && related.has(session.header.parentSession) && !related.has(session.id)) {
+            related.add(session.id); changed = true
+          }
+        }
+      }
+      if ([...related].some(key => this.ctx.agents.get(key)?.status === 'running')) {
+        throw new RemoteError('session/agent-busy', 'Wait for this session and its tasks to finish.', { reason: 'Wait for this session and its tasks to finish.' })
+      }
+      const persistence = this.ctx.get('sessionPersistence') as (typeof this.ctx.sessionPersistence & {
+        resolveStoredDirectory?: (key: SessionId) => Promise<string | undefined>
+      }) | undefined
+      if (persistence?.resolveStoredDirectory === undefined) throw new Error('Desktop deletion requires file session storage.')
+      await this.history.closeSession(id)
+      await this.agents.releaseForDeletion(id)
+      await this.ctx.get('sessionProjectionCache')?.forget(id)
+      const path = await persistence.resolveStoredDirectory(id)
+      if (path === undefined) throw new RemoteError('session/not-found', 'Stored session not found.', { sessionId: id })
+      return { token, path }
+    } catch (error) {
+      this.deletions.delete(id); this.agents.deleting.delete(id)
+      this.ctx.emit('api-session/restored', id)
+      throw error
+    }
+  }
+
+  /**
+   * Publish deletion after the desktop has trashed the data; repeated commits are idempotent.
+   * @param request - identity and preparation capability.
+   * @returns completion after absence is verified and removal published.
+   */
+  @Remote('commitDelete')
+  async commitDelete(request: SessionDeleteFinish): Promise<void> {
+    if (this.completedDeletions.get(request.sessionId) === request.token) return
+    this.verifyDeletion(request)
+    const persistence = this.ctx.get('sessionPersistence')
+    if (persistence === undefined) throw new Error('Session storage unavailable.')
+    if (await persistence.stat(request.sessionId) !== undefined) throw new Error('Session data still exists.')
+    this.deletions.delete(request.sessionId)
+    this.agents.deleting.delete(request.sessionId)
+    this.completedDeletions.set(request.sessionId, request.token)
+    this.ctx.emit('api-session/removed', request.sessionId)
+  }
+
+  /**
+   * Unlock after a failed trash operation, reconciling a lost commit if data is absent.
+   * @param request - identity and preparation capability.
+   * @returns completion after clients can access the surviving data again.
+   */
+  @Remote('abortDelete')
+  async abortDelete(request: SessionDeleteFinish): Promise<void> {
+    if (this.completedDeletions.get(request.sessionId) === request.token) return
+    this.verifyDeletion(request)
+    // A lost commit response must not resurrect data already moved to the trash.
+    const persistence = this.ctx.get('sessionPersistence')
+    if (persistence === undefined) throw new Error('Session storage unavailable.')
+    if (await persistence.stat(request.sessionId) === undefined) {
+      await this.commitDelete(request)
+      return
+    }
+    this.deletions.delete(request.sessionId)
+    this.agents.deleting.delete(request.sessionId)
+    this.ctx.emit('api-session/restored', request.sessionId)
+  }
+
+  private verifyDeletion(request: SessionDeleteFinish): void {
+    if (this.deletions.get(request.sessionId) !== request.token) throw new Error('Deletion capability expired or mismatched.')
+  }
+
+  /**
+   * Read visible rows without resuming an Agent; omit prepared deletions.
+   * @param _request - reserved empty request.
    * @param signal - cancellation for persistence reads.
-   * @returns visible Session summaries ordered by activity.
+   * @returns visible summaries ordered by activity.
    */
   @Remote('list')
   async list(_request: SessionListRequest, signal: AbortSignal): Promise<SessionListValue> {
-    return { items: await this.listState.list(signal) }
+    return { items: (await this.listState.list(signal)).filter(item => !this.deletions.has(item.sessionId)) }
   }
 
   /**
@@ -258,7 +366,9 @@ export class SessionController extends TypertRemoteService {
    */
   @Remote('create')
   create(request: SessionCreateRequest): Promise<SessionCreateValue> {
-    return this.commands.create(request)
+    return request.sessionId === undefined
+      ? this.commands.create(request)
+      : this.operation(request.sessionId, () => this.commands.create(request))
   }
 
   /**
@@ -268,7 +378,7 @@ export class SessionController extends TypertRemoteService {
    */
   @Remote('selectModel')
   selectModel(request: SessionSelectModelRequest): Promise<SessionSelectModelValue> {
-    return this.commands.selectModel(request)
+    return this.operation(request.sessionId, () => this.commands.selectModel(request))
   }
 
   /**
@@ -368,7 +478,7 @@ export class SessionController extends TypertRemoteService {
    */
   @Remote('rename')
   rename(request: SessionRenameRequest): Promise<SessionRenameValue> {
-    return this.commands.rename(request)
+    return this.operation(request.sessionId, () => this.commands.rename(request))
   }
 
   /**
@@ -378,7 +488,7 @@ export class SessionController extends TypertRemoteService {
    */
   @Remote('fork')
   fork(request: SessionForkRequest): Promise<SessionForkValue> {
-    return this.commands.fork(request)
+    return this.operation(request.sessionId, () => this.commands.fork(request))
   }
 
   /**
@@ -390,7 +500,7 @@ export class SessionController extends TypertRemoteService {
   @Remote('prompt')
   prompt(request: SessionPromptRequest, signal: AbortSignal): Promise<SessionPromptValue> {
     signal.throwIfAborted()
-    return this.commands.prompt(request)
+    return this.operation(request.sessionId, () => this.commands.prompt(request))
   }
 
   /**
@@ -400,7 +510,7 @@ export class SessionController extends TypertRemoteService {
    */
   @Remote('attachment')
   attachment(request: SessionAttachmentRequest): Promise<SessionAttachmentValue> {
-    return this.commands.attachment(request)
+    return this.operation(request.sessionId, () => this.commands.attachment(request))
   }
 
   /**
@@ -410,6 +520,7 @@ export class SessionController extends TypertRemoteService {
    */
   @Remote('updateQueue')
   updateQueue(request: SessionUpdateQueueRequest): SessionUpdateQueueValue {
+    this.agents.assertAvailable(request.sessionId)
     return this.commands.updateQueue(request)
   }
 
@@ -420,6 +531,7 @@ export class SessionController extends TypertRemoteService {
    */
   @Remote('cancel')
   cancel(request: SessionCancelRequest): SessionCancelValue {
+    this.agents.assertAvailable(request.sessionId)
     return this.commands.cancel(request)
   }
 
@@ -431,7 +543,8 @@ export class SessionController extends TypertRemoteService {
    */
   @Remote('page')
   page(request: SessionPageRequest, signal: AbortSignal): Promise<SessionPage> {
-    return this.history.page(request, signal)
+    const id = request.address.kind === 'session' ? request.address.sessionId : request.address.childSessionId
+    return this.operation(id, () => this.history.page(request, signal))
   }
 
   /**
@@ -442,8 +555,10 @@ export class SessionController extends TypertRemoteService {
    *   frames and optional cursorless assistant-stream frames.
    */
   @Remote({ mode: 'stream' })
-  follow(request: SessionFollowRequest, signal: AbortSignal): AsyncIterable<SessionFollowFrame> {
-    return this.history.follow(request, signal)
+  async *follow(request: SessionFollowRequest, signal: AbortSignal): AsyncIterable<SessionFollowFrame> {
+    const id = request.address.kind === 'session' ? request.address.sessionId : request.address.childSessionId
+    this.agents.assertAvailable(id)
+    yield* this.history.follow(request, signal)
   }
 
   /**

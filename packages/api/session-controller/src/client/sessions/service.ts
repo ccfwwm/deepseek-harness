@@ -359,6 +359,10 @@ export class ClientSessions implements ISessions {
    * Apply one remotely forwarded Session removal.
    * @param sessionId - removed Session identity.
    */
+  handleSessionRestored(sessionId: SessionId): void {
+    this.manager.handleSessionRestored(sessionId)
+  }
+
   handleSessionRemoved(sessionId: Parameters<SessionManager['handleSessionRemoved']>[0]): void {
     this.manager.handleSessionRemoved(sessionId)
   }

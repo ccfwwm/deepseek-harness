@@ -186,6 +186,24 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })))
 })
 
+describe('SessionProjectionCache deletion', () => {
+  it('removes the durable cache and prevents an admitted flush from recreating it', async () => {
+    const { ctx, root, cache } = await harness()
+    const session = ctx.sessions.create(SessionId('delete-cache'))
+    await cache.write(session)
+    let release!: () => void
+    const barrier = new Promise<void>((resolve) => { release = resolve })
+    const flush = vi.spyOn(ctx.sessions, 'flush').mockImplementationOnce(async () => { await barrier; return true })
+    const pending = cache.write(session)
+    await cache.forget(session.id)
+    release()
+    await pending
+    expect(await storedRecord(root, session.id)).toBeUndefined()
+    expect(cache.cachedSnapshot(session.header, session.inheritedEventCount)).toBeUndefined()
+    flush.mockRestore()
+  })
+})
+
 describe('SessionProjectionCache write policy', () => {
   it('writes a durable checkpoint at turn/end (mandatory point)', async () => {
     const { ctx, root } = await harness()

@@ -205,6 +205,9 @@ export class FakeApiClient {
         execute: () => Promise.resolve({ ok: true, value: undefined }),
       },
       session: {
+        prepareDelete: async () => { throw new Error('Deletion requires an explicit test handler') },
+        commitDelete: async () => ok(undefined),
+        abortDelete: async () => ok(undefined),
         canOpenWorkspacePath: () => Promise.resolve(ok(true)),
         list: payload => this.record('session.list', payload, this.onList(payload)),
         modelCatalog: () => Promise.resolve({

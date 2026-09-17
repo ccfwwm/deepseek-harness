@@ -87,3 +87,5 @@ Session 对象还承载本地提交回显：`session.beginSubmission` 在调用�
 </details>
 
 **运行时不变式：** 不发布伴生入口。每个分页与帧都会对照其指向的持久 Session 校验。
+
+桌面单会话删除采用持有释放句柄的准备与提交流程，见[删除决策](../../../.agents/notes/implemented/feature/2026-09-17-single-session-desktop-deletion.zh.md)。不会新增模型可见工具或提示内容。

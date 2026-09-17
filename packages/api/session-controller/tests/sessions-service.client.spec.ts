@@ -1146,3 +1146,22 @@ describe('coverage tails (branch duals)', () => {
   })
 
 })
+
+
+describe('session deletion selection', () => {
+  it('keeps the active session on other-row removal, chooses a survivor, and clears the last row', async () => {
+    const b = bench()
+    await feedList(b, [{ id: 'a' }, { id: 'b' }, { id: 'c' }])
+    b.svc.open(sid('b'))
+    b.svc.handleSessionRemoved(sid('a'))
+    await Promise.resolve()
+    expect(b.svc.list.getSnapshot().current).toBe(sid('b'))
+    b.svc.handleSessionRemoved(sid('b'))
+    await Promise.resolve()
+    expect(b.svc.list.getSnapshot().current).toBe(sid('c'))
+    b.svc.handleSessionRemoved(sid('c'))
+    await Promise.resolve()
+    expect(b.svc.list.getSnapshot().current).toBeUndefined()
+    expect(b.svc.list.getSnapshot().ids).toEqual([])
+  })
+})

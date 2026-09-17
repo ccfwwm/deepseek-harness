@@ -729,6 +729,12 @@ export class SessionManager {
    * Apply one Session removal forwarded through `ctx.remote.$on`.
    * @param sessionId - removed Session identity.
    */
+  handleSessionRestored(sessionId: SessionId): void {
+    this.sessions.get(sessionId)?.handleRestored()
+    void this.refreshList()
+  }
+
+  /** Remove one committed session and select the nearest surviving ordinary row. */
   handleSessionRemoved(sessionId: SessionId): void {
     const summary = this.summaries.find(candidate => candidate.sessionId === sessionId)
     const durableSubagent = summary?.origin === 'subagent' || this.addresses.has(sessionId)
@@ -738,6 +744,12 @@ export class SessionManager {
     this.updateCatalogActivity(sessionId, false)
     if (durableSubagent) this.sessions.get(sessionId)?.handleRunning(false)
     else this.sessions.get(sessionId)?.handleRemoved()
+    if (!durableSubagent && this.selected === sessionId) {
+      const next = this.summaries.filter(item => item.sessionId !== sessionId && item.origin !== 'subagent')
+        .sort((a, b) => b.updatedAt - a.updatedAt)[0]
+      if (next !== undefined) this.select(next.sessionId)
+      else this.clearSelection()
+    }
     this.queues.delete(sessionId)
     this.jobsBySession.delete(sessionId)
     if (!durableSubagent) this.projectionStores.delete(sessionId)

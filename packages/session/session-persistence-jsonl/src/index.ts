@@ -778,10 +778,21 @@ class JsonlSessionPersistence extends SessionPersistence {
   }
 
   /**
-   * Resolve a session's current-generation log path.
-   * @param id - the stored session to locate.
-   * @param signal - optional cancellation for the directory scans.
-   * @returns the current artifact path, or `undefined` while only a historical generation exists.
+   * Resolve the directory containing a supported current or historical session log.
+   * @param id - the stored session to locate after its readers and writer are released.
+   * @returns the existing directory, or undefined when no stored generation exists.
+   */
+  async resolveStoredDirectory(id: SessionId): Promise<string | undefined> {
+    await this.ensureRootEncoding()
+    const selected = await this.findLog(id)
+    return selected === undefined ? undefined : dirname(selected.sourcePath)
+  }
+
+  /**
+   * Resolve the current-generation artifact for projection caches.
+   * @param id - stored session identity.
+   * @param signal - optional cancellation for directory scans.
+   * @returns the current log path, or undefined for historical/absent storage.
    */
   async resolveCurrentLog(id: SessionId, signal?: AbortSignal): Promise<string | undefined> {
     await this.ensureRootEncoding()

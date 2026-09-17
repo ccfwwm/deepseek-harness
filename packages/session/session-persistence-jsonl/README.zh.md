@@ -168,3 +168,5 @@ JSONL 存储不修改实时请求前缀。只有重建历史、当前 envelope �
 无。
 
 </details>
+
+桌面单会话删除采用持有释放句柄的准备与提交流程，见[删除决策](../../../.agents/notes/implemented/feature/2026-09-17-single-session-desktop-deletion.zh.md)。不会新增模型可见工具或提示内容。

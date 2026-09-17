@@ -139,3 +139,5 @@ kind: "package-reference"
 无。
 
 </details>
+
+桌面单会话删除采用持有释放句柄的准备与提交流程，见[删除决策](../../../.agents/notes/implemented/feature/2026-09-17-single-session-desktop-deletion.zh.md)。不会新增模型可见工具或提示内容。

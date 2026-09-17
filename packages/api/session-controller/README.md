@@ -87,3 +87,5 @@ None.
 </details>
 
 **Runtime invariant:** No companion is published. Every page and frame is checked against the addressed durable Session.
+
+Single-session desktop deletion uses an owned release and commit lifecycle; see the [deletion decision](../../../.agents/notes/implemented/feature/2026-09-17-single-session-desktop-deletion.md). It adds no model-visible tools or prompt content.

@@ -40,7 +40,13 @@ const MESSAGE_TYPES = new Set(['user/message', 'assistant/message'])
 
 /** Implements cold-safe history operations delegated by the Session Controller. */
 export class SessionHistoryController {
-  private readonly closeFollowers = new Set<() => void>()
+  private readonly closeFollowers = new Map<() => Promise<void>, SessionId>()
+
+  /** Stop live history readers for a deleted Session. */
+  async closeSession(id: SessionId): Promise<void> {
+    await Promise.all([...this.closeFollowers].filter(([, target]) => target === id).map(([close]) => close()))
+    this.assistantStreams.delete(id)
+  }
   private readonly assistantStreams = new Map<SessionId, SessionAssistantStreamAccumulator>()
 
   /**
@@ -63,7 +69,7 @@ export class SessionHistoryController {
       this.assistantStreams.delete(agent.session.id)
     }, { global: true })
     ctx.effect(() => () => {
-      for (const close of this.closeFollowers) close()
+      for (const close of this.closeFollowers.keys()) void close()
       this.closeFollowers.clear()
     }, 'session-controller.history')
   }
@@ -137,11 +143,16 @@ export class SessionHistoryController {
       resume?.()
     }
     const follower = { closed: false }
-    const close = (): void => {
+    let retained: SessionObservation | undefined
+    let opening: Promise<SessionObservation> | undefined
+    const release = (): void => { retained?.[Symbol.dispose](); retained = undefined }
+    const close = async (): Promise<void> => {
       follower.closed = true
       notify()
+      try { await opening } catch { /* Opening failure already belongs to the stream. */ }
+      release()
     }
-    this.closeFollowers.add(close)
+    this.closeFollowers.set(close, target)
     const disposeEvent = this.ctx.on('session/event', (session, event) => {
       if (session.id !== target) return
       buffered.pushBack({ type: 'event', event })
@@ -174,7 +185,10 @@ export class SessionHistoryController {
     const onAbort = (): void => { notify() }
     signal.addEventListener('abort', onAbort, { once: true })
     try {
-      using source = await this.sourceFor(address, signal, true)
+      opening = this.sourceFor(address, signal, true)
+      const source = await opening
+      retained = source
+      if (follower.closed) return
       const events = source.events
       signal.throwIfAborted()
       const cursor = source.cursor
@@ -199,7 +213,7 @@ export class SessionHistoryController {
           : projectionBlock(source.projections),
         ...assistantStream === undefined ? {} : { assistantStream },
       }
-      if (address.kind === 'session' && source.source === 'prepared') {
+      if (!follower.closed && address.kind === 'session' && source.source === 'prepared') {
         const promotion = source.retain()
         try {
           this.promote(promotion)
@@ -230,6 +244,7 @@ export class SessionHistoryController {
         yield entryFor(item.event)
       }
     } finally {
+      release()
       this.closeFollowers.delete(close)
       signal.removeEventListener('abort', onAbort)
       disposeCreated()
