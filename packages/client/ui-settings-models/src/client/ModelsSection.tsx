@@ -343,7 +343,7 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
         <div className={styles['runtimeCatalogHead']}>
           <div>
             <h3 className={styles['runtimeCatalogTitle']}>{t('runtimeModels')}</h3>
-            {catalogTime !== null && <p className={styles['modelCatalogMeta']}>{`${t('catalogUpdated')} ${catalogTime}`}</p>}
+            {catalogTime !== null && <p className={styles['modelCatalogMeta']}>{t('catalogUpdated').replace('{time}', catalogTime)}</p>}
           </div>
           <div className={styles['runtimeCatalogActions']}>
             <button type="button" className={styles['secondaryButton']} disabled={catalogBusy} onClick={() => { void controller.syncModels(false, true) }}>

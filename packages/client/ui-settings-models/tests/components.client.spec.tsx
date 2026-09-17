@@ -307,6 +307,18 @@ async function mountDeepSeekCard(overrides: Parameters<typeof scriptedFace>[0] =
 }
 
 describe('ModelsSection', () => {
+  it('interpolates the runtime catalog update time', async () => {
+    const { controller } = await mountSection()
+    act(() => controller.acceptModelCatalog({
+      default: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+      routableProviders: ['deepseek-official'],
+      groups: [],
+      failures: [],
+    }))
+    const updated = screen.getByText(/^Last synced /u)
+    expect(updated.textContent).not.toContain('{time}')
+  })
+
   it('hides both add actions when their settings namespaces are absent', async () => {
     const scripted = scriptedFace()
     scripted.face.settings.describe.mockResolvedValue(remoteOk({ writable: true, hasDocument: false, namespaces: [] }))
