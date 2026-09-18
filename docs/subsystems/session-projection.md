@@ -121,6 +121,13 @@ The persisted projection cache service. Opens the `session_projcache` domain at 
 
 ```ts cordis-catalog
 /**
+ * Invalidate derived state after the owning session has been released.
+ * @param id - session whose queued writes must no longer repopulate this cache.
+ * @returns completion of the ordered durable cache removal.
+ */
+async forget(id: SessionId): Promise<void>
+
+/**
  * The zero-I/O listing read: whole values viewed straight from the stored
  * rows (version-matching keys only), each cut carried with its watermark so
  * a client value store can seed under its higher-seq-wins rule — as stale
@@ -194,7 +201,7 @@ async write(session: Session): Promise<void>
 coldSnapshot( meta: SessionHeader, inheritedEventCount: SessionLogOffset, events: readonly SessionEvent[], ): ProjectionSnapshot
 ```
 
-Types: [Session](session.md) · [SessionEvent](session.md) · [SessionHeader](persistence.md) · [SessionLogOffset](session.md)
+Types: [Session](session.md) · [SessionEvent](session.md) · [SessionHeader](persistence.md) · [SessionId](core.md) · [SessionLogOffset](session.md)
 
 Source: [`packages/session/session-projection-cache/src/index.ts`](../../packages/session/session-projection-cache/src/index.ts)
 

@@ -925,6 +925,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the staged receipt and durable file reference.',
       },
       {
+        signature: '@Remote(\'restage\') restage(agent: Agent, attachmentId: AttachmentIdType): Promise<FileUploadValue>',
+        description: 'Stage an existing user file again for a retry without copying its bytes.',
+        parameters: [{ name: 'agent', description: 'receiving Agent resolved by the Remote scope.' }, { name: 'attachmentId', description: 'file identity already admitted in this Session.' }],
+        returns: 'a fresh receipt scoped to the same Session.',
+      },
+      {
         signature: 'async uploadStream(request: { readonly sessionId: SessionId readonly data: AsyncIterable<Uint8Array> readonly signal?: AbortSignal readonly name?: string }): Promise<FileUploadValue>',
         description: 'Persist raw chunks for one Session without aggregating the upload.',
         parameters: [{ name: 'request', description: 'Session identity, ordered bytes, cancellation, and optional display name.' }],
@@ -1470,10 +1476,28 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the current attached state or persisted header and event prefix.',
       },
       {
+        signature: '@Remote(\'prepareDelete\') async prepareDelete(request: SessionDeleteRequest): Promise<SessionDeletePrepared>',
+        description: 'Prepare one local deletion while unrelated agents keep running.',
+        parameters: [{ name: 'request', description: 'target durable identity.' }],
+        returns: 'a single-use capability and the backend-resolved storage directory.',
+      },
+      {
+        signature: '@Remote(\'commitDelete\') async commitDelete(request: SessionDeleteFinish): Promise<void>',
+        description: 'Publish deletion after the desktop has trashed the data; repeated commits are idempotent.',
+        parameters: [{ name: 'request', description: 'identity and preparation capability.' }],
+        returns: 'completion after absence is verified and removal published.',
+      },
+      {
+        signature: '@Remote(\'abortDelete\') async abortDelete(request: SessionDeleteFinish): Promise<void>',
+        description: 'Unlock after a failed trash operation, reconciling a lost commit if data is absent.',
+        parameters: [{ name: 'request', description: 'identity and preparation capability.' }],
+        returns: 'completion after clients can access the surviving data again.',
+      },
+      {
         signature: '@Remote(\'list\') async list(_request: SessionListRequest, signal: AbortSignal): Promise<SessionListValue>',
-        description: 'Read all visible Session rows without resuming an Agent.',
-        parameters: [{ name: '_request', description: 'reserved empty list request.' }, { name: 'signal', description: 'cancellation for persistence reads.' }],
-        returns: 'visible Session summaries ordered by activity.',
+        description: 'Read visible rows without resuming an Agent; omit prepared deletions.',
+        parameters: [{ name: '_request', description: 'reserved empty request.' }, { name: 'signal', description: 'cancellation for persistence reads.' }],
+        returns: 'visible summaries ordered by activity.',
       },
       {
         signature: '@Remote(\'search\') search(request: SessionSearchRequest, signal: AbortSignal): Promise<SessionSearchValue>',
@@ -1561,7 +1585,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'one chronological page.',
       },
       {
-        signature: '@Remote({ mode: \'stream\' }) follow(request: SessionFollowRequest, signal: AbortSignal): AsyncIterable<SessionFollowFrame>',
+        signature: '@Remote({ mode: \'stream\' }) async *follow(request: SessionFollowRequest, signal: AbortSignal): AsyncIterable<SessionFollowFrame>',
         description: 'Follow one Session log from its opening or resume cursor.',
         parameters: [{ name: 'request', description: 'durable address and last committed sequence already held by the caller.' }, { name: 'signal', description: 'cancellation owned by the Remote stream carrier.' }],
         returns: 'a complete opening snapshot followed by gap-free durable event frames and optional cursorless assistant-stream frames.',
@@ -1645,6 +1669,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     summary: 'The persisted projection cache service.',
     description: 'The persisted projection cache service. Opens the `session_projcache` domain at init, checkpoints live sessions on a throttled write-behind (count/interval triggers from Config) plus three mandatory points — session creation, `turn/end`, and session disposal (the live-to-cold moment) — and serves the cached rows for a session header. Every durable write is fail-soft: failures log a warning and the cache self-heals on the next write.',
     methods: [
+      {
+        signature: 'async forget(id: SessionId): Promise<void>',
+        description: 'Invalidate derived state after the owning session has been released.',
+        parameters: [{ name: 'id', description: 'session whose queued writes must no longer repopulate this cache.' }],
+        returns: 'completion of the ordered durable cache removal.',
+      },
       {
         signature: 'cachedSnapshot( meta: SessionHeader, inheritedEventCount: SessionLogOffset, keys?: readonly Extract<keyof SessionProjectionMap, string>[], ): ProjectionSnapshot | undefined',
         description: 'The zero-I/O listing read: whole values viewed straight from the stored rows (version-matching keys only), each cut carried with its watermark so a client value store can seed under its higher-seq-wins rule — as stale as the last durable checkpoint but never wrong, and never from an unrelated log (the caller\'s header is the identity witness). Fresher paths (the history tail baseline) supersede these values whenever a session is actually opened.',
@@ -3013,9 +3043,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the complete committed workspace order.',
       },
       {
-        signature: 'archiveSession(sessionId: SessionId): Promise<void>',
+        signature: 'archiveSession(sessionId: SessionId, archived: boolean = true): Promise<void>',
         description: 'Archive one session durably. The session must exist (live or in session persistence); its workspace accounting — or lack of one — is irrelevant. An already archived id resolves without writing.',
-        parameters: [{ name: 'sessionId', description: 'The session to archive.' }],
+        parameters: [{ name: 'sessionId', description: 'The session to archive.' }, { name: 'archived', description: 'False restores the session without changing workspace membership or order.' }],
         returns: 'resolution after durability.',
       },
       {
@@ -3189,6 +3219,14 @@ export const EVENT_API: readonly EventApiEntry[] = [
     summary: 'A Session left the live Host registry.',
     description: 'A Session left the live Host registry.',
     parameters: [{ name: 'sessionId', description: 'removed Session identity.' }],
+  },
+  {
+    name: 'api-session/restored',
+    mode: 'emit',
+    signature: '\'api-session/restored\'(sessionId: SessionId): void',
+    summary: 'A prepared deletion was rolled back; reopen this session\'s history only.',
+    description: 'A prepared deletion was rolled back; reopen this session\'s history only.',
+    parameters: [{ name: 'sessionId', description: 'restored durable identity.' }],
   },
   {
     name: 'api-session/status',
@@ -4236,7 +4274,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'FileAttachmentRef',
-    declaration: 'export interface FileAttachmentRef {\n    attachmentId: AttachmentId;\n    name: string;\n    bytes: number;\n}',
+    declaration: 'export interface FileAttachmentRef {\n    parser?: string;\n    status?: string;\n    textChars?: number;\n    preview?: string;\n    content?: string;\n    pageCount?: number;\n    sheetCount?: number;\n    warning?: string;\n    attachmentId: AttachmentId;\n    name: string;\n    bytes: number;\n}',
   },
   {
     name: 'FileBlock',
@@ -4592,7 +4630,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'LlmRuntime',
-    declaration: 'export class LlmRuntime extends TypertRemoteService {\n    constructor(ctx: Context);\n    registerAdapter(providers: string[], adapter: LlmAdapter): AdapterRegistrationHandle;\n    @Remote\n    listProviders(): LlmProviderInfo[];\n    registerConfigurableProviders(entries: readonly LlmConfigurableProvider[]): DirectoryRegistrationHandle;\n    @Remote\n    listConfigurableProviders(): LlmConfigurableProvider[];\n    registerModelDiscovery(settingsNs: string, discover: (request: LlmModelDiscoveryRequest, signal?: AbortSignal) => Promise<readonly LlmDiscoveredModel[]>): () => void;\n    async discoverModels(settingsNs: string, request: LlmModelDiscoveryRequest, signal?: AbortSignal): Promise<LlmDiscoveredModel[]>;\n    @Remote(\'discoverModels\')\n    async remoteDiscoverModels(settingsNs: string, request: LlmModelDiscoveryRequest, signal: AbortSignal): Promise<LlmDiscoveredModel[]>;\n    providerRetryPolicy(provider: string): ResolvedRetryPolicy;\n    imageRequestPricing(provider: string, model: string): LlmImageRequestPricing | undefined;\n    fileRequestText(ref: FileAttachmentRef): string;\n    async listModels(provider: string): Promise<LlmModelInfo[]>;\n    async resolveModelInfo(provider: string, model: string, signal?: AbortSignal): Promise<LlmResolvedModelInfo>;\n    async resolveCallConfig(config: LlmCallConfig, signal?: AbortSignal): Promise<LlmCallConfig>;\n    async prepareCall(config: LlmCallConfig, signal?: AbortSignal): Promise<PreparedLlmCall>;\n    stream(options: GenerateOptions) /* …truncated — full shape in source */',
+    declaration: 'export class LlmRuntime extends TypertRemoteService {\n    constructor(ctx: Context);\n    registerAdapter(providers: string[], adapter: LlmAdapter): AdapterRegistrationHandle;\n    @Remote\n    listProviders(): LlmProviderInfo[];\n    registerConfigurableProviders(entries: readonly LlmConfigurableProvider[]): DirectoryRegistrationHandle;\n    @Remote\n    listConfigurableProviders(): LlmConfigurableProvider[];\n    registerModelDiscovery(settingsNs: string, discover: (request: LlmModelDiscoveryRequest, signal?: AbortSignal) => Promise<readonly LlmDiscoveredModel[]>): () => void;\n    async discoverModels(settingsNs: string, request: LlmModelDiscoveryRequest, signal?: AbortSignal): Promise<LlmDiscoveredModel[]>;\n    @Remote(\'discoverModels\')\n    async remoteDiscoverModels(settingsNs: string, request: LlmModelDiscoveryRequest, signal: AbortSignal): Promise<LlmDiscoveredModel[]>;\n    providerRetryPolicy(provider: string): ResolvedRetryPolicy;\n    imageRequestPricing(provider: string, model: string): LlmImageRequestPricing | undefined;\n    fileRequestText(ref: FileAttachmentRef): string;\n    async listModels(provider: string): Promise<LlmModelInfo[]>;\n    async resolveModelInfo(provider: string, model: string, signal?: AbortSignal): Promise<LlmResolvedModelInfo>;\n    async resolveCallConfig(config: LlmCallConfig, signal?: AbortSignal): Promise<LlmCallConfig>;\n    async prepareCall(config: LlmCallConfig, signal?: AbortSignal): Promise<PreparedLlmCall>;\n    async probeModel(provider: strin /* …truncated — full shape in source */',
+  },
+  {
+    name: 'LlmVisionProbeResult',
+    declaration: 'export interface LlmVisionProbeResult {\n    status: \'supported\' | \'unsupported\' | \'unknown\';\n    protocol?: string;\n    message?: string;\n}',
   },
   {
     name: 'LspHover',
@@ -5133,6 +5175,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SessionCreateValue',
     declaration: 'export interface SessionCreateValue {\n    readonly sessionId: SessionId;\n    readonly agentPreset?: string;\n}',
+  },
+  {
+    name: 'SessionDeleteFinish',
+    declaration: 'export interface SessionDeleteFinish extends SessionDeleteRequest {\n    readonly token: string;\n}',
+  },
+  {
+    name: 'SessionDeletePrepared',
+    declaration: 'export interface SessionDeletePrepared {\n    readonly token: string;\n    readonly path: string;\n}',
+  },
+  {
+    name: 'SessionDeleteRequest',
+    declaration: 'export interface SessionDeleteRequest {\n    readonly sessionId: SessionId;\n}',
   },
   {
     name: 'SessionEvent',
@@ -6072,7 +6126,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ToolDefinition',
-    declaration: 'export interface ToolDefinition extends ToolSchema {\n    readonly output: ToolOutputDefinition;\n    execute(args: unknown, exec: ToolRunContext): Promise<unknown>;\n    finalizeContent?(exec: Readonly<ToolExecution>, result: Readonly<ToolExecutionResult>): ContentBlock[] | undefined;\n    timeoutMs?: number;\n    isConcurrencySafe?(args: unknown): boolean;\n    presentCall?(args: unknown): ToolCallView | undefined;\n    presentResult?(args: unknown, result: ToolResult): ToolResultView | undefined;\n}',
+    declaration: 'export interface ToolDefinition extends ToolSchema {\n    readonly modelVisible?: boolean;\n    readonly output: ToolOutputDefinition;\n    execute(args: unknown, exec: ToolRunContext): Promise<unknown>;\n    finalizeContent?(exec: Readonly<ToolExecution>, result: Readonly<ToolExecutionResult>): ContentBlock[] | undefined;\n    timeoutMs?: number;\n    isConcurrencySafe?(args: unknown): boolean;\n    presentCall?(args: unknown): ToolCallView | undefined;\n    presentResult?(args: unknown, result: ToolResult): ToolResultView | undefined;\n}',
   },
   {
     name: 'ToolDispatchExecution',
@@ -6452,7 +6506,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'WorkspaceArchiveSessionRequest',
-    declaration: 'export interface WorkspaceArchiveSessionRequest {\n    readonly sessionId: SessionId;\n}',
+    declaration: 'export interface WorkspaceArchiveSessionRequest {\n    readonly sessionId: SessionId;\n    readonly archived?: boolean;\n}',
   },
   {
     name: 'WorkspaceArchiveValue',

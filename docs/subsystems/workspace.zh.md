@@ -380,9 +380,10 @@ insertBefore(id: WorkspaceId, beforeId?: WorkspaceId): Promise<readonly Workspac
  * persistence); its workspace accounting — or lack of one — is irrelevant.
  * An already archived id resolves without writing.
  * @param sessionId - The session to archive.
+ * @param archived - False restores the session without changing workspace membership or order.
  * @returns resolution after durability.
  */
-archiveSession(sessionId: SessionId): Promise<void>
+archiveSession(sessionId: SessionId, archived: boolean = true): Promise<void>
 
 /**
  * Resolve by canonical directory path without creating or mutating a

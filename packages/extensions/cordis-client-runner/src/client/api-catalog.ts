@@ -402,9 +402,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'workspaceId', description: 'target Workspace.' }],
       },
       {
-        signature: 'archiveSession(sessionId: SessionId): Promise<void>',
+        signature: 'archiveSession(sessionId: SessionId, archived?: boolean): Promise<void>',
         description: 'Archive a Session from Workspace grouping surfaces.',
-        parameters: [{ name: 'sessionId', description: 'Session to archive.' }],
+        parameters: [{ name: 'sessionId', description: 'Session to archive.' }, { name: 'archived', description: 'False restores the Session; omitted archives.' }],
       },
       {
         signature: 'insertSessionBefore( workspaceId: WorkspaceId, sessionId: SessionId, beforeSessionId?: SessionId, ): Promise<WorkspaceView>',

@@ -313,6 +313,14 @@ registerAgentResolver(resolve: AgentResolver): () => void
 @Remote('upload') upload(agent: Agent, request: EncodedFileUploadRequest, signal: AbortSignal): Promise<FileUploadValue>
 
 /**
+ * Stage an existing user file again for a retry without copying its bytes.
+ * @param agent - receiving Agent resolved by the Remote scope.
+ * @param attachmentId - file identity already admitted in this Session.
+ * @returns a fresh receipt scoped to the same Session.
+ */
+@Remote('restage') restage(agent: Agent, attachmentId: AttachmentIdType): Promise<FileUploadValue>
+
+/**
  * Persist raw chunks for one Session without aggregating the upload.
  * @param request - Session identity, ordered bytes, cancellation, and optional display name.
  * @returns the staged receipt and durable file reference.

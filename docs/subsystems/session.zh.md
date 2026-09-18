@@ -717,10 +717,31 @@ resolveAgent(sessionId: SessionId): Promise<ApiSessionAgentResult>
 inspect( sessionId: SessionId, signal?: AbortSignal, ): Promise<SessionInspection>
 
 /**
- * Read all visible Session rows without resuming an Agent.
- * @param _request - reserved empty list request.
+ * Prepare one local deletion while unrelated agents keep running.
+ * @param request - target durable identity.
+ * @returns a single-use capability and the backend-resolved storage directory.
+ */
+@Remote('prepareDelete') async prepareDelete(request: SessionDeleteRequest): Promise<SessionDeletePrepared>
+
+/**
+ * Publish deletion after the desktop has trashed the data; repeated commits are idempotent.
+ * @param request - identity and preparation capability.
+ * @returns completion after absence is verified and removal published.
+ */
+@Remote('commitDelete') async commitDelete(request: SessionDeleteFinish): Promise<void>
+
+/**
+ * Unlock after a failed trash operation, reconciling a lost commit if data is absent.
+ * @param request - identity and preparation capability.
+ * @returns completion after clients can access the surviving data again.
+ */
+@Remote('abortDelete') async abortDelete(request: SessionDeleteFinish): Promise<void>
+
+/**
+ * Read visible rows without resuming an Agent; omit prepared deletions.
+ * @param _request - reserved empty request.
  * @param signal - cancellation for persistence reads.
- * @returns visible Session summaries ordered by activity.
+ * @returns visible summaries ordered by activity.
  */
 @Remote('list') async list(_request: SessionListRequest, signal: AbortSignal): Promise<SessionListValue>
 
@@ -832,7 +853,7 @@ workspaceDesktop(): { name: string; available: boolean; fileManager: 'finder' | 
  * @returns a complete opening snapshot followed by gap-free durable event
  *   frames and optional cursorless assistant-stream frames.
  */
-@Remote({ mode: 'stream' }) follow(request: SessionFollowRequest, signal: AbortSignal): AsyncIterable<SessionFollowFrame>
+@Remote({ mode: 'stream' }) async *follow(request: SessionFollowRequest, signal: AbortSignal): AsyncIterable<SessionFollowFrame>
 
 /**
  * Stream a complete live-control baseline followed by replacement frames.
@@ -1072,6 +1093,25 @@ A Session left the live Host registry.
  * @param sessionId - removed Session identity.
  */
 'api-session/removed'(sessionId: SessionId): void
+```
+
+Types: [SessionId](core.zh.md)
+
+Source: [`packages/api/session-controller/src/types.ts`](../../packages/api/session-controller/src/types.ts)
+
+<a id="api-sessionrestored--emit"></a>
+
+#### `api-session/restored` — emit
+
+A prepared deletion was rolled back; reopen this session's history only.
+
+```ts cordis-catalog
+/**
+ * A prepared deletion was rolled back; reopen this session's history only.
+ * @mode emit
+ * @param sessionId - restored durable identity.
+ */
+'api-session/restored'(sessionId: SessionId): void
 ```
 
 Types: [SessionId](core.zh.md)
