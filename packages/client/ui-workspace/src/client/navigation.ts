@@ -188,9 +188,18 @@ class UiWorkspaceService extends Service implements UiWorkspace {
 
   private watchNavigation(): () => void {
     let initial: 'waiting' | 'connecting' | 'done' = 'waiting'
+    let archived = new Set<SessionId>()
     const reconcile = (): void => {
       if (this.lifetime.signal.aborted) return
-      if (this.clearArchivedCurrent()) return
+      const nextArchived = new Set(this.workspaces.list.getSnapshot().archivedSessionIds)
+      const current = this.sessions.list.getSnapshot().current
+      const newlyArchived = current !== undefined && nextArchived.has(current) && !archived.has(current)
+      // Record the transition before clear() synchronously notifies this subscriber.
+      archived = nextArchived
+      if (newlyArchived) {
+        this.sessions.clear()
+        return
+      }
       if (initial !== 'waiting') return
       const workspace = this.workspaces.list.getSnapshot()
       const sessions = this.sessions.list.getSnapshot()
@@ -226,15 +235,6 @@ class UiWorkspaceService extends Service implements UiWorkspace {
       disposeSessions()
       disposeWorkspaces()
     }
-  }
-
-  /** @returns true when an archived current selection was cleared. */
-  private clearArchivedCurrent(): boolean {
-    const current = this.sessions.list.getSnapshot().current
-    if (current === undefined
-      || !this.workspaces.list.getSnapshot().archivedSessionIds.includes(current)) return false
-    this.sessions.clear()
-    return true
   }
 
 }

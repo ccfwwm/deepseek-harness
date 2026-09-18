@@ -14,6 +14,8 @@ The Workspace browser exposes an archive dialog in both sidebar widths. It reads
 
 The sidebar marks its root, rail state, and header explicitly for desktop chrome styling. Header spacing must not change the column height or the flexible history region.
 
+Navigation clears the current conversation only when its id enters the archive set. Opening an already archived conversation keeps it selected across subsequent Session and Workspace updates.
+
 ## Alternatives considered
 
 **Show archives in ordinary history.** This removes the purpose of archiving. A separate, always reachable entry preserves ordinary browsing and makes recovery discoverable.

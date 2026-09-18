@@ -620,6 +620,23 @@ describe('UiWorkspaceService', () => {
     expect(b.workspaces.archiveCalls).toEqual([idle, idle])
   })
 
+  it('keeps an explicitly opened archived Session selected across metadata refreshes', () => {
+    const current = summary('current')
+    const archived = summary('archived')
+    const b = bench({
+      sessions: sessionState([current, archived], current.id),
+      workspaces: workspaceState([workspace('one', [current.id, archived.id])], [archived.id]),
+    })
+    b.uiWorkspace.openSession(archived.id)
+    b.workspaces.list.update(state => ({ ...state }))
+    b.sessions.list.update(state => ({ ...state }))
+    expect(b.sessions.list.getSnapshot().current).toBe(archived.id)
+    expect(b.sessions.clear).not.toHaveBeenCalled()
+    b.workspaces.list.update(state => ({ ...state, archivedSessionIds: [] }))
+    b.workspaces.list.update(state => ({ ...state, archivedSessionIds: [archived.id] }))
+    expect(b.sessions.clear).toHaveBeenCalledOnce()
+  })
+
   it('passes directory operations to the Host and preserves structured browse failures', async () => {
     const b = bench()
     b.directoryPicker.onPick = () => Promise.resolve({ ok: true, value: '/w/alpha' })
