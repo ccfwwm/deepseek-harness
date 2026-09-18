@@ -904,6 +904,32 @@ describe('workspace mutation and status', () => {
 })
 
 describe('registry-global session archive', () => {
+  it('restores durably without changing membership or order and serializes competing archive writes', async () => {
+    const dir = await makeDir('archive-restore')
+    const pool = new MemoryMediaPool()
+    const sessions = [header('first', dir, 100), header('second', dir, 200)]
+    const first = await harness({ pool, sessions })
+    const order = [...first.registry.list()[0]!.sessionIds]
+    await first.registry.archiveSession(SessionId('first'))
+    await first.registry.archiveSession(SessionId('second'))
+    await first.fiber.dispose()
+    const second = await harness({ pool, sessions })
+    expect(second.registry.archivedSessionIds).toEqual(['first', 'second'])
+    await Promise.all([
+      second.registry.archiveSession(SessionId('first'), false),
+      second.registry.archiveSession(SessionId('second'), false),
+    ])
+    expect(second.registry.archivedSessionIds).toEqual([])
+    expect(second.registry.list()[0]!.sessionIds).toEqual(order)
+    const writes = second.changes.length
+    await second.registry.archiveSession(SessionId('first'), false)
+    expect(second.changes).toHaveLength(writes)
+    await second.fiber.dispose()
+    const third = await harness({ pool, sessions })
+    expect(third.registry.archivedSessionIds).toEqual([])
+    expect(third.registry.list()[0]!.sessionIds).toEqual(order)
+  })
+
   it('archives durably in order, idempotently skips repeats, and leaves accounting untouched', async () => {
     const dir = await makeDir('archive-home')
     const result = await harness({ sessions: [header('kept', dir, 100), header('gone', dir, 200)] })

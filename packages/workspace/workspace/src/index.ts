@@ -238,18 +238,21 @@ export class WorkspaceRegistry extends Service {
    * persistence); its workspace accounting — or lack of one — is irrelevant.
    * An already archived id resolves without writing.
    * @param sessionId - The session to archive.
+   * @param archived - False restores the session without changing workspace membership or order.
    * @returns resolution after durability.
    */
-  archiveSession(sessionId: SessionId): Promise<void> {
+  archiveSession(sessionId: SessionId, archived: boolean = true): Promise<void> {
     return this.enqueueOperation(async () => {
       // The chain slot serializes against every other registry write, so this
       // check-then-write pair cannot interleave with another archive.
-      if (this.requireState().archivedSessionIds.includes(sessionId)) return
+      if (this.requireState().archivedSessionIds.includes(sessionId) === archived) return
       if (!(await this.sessionKnown(sessionId))) {
         throw new WorkspaceUnknownSessionError(sessionId)
       }
       const state = this.requireState()
-      await this.setState({ ...state, archivedSessionIds: [...state.archivedSessionIds, sessionId] })
+      await this.setState({ ...state, archivedSessionIds: archived
+        ? [...state.archivedSessionIds, sessionId]
+        : state.archivedSessionIds.filter(id => id !== sessionId) })
     })
   }
 

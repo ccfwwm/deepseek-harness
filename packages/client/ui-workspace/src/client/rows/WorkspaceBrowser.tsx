@@ -12,7 +12,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
 import {
-  Button, IconCloseFill14, IconPersonalizationOutline16,
+  Button, IconArchiveOutline20, IconCloseFill14, IconPersonalizationOutline16,
   IconProjectAddOutline16, IconSearchOutline16, Menu, Modal, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
@@ -26,6 +26,7 @@ import {
   deriveFlat, deriveGroups, deriveSearchResults, owningGroupKey, UNGROUPED_KEY,
 } from '../tree.ts'
 import { ProjectRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
+import { ArchivedSessions } from './ArchivedSessions.tsx'
 import { FLAT_SESSION_ORDER_KEY } from '../stores.ts'
 import { WorkspacePickFlow } from '../WorkspacePicker.tsx'
 import css from './WorkspaceBrowser.module.css'
@@ -857,6 +858,7 @@ export function WorkspaceBrowser({
   deleteWorkspace,
   insertWorkspaceBefore,
   archiveSession,
+  restoreSession,
   insertSessionBefore,
   createWorkspace,
   searchSessions,
@@ -871,6 +873,8 @@ export function WorkspaceBrowser({
   const workspacePhase = useWorkspaces(state => state.phase)
   const workspaceStreamState = useWorkspaces(state => state.state)
   const archivedSessionIds = useWorkspaces(state => state.archivedSessionIds)
+  const [archiveOpen, setArchiveOpen] = useState(false)
+  const [archiveError, setArchiveError] = useState<string | null>(null)
   // Live occupancy of this surface's directory-flow hole (the same source the
   // flow reads): a composition without a picking affordance can add nothing.
   const directoryFlowAvailable = useDirectoryFlow(occupied => occupied)
@@ -1084,8 +1088,9 @@ export function WorkspaceBrowser({
   // archive-set echo lands. Failures are non-fatal console diagnostics, the
   // same posture as reorder rejections.
   const onSessionArchive = (sessionId: SessionNode['id']) => {
+    setArchiveError(null)
     archiveSession(sessionId).catch((reason: unknown) => {
-      console.warn('session archive rejected:', reason)
+      setArchiveError(reason instanceof Error ? reason.message : String(reason))
     })
   }
 
@@ -1331,6 +1336,20 @@ export function WorkspaceBrowser({
               />
             ))}
       </div>
+
+      {archiveError !== null && <div role="alert" className={css.renameError}>{archiveError}</div>}
+      <Tooltip label={t('archive.title')} disabled={wide}>
+        <button type="button" className={clsx(css.archiveButton, !wide && css.archiveRail)} aria-label={t('archive.title')} onClick={() => { setArchiveOpen(true) }}>
+          <IconArchiveOutline20 size={18} />
+          {wide && <><span>{t('archive.title')}</span><small>{archivedSessionIds.length}</small></>}
+        </button>
+      </Tooltip>
+      {archiveOpen && (
+        <ArchivedSessions
+          useSessions={useSessions} useWorkspaces={useWorkspaces} restoreSession={restoreSession}
+          open={open} onClose={() => { setArchiveOpen(false) }} t={t}
+        />
+      )}
 
       <Modal
         open={renameTarget !== null}

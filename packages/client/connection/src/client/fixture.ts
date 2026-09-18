@@ -357,7 +357,7 @@ interface WorkspaceInsertSessionBeforeRequest {
   readonly sessionId: SessionId
   readonly beforeSessionId?: SessionId
 }
-interface WorkspaceArchiveSessionRequest { readonly sessionId: SessionId }
+interface WorkspaceArchiveSessionRequest { readonly sessionId: SessionId; readonly archived?: boolean }
 interface WorkspaceArchiveValue { readonly archivedSessionIds: readonly SessionId[] }
 
 type WorkspaceFollowFrame =
@@ -3792,8 +3792,10 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
           details: { sessionId: request.sessionId },
         })
       }
-      if (!archivedSessionIds.includes(request.sessionId)) {
-        archivedSessionIds.push(request.sessionId)
+      const archived = request.archived ?? true
+      if (archivedSessionIds.includes(request.sessionId) !== archived) {
+        if (archived) archivedSessionIds.push(request.sessionId)
+        else archivedSessionIds.splice(archivedSessionIds.indexOf(request.sessionId), 1)
         emitWorkspace({ type: 'archived', archivedSessionIds: [...archivedSessionIds] })
       }
       return sessionOk({ archivedSessionIds: [...archivedSessionIds] })

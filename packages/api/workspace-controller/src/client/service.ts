@@ -60,8 +60,9 @@ export interface IWorkspaces {
   /**
    * Archive a Session from Workspace grouping surfaces.
    * @param sessionId - Session to archive.
+   * @param archived - False restores the Session; omitted archives.
    */
-  archiveSession(sessionId: SessionId): Promise<void>
+  archiveSession(sessionId: SessionId, archived?: boolean): Promise<void>
   /**
    * Move a Session within one Workspace account.
    * @param workspaceId - owning Workspace.
@@ -111,8 +112,8 @@ export class WorkspaceController extends Service implements IWorkspaces {
     if (!result.ok) throw commandError('reorder', result.error)
   }
 
-  async archiveSession(sessionId: SessionId): Promise<void> {
-    const result = await this.model.archiveSession(sessionId)
+  async archiveSession(sessionId: SessionId, archived: boolean = true): Promise<void> {
+    const result = await this.model.archiveSession(sessionId, archived)
     if (!result.ok) throw commandError('session archive', result.error)
   }
 

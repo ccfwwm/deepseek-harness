@@ -160,12 +160,14 @@ export class ClientWorkspaceModel implements WorkspaceFollowSink {
   /**
    * Archive one Session and install the returned complete archive set.
    * @param sessionId - Session to archive.
+   * @param archived - False restores the Session.
    * @returns generated Remote result.
    */
   async archiveSession(
     sessionId: WorkspaceArchiveSessionRequest['sessionId'],
+    archived = true,
   ): Promise<RemoteResult<WorkspaceArchiveValue>> {
-    const result = await this.remote.archiveSession({ sessionId })
+    const result = await this.remote.archiveSession({ sessionId, ...archived ? {} : { archived } })
     if (result.ok) this.installArchived(result.value.archivedSessionIds)
     return result
   }

@@ -93,6 +93,7 @@ function mount(overrides: Partial<WorkspaceBrowserProps> = {}) {
     renameWorkspace: vi.fn(async () => {}),
     deleteWorkspace: vi.fn(async () => {}),
     archiveSession: vi.fn(async () => {}),
+    restoreSession: vi.fn(async () => {}),
     insertWorkspaceBefore: vi.fn(async () => {}),
     insertSessionBefore: vi.fn(async () => {}),
     createWorkspace: vi.fn(async () => workspace('created', [])),
@@ -468,26 +469,55 @@ describe('WorkspaceBrowser', () => {
     expect(screen.queryByText('gone-s')).toBeNull()
   })
 
-  it('logs and keeps the tree when the archive call rejects', async () => {
+  it('shows the failure and keeps the tree when the archive call rejects', async () => {
     const rejection = new Error('archive exploded')
     const archiveSession = vi.fn(async () => { throw rejection })
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    try {
-      mount({
-        useSessions: hook(sessionState([summary('alpha-s', 1)])),
-        useWorkspaces: hook(workspaceState([workspace('alpha', ['alpha-s'])])),
-        archiveSession,
-      })
-      fireEvent.click(screen.getByText('alpha'))
-      fireEvent.click(screen.getByRole('button', { name: '会话“alpha-s”的操作' }))
-      fireEvent.click(screen.getByRole('menuitem', { name: '归档会话' }))
-      await Promise.resolve()
-      await Promise.resolve()
-      expect(warn).toHaveBeenCalledWith('session archive rejected:', rejection)
-      expect(screen.getByText('alpha-s')).toBeTruthy()
-    } finally {
-      warn.mockRestore()
-    }
+    mount({
+      useSessions: hook(sessionState([summary('alpha-s', 1)])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['alpha-s'])])),
+      archiveSession,
+    })
+    fireEvent.click(screen.getByText('alpha'))
+    fireEvent.click(screen.getByRole('button', { name: '会话“alpha-s”的操作' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '归档会话' }))
+    expect((await screen.findByRole('alert')).textContent).toBe(rejection.message)
+    expect(screen.getByText('alpha-s')).toBeTruthy()
+  })
+
+  it('finds, opens, and restores archived sessions without showing active sessions in the archive', async () => {
+    const b = mount({
+      useSessions: hook(sessionState([summary('文献综述', 2), summary('active', 1)])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['文献综述', 'active'])], [sid('文献综述')])),
+    })
+    fireEvent.click(screen.getByRole('button', { name: '归档会话' }))
+    const search = screen.getByRole('textbox', { name: '搜索归档会话或工作区' })
+    fireEvent.change(search, { target: { value: 'missing' } })
+    expect(screen.getByText('无匹配结果')).toBeTruthy()
+    fireEvent.change(search, { target: { value: 'alpha' } })
+    fireEvent.click(screen.getByRole('button', { name: /文献综述.*alpha/ }))
+    expect(b.props.open).toHaveBeenCalledWith('文献综述')
+    expect(b.props.restoreSession).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '归档会话' }))
+    fireEvent.click(screen.getByRole('button', { name: '恢复会话' }))
+    await waitFor(() => expect(b.props.restoreSession).toHaveBeenCalledWith('文献综述'))
+    rerender(b, { useWorkspaces: hook(workspaceState([workspace('alpha', ['文献综述', 'active'])])) })
+    expect(screen.getByText('暂无归档会话')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+    fireEvent.click(screen.getByText('alpha'))
+    expect(screen.getByText('文献综述')).toBeTruthy()
+  })
+
+  it('keeps archived rows available for retry after a failed restoration', async () => {
+    mount({
+      useSessions: hook(sessionState([summary('archived', 1)])),
+      useWorkspaces: hook(workspaceState([], [sid('archived')])),
+      restoreSession: vi.fn(async () => { throw new Error('restore failed') }),
+    })
+    fireEvent.click(screen.getByRole('button', { name: '归档会话' }))
+    fireEvent.click(screen.getByRole('button', { name: '恢复会话' }))
+    expect((await screen.findByRole('alert')).textContent).toBe('restore failed')
+    expect(screen.getByRole('button', { name: /archived.*未分组/ })).toBeTruthy()
+    expect((screen.getByRole('button', { name: '恢复会话' }) as HTMLButtonElement).disabled).toBe(false)
   })
 
   it('renders a fork child as a top-level row without a session twist', () => {

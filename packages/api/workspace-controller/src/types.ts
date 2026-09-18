@@ -102,6 +102,8 @@ export interface WorkspaceInsertSessionBeforeRequest {
 /** Session requested for archival from Workspace grouping surfaces. */
 export interface WorkspaceArchiveSessionRequest {
   readonly sessionId: SessionId
+  /** Omitted or true archives; false restores the existing Session. */
+  readonly archived?: boolean
 }
 
 /** Complete archived Session set after a mutation. */

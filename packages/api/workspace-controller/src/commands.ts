@@ -152,7 +152,7 @@ export class WorkspaceCommands {
    */
   async archiveSession(request: WorkspaceArchiveSessionRequest): Promise<WorkspaceArchiveValue> {
     try {
-      await this.ctx.workspaceRegistry.archiveSession(request.sessionId)
+      await this.ctx.workspaceRegistry.archiveSession(request.sessionId, request.archived)
     } catch (error) {
       if (!(error instanceof WorkspaceUnknownSessionError)) throw error
       throw new RemoteError('session/not-found', error.message, { sessionId: request.sessionId }, { cause: error })
