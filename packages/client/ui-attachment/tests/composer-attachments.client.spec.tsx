@@ -88,6 +88,28 @@ function props(overrides: Partial<ComposerAttachmentsOwnerProps> = {}): Composer
 }
 
 describe('ComposerAttachments', () => {
+  it('separates uploaded files from parsing and exposes retry and removal on failure', () => {
+    const draft = fileDraft('parsing')
+    if (draft.kind !== 'file') throw new Error('Expected file draft')
+    const onRetryFile = vi.fn()
+    const onRemoveAttachment = vi.fn()
+    const input = props({ attachments: [draft], uploads: { [draft.id]: { status: 'ready', receiptId: 'r' as never, file: { attachmentId: 'f' as never, name: 'parsing.pdf', bytes: 3 } } }, onRetryFile, onRemoveAttachment })
+    draft.prepared = { attachmentId: 'f', name: 'parsing.pdf', mediaType: 'application/pdf', bytes: 3, sha256: '', storageStatus: 'stored', parseStatus: 'running' }
+    const view = render(<ComposerAttachments {...input} />)
+    expect(view.getByText('file.parsingRunning')).toBeTruthy()
+    expect(view.queryByText('上传中…')).toBeNull()
+    draft.prepared = { ...draft.prepared, parseStatus: 'failed', parseError: 'Parser unavailable' }
+    view.rerender(<ComposerAttachments {...input} />)
+    fireEvent.click(view.getByRole('button', { name: '重试上传 parsing.pdf' }))
+    expect(onRetryFile).toHaveBeenCalledWith(draft.id)
+    fireEvent.click(view.getByRole('button', { name: '移除文件 parsing.pdf' }))
+    expect(onRemoveAttachment).toHaveBeenCalledWith(draft.id)
+    draft.prepared = { ...draft.prepared, parseStatus: 'done', parseProgress: 100 }
+    view.rerender(<ComposerAttachments {...input} />)
+    expect(view.getByText('file.parsingDone')).toBeTruthy()
+    expect(view.queryByRole('button', { name: '重试上传 parsing.pdf' })).toBeNull()
+  })
+
   it('accepts file drops anywhere on the document and keeps non-file drags native', () => {
     const onAddFiles = vi.fn()
     const view = render(<ComposerAttachments {...props({
