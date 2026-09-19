@@ -65,6 +65,10 @@ export function fileCardLabels(t: TranslateNS<'conversation'>, name: string): Fi
     uploading: t('file.uploading'),
     failed: t('file.uploadFailed'),
     retry: t('file.retry', { name }),
+    parsingQueued: t('file.parsingQueued'),
+    parsingRunning: t('file.parsingRunning'),
+    parsingDone: t('file.parsingDone'),
+    parsingFailed: t('file.parsingFailed'),
   }
 }
 

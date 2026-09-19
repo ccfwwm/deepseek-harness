@@ -5,6 +5,7 @@ export const NS = 'chat'
 
 /** Simplified Chinese dictionary and key-set source of truth. */
 export const zh = {
+  'chat.parsingFiles': '正在解析附件，完成后自动发送…',
   'attachment.preview': '预览附件',
   'attachment.parsed': '查看解析结果',
   'attachment.copy': '复制附件',
@@ -126,6 +127,7 @@ export type ChatKey = keyof typeof zh
 
 /** English dictionary, checked against the Chinese key set. */
 export const en = {
+  'chat.parsingFiles': 'Parsing attachments; your message will be sent automatically…',
   'attachment.preview': 'Preview attachment',
   'attachment.parsed': 'View parsed content',
   'attachment.copy': 'Copy attachment',

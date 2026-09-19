@@ -7,10 +7,13 @@ exports[`sidebar shell snapshots > renders the collapsed rail after the crossfad
 >
   <div
     class="root collapsed railIn quietBars"
+    data-sidebar-rail="true"
+    data-sidebar-root="true"
     style=""
   >
     <div
       class="logoRow"
+      data-sidebar-header="true"
     >
       <button
         aria-label="Open sidebar"
@@ -73,6 +76,7 @@ exports[`sidebar shell snapshots > renders the collapsed rail after the crossfad
     >
       <div
         class="footerActions"
+        hidden=""
       >
         <div
           data-slot="sidebar.footer.action"
@@ -80,12 +84,25 @@ exports[`sidebar shell snapshots > renders the collapsed rail after the crossfad
         />
       </div>
       <div
-        class="settingsArea"
+        class="footerBar"
       >
         <div
-          data-slot="sidebar.settings"
-          style="display: contents;"
-        />
+          class="settingsArea"
+        >
+          <div
+            data-slot="sidebar.settings"
+            style="display: contents;"
+          />
+        </div>
+        <button
+          aria-expanded="false"
+          aria-label="Show shortcuts"
+          class="footerToggle"
+          title="Show shortcuts"
+          type="button"
+        >
+          ⋯
+        </button>
       </div>
     </div>
   </div>
@@ -99,10 +116,13 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
 >
   <div
     class="root quietBars"
+    data-sidebar-rail="false"
+    data-sidebar-root="true"
     style="width: 300px;"
   >
     <div
       class="logoRow"
+      data-sidebar-header="true"
     >
       <button
         aria-label="New session"
@@ -203,6 +223,7 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
     >
       <div
         class="footerActions"
+        hidden=""
       >
         <div
           data-slot="sidebar.footer.action"
@@ -210,12 +231,25 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
         />
       </div>
       <div
-        class="settingsArea"
+        class="footerBar"
       >
         <div
-          data-slot="sidebar.settings"
-          style="display: contents;"
-        />
+          class="settingsArea"
+        >
+          <div
+            data-slot="sidebar.settings"
+            style="display: contents;"
+          />
+        </div>
+        <button
+          aria-expanded="false"
+          aria-label="Show shortcuts"
+          class="footerToggle"
+          title="Show shortcuts"
+          type="button"
+        >
+          ⋯
+        </button>
       </div>
     </div>
   </div>
@@ -229,10 +263,13 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
 >
   <div
     class="root quietBars"
+    data-sidebar-rail="false"
+    data-sidebar-root="true"
     style="width: 300px;"
   >
     <div
       class="logoRow"
+      data-sidebar-header="true"
     >
       <button
         aria-label="新建会话"
@@ -333,6 +370,7 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
     >
       <div
         class="footerActions"
+        hidden=""
       >
         <div
           data-slot="sidebar.footer.action"
@@ -340,12 +378,25 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
         />
       </div>
       <div
-        class="settingsArea"
+        class="footerBar"
       >
         <div
-          data-slot="sidebar.settings"
-          style="display: contents;"
-        />
+          class="settingsArea"
+        >
+          <div
+            data-slot="sidebar.settings"
+            style="display: contents;"
+          />
+        </div>
+        <button
+          aria-expanded="false"
+          aria-label="展开快捷入口"
+          class="footerToggle"
+          title="展开快捷入口"
+          type="button"
+        >
+          ⋯
+        </button>
       </div>
     </div>
   </div>

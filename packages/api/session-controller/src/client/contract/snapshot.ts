@@ -67,6 +67,7 @@ export interface PendingSubmission {
   /** Prompt text exactly as it will be sent (one text block). */
   readonly text: string
   /** Ordered image previews and durable file metadata matching the prompt attachments. */
+  readonly preparingFiles?: boolean
   readonly attachments: readonly PendingSubmissionAttachment[]
 }
 

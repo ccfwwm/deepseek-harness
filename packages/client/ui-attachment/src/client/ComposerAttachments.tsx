@@ -141,6 +141,11 @@ export function ComposerAttachments({
                     {...upload?.status === 'uploading' && upload.total !== undefined && upload.total > 0
                       ? { progress: upload.loaded / upload.total }
                       : {}}
+                    {...attachment.prepared?.parseStatus === undefined ? {} : {
+                      parseState: attachment.prepared.parseStatus === 'idle' ? undefined : attachment.prepared.parseStatus,
+                      parseProgress: attachment.prepared.parseProgress,
+                      parseError: attachment.prepared.parseError,
+                    }}
                     labels={fileCardLabels(t, attachment.file.name)}
                     onRemove={() => { onRemoveAttachment(attachment.id) }}
                     onRetry={() => { onRetryFile(attachment.id) }}

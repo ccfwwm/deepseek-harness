@@ -436,23 +436,26 @@ export function PendingSubmissionBubble({ submission, renderMessageImages, t }: 
     [submission.attachments],
   )
   return (
-    <UserStyleBubble
-      content={content}
-      previewAttachments={previewAttachments}
-      renderMessageImages={renderMessageImages}
-      pending={submission.placement === 'steering'}
-      echo
-      t={t}
-      actions={text => (
-        <MessageIconActions
-          text={text}
-          time={submission.time}
-          clock="start"
-          className={css.actions}
-          t={t}
-        />
-      )}
-    />
+    <>
+      {submission.preparingFiles && <p role="status" aria-live="polite">{t('chat.parsingFiles')}</p>}
+      <UserStyleBubble
+        content={content}
+        previewAttachments={previewAttachments}
+        renderMessageImages={renderMessageImages}
+        pending={submission.placement === 'steering'}
+        echo
+        t={t}
+        actions={text => (
+          <MessageIconActions
+            text={text}
+            time={submission.time}
+            clock="start"
+            className={css.actions}
+            t={t}
+          />
+        )}
+      />
+    </>
   )
 }
 

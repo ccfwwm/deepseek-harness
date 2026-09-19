@@ -13,37 +13,55 @@ export interface FileCardLabels {
   readonly failed: string
   /** Retry-button label. */
   readonly retry: string
+  readonly parsingQueued: string
+  readonly parsingRunning: string
+  readonly parsingDone: string
+  readonly parsingFailed: string
 }
 
 /** Upload display state resolved by the owner. */
 export type FileCardState = 'uploading' | 'ready' | 'error'
+export type FileParseState = 'queued' | 'running' | 'done' | 'failed'
 
 /** One pending file card: type glyph, name, size or upload status, remove, retry. */
 export function FileCard({
-  name, bytes, state, progress, labels, onRemove, onRetry,
+  name, bytes, state, progress, parseState, parseProgress, parseError, labels, onRemove, onRetry,
 }: {
   name: string
   bytes: number
   state: FileCardState
   progress?: number
+  parseState?: FileParseState | undefined
+  parseProgress?: number | undefined
+  parseError?: string | undefined
   labels: FileCardLabels
   onRemove: () => void
   onRetry: () => void
 }) {
   const extension = fileExtension(name).toUpperCase().slice(0, 8)
-  const meta = state === 'uploading'
+  const uploadMeta = state === 'uploading'
     ? labels.uploading
     : state === 'error'
       ? labels.failed
       : [extension, fileSizeText(bytes)].filter(part => part !== '').join(' ')
-  const retryable = state === 'error'
+  const parseMeta = parseState === 'queued'
+    ? labels.parsingQueued
+    : parseState === 'running'
+      ? `${labels.parsingRunning}${parseProgress === undefined ? '' : ` ${Math.round(parseProgress)}%`}`
+      : parseState === 'done'
+        ? labels.parsingDone
+        : parseState === 'failed'
+          ? `${labels.parsingFailed}${parseError ? `: ${parseError}` : ''}`
+          : undefined
+  const meta = parseMeta ?? uploadMeta
+  const retryable = state === 'error' || parseState === 'failed'
   return (
     <div
       className={`${css.card}${retryable ? ` ${css.failed}` : ''}`}
       title={name}
     >
       <span className={css.icon} aria-hidden>
-        {state === 'uploading'
+        {state === 'uploading' || parseState === 'queued' || parseState === 'running'
           ? <span className={css.spinner} />
           : <FileTypeIcon path={name} />}
       </span>
@@ -74,6 +92,11 @@ export function FileCard({
             className={css.progressBar}
             style={progress === undefined ? undefined : { width: `${String(Math.min(1, Math.max(0, progress)) * 100)}%` }}
           />
+        </span>
+      )}
+      {state === 'ready' && (parseState === 'queued' || parseState === 'running') && (
+        <span className={css.progressTrack} aria-label={meta}>
+          <span className={css.progressBar} style={parseProgress === undefined ? undefined : { width: `${String(Math.min(1, Math.max(0, parseProgress / 100)) * 100)}%` }} />
         </span>
       )}
     </div>

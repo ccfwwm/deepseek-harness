@@ -216,6 +216,7 @@ export class Session implements SessionFace {
       time: Date.now(),
       text: input.text,
       attachments: input.attachments,
+      ...(input.preparingFiles ? { preparingFiles: true } : {}),
     }]
     this.submissionSettlements.set(requestId, { onRetire: input.onRetire, retiring: false })
     // The blank → engaging edge flips here, ahead of prompt(): the composer

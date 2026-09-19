@@ -51,7 +51,7 @@ async function bench(maxConcurrentFileUploads = 2) {
 }
 
 describe('ConversationController', () => {
-  it('waits for receipt-authorized parsing before publishing a ready upload', async () => {
+  it('publishes the uploaded card immediately while receipt-authorized parsing continues', async () => {
     const b = await bench()
     const session = b.runtime.sessions.binding('s1')!.session
     let finish!: (value: unknown) => void
@@ -61,9 +61,10 @@ describe('ConversationController', () => {
     const [attachment] = b.root.createDrafts(session.sessionId, [new File(['x'], 'paper.pdf')])
     if (attachment === undefined) throw new Error('missing draft')
     await vi.waitFor(() => { expect(prepareNative).toHaveBeenCalledWith({ sessionId: session.sessionId, receiptId: 'pdf-receipt' }) })
-    expect(b.root.fileUploads.getSnapshot()[attachment.id]?.status).toBe('uploading')
+    expect(b.root.fileUploads.getSnapshot()[attachment.id]?.status).toBe('ready')
+    expect(attachment.kind === 'file' && attachment.prepared?.parseStatus).toBe('running')
     finish({ ok: true, value: { attachmentId: 'pdf-file', content: 'Extracted paper', parser: 'mineru' } })
-    await vi.waitFor(() => { expect(b.root.fileUploads.getSnapshot()[attachment.id]?.status).toBe('ready') })
+    await vi.waitFor(() => { expect(attachment.kind === 'file' && attachment.prepared?.parseStatus).toBe('done') })
     expect(attachment.kind === 'file' && attachment.prepared?.content).toBe('Extracted paper')
     await b.runtime.dispose()
   })
@@ -498,6 +499,48 @@ describe('sendSession submission echo', () => {
     }
     return { ...b, beginSubmission, abandon, retire, revoked, restore }
   }
+
+  it.each(['success', 'failure', 'cancel'] as const)('echoes a parsing file immediately and settles on %s', async (outcome) => {
+    const b = await echoBench()
+    let finish!: (value: unknown) => void
+    const prepareNative = vi.fn(() => new Promise((resolve) => { finish = resolve }))
+    const controller = new AbortController()
+    b.runtime.ctx.provide('remote.zerowallFiles', { prepareNative })
+    const session = b.runtime.sessions.binding('s1')!.session
+    ;(session as { uploadFile?: unknown }).uploadFile = vi.fn(async () => ({ ok: true, value: { receiptId: 'parsing-receipt', file: { attachmentId: 'file-1', name: 'paper.pdf', bytes: 1 } } }))
+    try {
+      const [attachment] = b.root.createDrafts(session.sessionId, [new File(['x'], 'paper.pdf')])
+      await vi.waitFor(() => expect(prepareNative).toHaveBeenCalledOnce())
+      const sending = b.root.sendSession(session, 'read this', [attachment!.id], 'queue', controller.signal)
+      const settled = sending.then(value => ({ value }), error => ({ error }))
+      expect(b.beginSubmission.mock.calls[0]?.[0]).toMatchObject({ preparingFiles: true, attachments: [{ type: 'file', value: { name: 'paper.pdf' } }] })
+      expect(b.prompt).not.toHaveBeenCalled()
+      if (outcome === 'cancel') {
+        controller.abort()
+        expect(await settled).toMatchObject({ error: { name: 'AbortError' } })
+        expect(b.abandon).toHaveBeenCalledOnce()
+        expect(b.prompt).not.toHaveBeenCalled()
+      } else if (outcome === 'failure') {
+        finish({ ok: false, error: { message: 'Parser unavailable' } })
+        expect(await settled).toMatchObject({ error: { message: 'Parser unavailable' } })
+        expect(b.abandon).toHaveBeenCalledOnce()
+        expect(attachment!.kind === 'file' && attachment!.prepared?.parseStatus).toBe('failed')
+        expect(b.root.resolveDraftAttachments([attachment!.id])).toHaveLength(1)
+        expect(b.prompt).not.toHaveBeenCalled()
+      } else {
+        finish({ ok: true, value: { attachmentId: 'file-1', content: 'Extracted', parser: 'mineru' } })
+        await vi.waitFor(() => expect(b.prompt).toHaveBeenCalledOnce())
+        expect(b.prompt.mock.calls[0]?.[0]).toEqual([{ type: 'file', receiptId: 'parsing-receipt' }, { type: 'text', text: 'read this' }])
+        b.retire.onRetire?.({ reason: 'observed', attachments: [] })
+        expect(await settled).toEqual({ value: { kind: 'success' } })
+      }
+    } finally {
+      controller.abort()
+      finish({ ok: true, value: { parser: 'mineru' } })
+      b.restore()
+      await b.runtime.dispose()
+    }
+  })
 
   it('registers the echo before serialization and prompts with its identity', async () => {
     const b = await echoBench()

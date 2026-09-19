@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-19-upload-parsing-visibility.md
+2026-09-19-upload-parsing-visibility.md: 5c68a02d1c368a5c7c9fc68fbd7cf265f7833e52
+2026-09-19-upload-parsing-visibility.zh.md: 273c391288ca1bc02efa6acb7b20fb6cec9bb6e4

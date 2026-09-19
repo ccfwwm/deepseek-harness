@@ -328,7 +328,7 @@ export function QueueDock({ useSession, updateQueue, notify, loadImage, t }: Que
                   </span>
                 )}
                 <span className={css.preview}>{projectUserText(submission.text, [])}</span>
-                <span className={css.status} role="status">{t('queue.sending')}</span>
+                <span className={css.status} role="status">{t(submission.preparingFiles ? 'file.parsingRunning' : 'queue.sending')}</span>
                 {queueMutable && <div className={css.actions}>
                   <button
                     type="button"

@@ -35,6 +35,7 @@ export interface BeginSubmissionInput {
   /** Prompt text exactly as the upcoming prompt will send it. */
   readonly text: string
   /** Ordered image previews and durable file metadata matching the upcoming prompt attachments. */
+  readonly preparingFiles?: boolean
   readonly attachments: readonly PendingSubmissionAttachment[]
   /** Settlement callback fired exactly once when the echo retires. */
   readonly onRetire?: (retirement: PendingSubmissionRetirement) => void

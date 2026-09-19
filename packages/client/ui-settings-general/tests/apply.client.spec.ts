@@ -9,8 +9,6 @@ import { apply as settingsApply, inject as settingsInject } from '@deepseek-ai/d
 import { apply, inject } from '@deepseek-ai/dsh-client-ui-settings-general/client'
 import { CloseLabel, HeaderContent, TriggerContent } from '../src/client/chrome.tsx'
 import { GeneralSection } from '../src/client/GeneralSection.tsx'
-import { SettingsDocumentAction } from '../src/client/SettingsDocumentAction.tsx'
-import type { SettingsDocumentActionInjected } from '../src/client/SettingsDocumentAction.tsx'
 
 // These specs assert the shipped Chinese copy. The lane has no jsdom `window`,
 // so browser-language detection never runs and a fresh LocaleRuntime opens on
@@ -20,7 +18,6 @@ import type { SettingsDocumentActionInjected } from '../src/client/SettingsDocum
 const SEATS = [
   ['settings.trigger', TriggerContent],
   ['settings.header', HeaderContent],
-  ['settings.action', SettingsDocumentAction],
   ['settings.close', CloseLabel],
   ['settings.section', GeneralSection],
 ] as const
@@ -98,10 +95,7 @@ describe('ui-settings-general apply', () => {
     // The onboarding hole stays declared for feature-owned steps; this plugin
     // no longer seats one.
     expect(before.slots.entries('settings.onboarding')).toEqual([])
-    const action = before.slots.entries('settings.action')[0]!
-    const actionInjected = (action.inject as unknown as () => SettingsDocumentActionInjected)()
-    expect(actionInjected.controller.store.getSnapshot().status).toBe('idle')
-    expect(actionInjected.hooks.snapshot).toBe(actionInjected.controller.store)
+    expect(before.slots.entries('settings.action')).toEqual([])
     // Copy rides the standard locale seat: every seat declares the namespace.
     for (const [name] of SEATS) {
       expect(before.slots.entries(name)[0]!.locale).toBe('settings')
@@ -156,21 +150,6 @@ describe('ui-settings-general apply', () => {
     expect(resolveSlotLabel(generalEntry(b.slots)!.options.label)).toBe('General')
     b.locale.setLocale('zh')
     expect(resolveSlotLabel(generalEntry(b.slots)!.options.label)).toBe('通用设置')
-  })
-
-  it('reads availability from the shared mirror and follows its reconnect refresh', async () => {
-    const b = await bench()
-    declare(b.slots)
-    await b.ctx.plugin({ inject: [...inject], apply }).await()
-    const entry = b.slots.entries('settings.action')[0]!
-    const { controller } = (entry.inject as unknown as () => SettingsDocumentActionInjected)()
-    // The mirror read once at its own boot; the action's load adds no read.
-    await vi.waitFor(() => { expect(b.settingsDescribe).toHaveBeenCalledOnce() })
-    await controller.load()
-    expect(b.settingsDescribe).toHaveBeenCalledOnce()
-    expect(controller.store.getSnapshot().status).toBe('ready')
-    b.ctx.emit('connection/reset')
-    await vi.waitFor(() => { expect(b.settingsDescribe).toHaveBeenCalledTimes(2) })
   })
 
   it('withholds the Host document action off-loopback', async () => {

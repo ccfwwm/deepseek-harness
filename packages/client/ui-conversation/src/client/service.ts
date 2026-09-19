@@ -234,9 +234,10 @@ export class ConversationController extends Service implements IConversation {
     this.blocks = config.blocks
     this.maxConcurrentFileUploads = config.maxConcurrentFileUploads
     ctx.effect(() => async () => {
+      const preparations = [...this.fileUploadOperations.keys()].map(id => this.pendingFilePreparations.get(id))
       const operations = [...this.fileUploadOperations.values()]
       for (const operation of operations) operation.controller.abort()
-      await Promise.allSettled([...this.pendingFileUploads])
+      await Promise.allSettled([...this.pendingFileUploads, ...preparations])
       this.fileUploadOperations.clear()
       this.fileUploadQueue.length = 0
       for (const attachment of this.draftAttachments.values()) {
@@ -314,7 +315,12 @@ export class ConversationController extends Service implements IConversation {
     const serializeAttachments = (): Promise<Parameters<SessionFace['prompt']>[0]> => Promise.all(
       attachments.map(async attachment => attachment.kind === 'image'
         ? { type: 'image' as const, ...await this.encodeImage(attachment.file) }
-        : { type: 'file' as const, receiptId: uploadFor(attachment).receiptId }),
+        : await (async () => {
+          const pending = this.pendingFilePreparations.get(attachment.id)
+          if (pending !== undefined) await this.awaitFilePreparation(pending, signal)
+          if (attachment.prepared?.parseStatus === 'failed') throw new Error(attachment.prepared.parseError)
+          return { type: 'file' as const, receiptId: uploadFor(attachment).receiptId }
+        })()),
     )
     const snapshot = session.getSnapshot()
     if (snapshot.subagent !== null) {
@@ -331,6 +337,7 @@ export class ConversationController extends Service implements IConversation {
       mode,
       text,
       attachments: pendingAttachments,
+      preparingFiles: attachments.some(attachment => this.pendingFilePreparations.has(attachment.id)),
       onRetire: (settlement) => {
         this.settleSubmittedAttachments(session.sessionId, attachments, settlement)
         finishRetirement?.(settlement)
@@ -340,6 +347,7 @@ export class ConversationController extends Service implements IConversation {
     try {
       await nextPaint()
       const uploaded = await serializeAttachments()
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
       content = [...uploaded, ...(text === '' ? [] : [{ type: 'text' as const, text }])]
     } catch (error) {
       submission.abandon()
@@ -487,7 +495,7 @@ export class ConversationController extends Service implements IConversation {
   retryFileUpload(sessionId: SessionId, id: DraftAttachmentId): void {
     const attachment = this.draftAttachments.get(id)
     if (attachment === undefined || attachment.kind !== 'file') return
-    if (this.fileUploads.getSnapshot()[id]?.status !== 'error') return
+    if (this.fileUploads.getSnapshot()[id]?.status !== 'error' && attachment.prepared?.parseStatus !== 'failed') return
     this.beginFileUpload(sessionId, attachment)
   }
 
@@ -505,7 +513,11 @@ export class ConversationController extends Service implements IConversation {
 
   private beginFileUpload(sessionId: SessionId, attachment: ComposerFileAttachment): void {
     this.fileUploadOperations.get(attachment.id)?.controller.abort()
+    this.pendingFilePreparations.delete(attachment.id)
+    delete attachment.prepared
     const controller = new AbortController()
+    const binding = this.requireSessions().binding(sessionId)
+    const shell = binding === undefined ? undefined : this.input.for(binding.ctx)
     this.fileUploads.update((draft) => {
       draft[attachment.id] = { status: 'uploading', loaded: 0 }
     })
@@ -539,14 +551,50 @@ export class ConversationController extends Service implements IConversation {
         if (result.ok) {
           const remote = this.ctx.get('remote.zerowallFiles') as FilesRemote | undefined
           if (remote?.prepareNative !== undefined) {
-            try {
-              const parsed = await remote.prepareNative({ sessionId, receiptId: result.value.receiptId })
-              if (this.fileUploadOperations.get(attachment.id)?.controller !== controller) return
-              if (parsed.ok) attachment.prepared = parsed.value
-            } catch (error) {
-              // The receipt remains usable when extraction is unavailable.
-              this.ctx.logger.warn('File extraction failed: %s', String(error))
-            }
+            const preparing = (async (): Promise<PreparedFile> => {
+              const initial: PreparedFile = {
+                attachmentId: String(result.value.file.attachmentId),
+                name: attachment.file.name || 'uploaded-file',
+                mediaType: attachment.file.type || 'application/octet-stream',
+                bytes: attachment.file.size,
+                sha256: '', storageStatus: 'stored', parseStatus: 'running',
+              }
+              attachment.prepared = initial
+              try {
+                const parsed = await this.awaitFilePreparation(
+                  remote.prepareNative({ sessionId, receiptId: result.value.receiptId }), controller.signal,
+                )
+                controller.signal.throwIfAborted()
+                if (!parsed.ok) throw new Error(parsed.error.message)
+                if (parsed.value.parser === undefined && parsed.value.warning) throw new Error(parsed.value.warning)
+                attachment.prepared = { ...parsed.value, parseStatus: 'done', parseProgress: 100 }
+                return attachment.prepared
+              } catch (error) {
+                controller.signal.throwIfAborted()
+                attachment.prepared = { ...initial, parseStatus: 'failed', parseError: error instanceof Error ? error.message : String(error) }
+                throw error
+              } finally {
+                if (this.fileUploadOperations.get(attachment.id)?.controller === controller) {
+                  this.pendingFilePreparations.delete(attachment.id)
+                  this.fileUploadOperations.delete(attachment.id)
+                }
+                // Publish a new upload snapshot so both composer and submission cards update.
+                if (!controller.signal.aborted && this.draftAttachments.has(attachment.id)) {
+                  this.fileUploads.update((draft) => {
+                    const current = draft[attachment.id]
+                    if (current?.status === 'ready') draft[attachment.id] = { ...current }
+                  })
+                  shell?.setDraft(shell.state.getSnapshot().draft)
+                }
+              }
+            })()
+            this.pendingFilePreparations.set(attachment.id, preparing)
+            // A picked file may never be submitted; its rejected preparation is
+            // represented in the UI and awaited again by submission when needed.
+            void preparing.catch(() => undefined)
+            this.fileUploads.update((draft) => {
+              if (attachment.id in draft) draft[attachment.id] = { status: 'ready', receiptId: result.value.receiptId, file: result.value.file }
+            })
           }
         }
         if (this.fileUploadOperations.get(attachment.id)?.controller !== controller) return
@@ -566,13 +614,30 @@ export class ConversationController extends Service implements IConversation {
           }
         })
       } finally {
-        if (this.fileUploadOperations.get(attachment.id)?.controller === controller) {
+        if (this.fileUploadOperations.get(attachment.id)?.controller === controller
+          && !this.pendingFilePreparations.has(attachment.id)) {
           this.fileUploadOperations.delete(attachment.id)
         }
       }
     }
     this.fileUploadQueue.push({ run, settle })
     this.pumpFileUploads()
+  }
+
+  /** Await preparation without leaving a cancelled submission blocked on a remote parser. */
+  private async awaitFilePreparation<T>(pending: Promise<T>, signal?: AbortSignal): Promise<T> {
+    if (signal === undefined) return pending
+    signal.throwIfAborted()
+    let abort!: () => void
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      abort = () => reject(signal.reason ?? new DOMException('Aborted', 'AbortError'))
+      signal.addEventListener('abort', abort, { once: true })
+    })
+    try {
+      return await Promise.race([pending, cancelled])
+    } finally {
+      signal.removeEventListener('abort', abort)
+    }
   }
 
   /** Start queued upload Workers until the configured concurrency is occupied. */
@@ -640,6 +705,7 @@ export class ConversationController extends Service implements IConversation {
     const operation = this.fileUploadOperations.get(id)
     this.fileUploadOperations.delete(id)
     operation?.controller.abort()
+    this.pendingFilePreparations.delete(id)
     this.draftAttachments.delete(id)
     if (attachment.kind === 'image') {
       revokePreview(attachment.previewUrl)
