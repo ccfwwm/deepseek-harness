@@ -9,6 +9,8 @@ English | [中文](README.zh.md)
 
 ## Summary
 
+For trusted ZeroWall rmcp connections, `omicverse.run.agent` receives the active model route and credential through the existing resolver. OmicVerse Python, native MCP and CPU adapter calls do not receive this injection. The service owns transient credential handling and explicit API protocol validation.
+
 `dsh-mcp-client` lets the model call tools from external Model Context Protocol (MCP) servers as native harness tools. Configure one server per entry, and its tools appear under stable names such as `mcp__github__create_issue`. Use it for filesystem, GitHub, database, memory, or other MCP tool servers; no server is enabled by default. Tool definitions add tokens to every model request, while a slow or crashed server can delay startup or make its tools fail until recovery. The package bridges tools only; MCP resources and prompts are unsupported.
 
 ## Table of Contents

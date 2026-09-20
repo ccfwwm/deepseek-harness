@@ -9,6 +9,8 @@ kind: "package-reference"
 
 ## 概述
 
+可信 ZeroWall rmcp 连接的 `omicverse.run.agent` 通过现有解析器获取当前模型路线与凭据。OmicVerse Python、原生 MCP 和 CPU 适配调用不接收此注入。服务端负责临时凭据处理和显式 API 协议校验。
+
 `dsh-mcp-client` 让模型把外部 MCP（Model Context Protocol）服务器的工具当作 harness 原生工具调用。每台服务器配置一条记录，其工具便会以稳定名称出现，例如 `mcp__github__create_issue`。可将它用于文件系统、GitHub、数据库、记忆或其他 MCP 工具服务器；默认不启用任何服务器。工具定义会为每次模型请求增加 token；缓慢或崩溃的服务器可能延迟启动，或让工具调用失败直至恢复。本包只桥接工具；MCP resources 与 prompts 不受支持。
 
 ## 目录

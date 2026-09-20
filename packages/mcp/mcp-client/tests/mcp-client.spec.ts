@@ -363,6 +363,22 @@ describe('syncTools', () => {
     expect(JSON.stringify(denied)).toContain('LLM_ROUTE_MISMATCH')
   })
 
+  it('injects OmicVerse Agent route but leaves scientific Python requests credential-free', async () => {
+    ctx.provide('zerowallMcpRouteResolver', { resolve: async () => ({ provider: 'custom', model: 'selected-model', baseUrl: 'https://model.invalid/v1', api: 'openai-responses', apiKey: 'task-sentinel' }) } as never)
+    const client = createMockClient([{ name: 'omicverse_execute', inputSchema: { type: 'object' } }])
+    await syncTools(client as never, ctx, { ...defaultOpts, serverName: 'rmcp' }, new Map())
+    const agent = { options: { provider: 'custom', model: 'selected-model' }, session: { id: 's', requestHeader: () => undefined } }
+    for (const action of ['omicverse.run.agent', 'omicverse.run.python']) await ctx.tools.execute({ signal: testToolSignal, callId: ToolCallId(action), name: 'mcp__rmcp__omicverse_execute', arguments: { action, arguments: { project_id: 'p', confirm: true } }, agent } as never)
+    const calls = client.callTool.mock.calls.map((call) => {
+      return (call[0] as { arguments: { arguments: Record<string, unknown> } }).arguments.arguments
+    })
+    expect(calls[0]).toMatchObject({
+      api_key: 'task-sentinel', model: 'selected-model', api: 'openai-responses', base_url: 'https://model.invalid/v1',
+    })
+    expect(calls[1]).not.toHaveProperty('api_key')
+    expect(calls[1]).not.toHaveProperty('model')
+  })
+
   it('rejects a tool list where one raw name appears twice', async () => {
     const client = createMockClient([
       { name: 'dup', inputSchema: { type: 'object' } },

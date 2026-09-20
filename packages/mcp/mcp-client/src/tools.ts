@@ -619,10 +619,11 @@ function createExecutor(
     // string/number/null). Fallback to {} lets the MCP server produce a
     // specific "missing required param" error the model can learn from.
     const argsObj = (typeof args === 'object' && args !== null ? { ...(args as Record<string, unknown>) } : {}) as Record<string, unknown>
-    const compact = rawName === 'biomni_execute'
+    const compact = rawName === 'biomni_execute' || rawName === 'omicverse_execute'
     const action = compact && typeof argsObj.action === 'string' ? argsObj.action : rawName
     const execution = ['biomni.run.agent', 'biomni.call.tool', 'biomni.run.python', 'r_biomni_run_agent', 'r_biomni_call_tool', 'r_biomni_run_python'].includes(action)
       || action.startsWith('biomni.tool.')
+      || action === 'omicverse.run.agent'
     const trusted = ['rmcp', 'rbioagent', 'rdatalinux_biomni'].includes(opts.serverName ?? '')
     if (execution && trusted) {
       let nested = compact ? argsObj.arguments : argsObj
@@ -655,10 +656,10 @@ function createExecutor(
           if (key) values.api_key ??= key
         }
       }
-      values.session_id ??= exec.agent?.session.id
+      if (rawName !== 'omicverse_execute') values.session_id ??= exec.agent?.session.id
       const environment = ctx.get('zerowallMcpRuntimeEnvironment') as { resolve?: (server: string) => Promise<Record<string, string>> } | undefined
       const env = await environment?.resolve?.(opts.serverName)
-      if (env && Object.keys(env).length) values.runtime_env = env
+      if (rawName !== 'omicverse_execute' && env && Object.keys(env).length) values.runtime_env = env
       if (compact) argsObj.arguments = values
       else Object.assign(argsObj, values)
     }
