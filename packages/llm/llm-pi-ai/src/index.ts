@@ -211,6 +211,7 @@ export function apply(ctx: Context, config: Config): void {
       )
     },
   })
+  ctx.provide('llmPiAiTaskRouteResolver', { resolve: (provider: string, model: string) => adapter.resolveTaskRoute(provider, model) } as never)
   // Independent of the route set: signing in is what makes a route worth
   // adding, so the flows are offered before any profile names their provider.
   // Scoped to the authorization seam rather than injected outright, because a

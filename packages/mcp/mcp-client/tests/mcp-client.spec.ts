@@ -347,6 +347,22 @@ describe('syncTools', () => {
     expect(resolver).toHaveBeenCalledWith('zerowall-ai-cloud-50-completions', 'gpt-test')
   })
 
+  it('forwards credentials for compact dynamic tools and rejects a substituted endpoint', async () => {
+    ctx.provide('zerowallMcpRouteResolver', { resolve: async () => ({ provider: 'deepseek', model: 'deepseek-chat', baseUrl: 'https://api.deepseek.com/v1', api: 'openai-completions', apiKey: 'sentinel' }) } as never)
+    ctx.provide('zerowallMcpRuntimeEnvironment', { resolve: async () => ({ NCBI_API_KEY: 'research-sentinel' }) } as never)
+    const client = createMockClient([{ name: 'biomni_execute', inputSchema: { type: 'object' } }])
+    await syncTools(client as never, ctx, { ...defaultOpts, serverName: 'rmcp' }, new Map())
+    const agent = { options: { provider: 'deepseek', model: 'deepseek-chat' }, session: { id: 's', requestHeader: () => undefined } }
+    const original = { action: 'biomni.tool.database.query_uniprot', arguments: JSON.stringify({ project_id: 'p', tool_arguments: { prompt: 'TP53' }, confirm: true }) }
+    await ctx.tools.execute({ signal: testToolSignal, callId: ToolCallId('dynamic'), name: 'mcp__rmcp__biomni_execute', arguments: original, agent } as never)
+    const sent = client.callTool.mock.calls[0]?.[0] as { arguments: { arguments: Record<string, unknown> } }
+    expect(sent.arguments.arguments).toMatchObject({ api_key: 'sentinel', api: 'openai-completions', model: 'deepseek-chat', runtime_env: { NCBI_API_KEY: 'research-sentinel' } })
+    expect(JSON.stringify(original)).not.toContain('sentinel')
+    const denied = await ctx.tools.execute({ signal: testToolSignal, callId: ToolCallId('mismatch'), name: 'mcp__rmcp__biomni_execute', arguments: { action: 'biomni.call.tool', arguments: { base_url: 'https://other.invalid/v1' } }, agent } as never)
+    expect(client.callTool.mock.calls).toHaveLength(1)
+    expect(JSON.stringify(denied)).toContain('LLM_ROUTE_MISMATCH')
+  })
+
   it('rejects a tool list where one raw name appears twice', async () => {
     const client = createMockClient([
       { name: 'dup', inputSchema: { type: 'object' } },

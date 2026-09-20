@@ -42,6 +42,7 @@ export interface ToolBridgeOptions {
 
 /** Host-resolved route details used by Biomni execution tools. */
 export interface BiomniRouteDetails {
+  api?: string
   provider?: string
   model?: string
   baseUrl?: string
@@ -618,42 +619,46 @@ function createExecutor(
     // string/number/null). Fallback to {} lets the MCP server produce a
     // specific "missing required param" error the model can learn from.
     const argsObj = (typeof args === 'object' && args !== null ? { ...(args as Record<string, unknown>) } : {}) as Record<string, unknown>
-    // Biomni uses the model that is active in the current ZeroWall session.
-    // Inject only non-secret routing metadata; API keys remain in the Host
-    // credential broker and are never added to MCP arguments or chat content.
-    const compactBiomniArgs = rawName === 'biomni_execute' && typeof argsObj.arguments === 'object' && argsObj.arguments !== null
-      ? { ...(argsObj.arguments as Record<string, unknown>) }
-      : undefined
-    const biomniArgs = compactBiomniArgs ?? argsObj
-    const compactBiomniAction = rawName === 'biomni_execute' && typeof argsObj.action === 'string' ? argsObj.action : undefined
-    if (opts.serverName === 'rbioagent' || opts.serverName === 'rdatalinux_biomni' || rawName.startsWith('r_biomni_') || rawName === 'biomni_execute') {
+    const compact = rawName === 'biomni_execute'
+    const action = compact && typeof argsObj.action === 'string' ? argsObj.action : rawName
+    const execution = ['biomni.run.agent', 'biomni.call.tool', 'biomni.run.python', 'r_biomni_run_agent', 'r_biomni_call_tool', 'r_biomni_run_python'].includes(action)
+      || action.startsWith('biomni.tool.')
+    const trusted = ['rmcp', 'rbioagent', 'rdatalinux_biomni'].includes(opts.serverName ?? '')
+    if (execution && trusted) {
+      let nested = compact ? argsObj.arguments : argsObj
+      if (typeof nested === 'string') nested = JSON.parse(nested)
+      if (nested === null || typeof nested !== 'object' || Array.isArray(nested)) throw new Error('Biomni arguments must be an object')
+      const values = { ...nested as Record<string, unknown> }
       const route = exec.agent?.session.requestHeader()?.config ?? exec.agent?.options
       const provider = typeof route?.provider === 'string' ? route.provider : undefined
       const model = typeof route?.model === 'string' ? route.model : undefined
-      const routeResolver = ctx.get('zerowallMcpRouteResolver') as BiomniRouteResolver | undefined
-      const resolved = provider !== undefined && model !== undefined && typeof routeResolver?.resolve === 'function'
-        ? await routeResolver.resolve(provider, model)
-        : undefined
-      if (typeof biomniArgs.model !== 'string' && typeof resolved?.model === 'string') biomniArgs.model = resolved.model
-      if (typeof biomniArgs.model !== 'string' && model !== undefined) biomniArgs.model = model
-      const baseUrl = canonicalAiCloudBaseUrl(resolved?.baseUrl)
-        ?? canonicalAiCloudBaseUrl((route as { baseUrl?: unknown; baseURL?: unknown } | undefined)?.baseUrl)
-        ?? canonicalAiCloudBaseUrl((route as { baseURL?: unknown } | undefined)?.baseURL)
-      if (typeof biomniArgs.base_url !== 'string' && baseUrl !== undefined) biomniArgs.base_url = baseUrl
-      const sessionId = exec.agent?.session.id
-      if (typeof biomniArgs.session_id !== 'string' && typeof sessionId === 'string' && sessionId.length > 0) biomniArgs.session_id = sessionId
-      // ZeroWall's AI Cloud routes keep the provider key in its Host-side
-      // credential broker. Resolve it only for the two Biomni execution
-      // tools that declare `api_key`; never add it to read-only calls or logs.
-      if (rawName === 'r_biomni_run_agent' || rawName === 'r_biomni_call_tool' || compactBiomniAction === 'biomni.run.agent') {
-        const resolver = ctx.get('zerowallMcpCredentialResolver') as { resolve?: (provider: string, model: string) => Promise<string | undefined> } | undefined
-        if (typeof biomniArgs.api_key !== 'string' && typeof resolved?.apiKey === 'string') biomniArgs.api_key = resolved.apiKey
-        if (typeof biomniArgs.api_key !== 'string' && provider !== undefined && model !== undefined && typeof resolver?.resolve === 'function') {
-          const apiKey = await resolver.resolve(provider, model)
-          if (apiKey !== undefined && apiKey.trim().length > 0) biomniArgs.api_key = apiKey
+      if (provider && model) {
+        const managed = ctx.get('zerowallMcpRouteResolver') as BiomniRouteResolver | undefined
+        const generic = ctx.get('llmPiAiTaskRouteResolver') as BiomniRouteResolver | undefined
+        const resolved = await managed?.resolve?.(provider, model) ?? await generic?.resolve?.(provider, model)
+        const base = canonicalAiCloudBaseUrl(resolved?.baseUrl)
+          ?? canonicalAiCloudBaseUrl((route as { baseUrl?: string; baseURL?: string })?.baseUrl ?? (route as { baseURL?: string })?.baseURL)
+        const activeModel = resolved?.model ?? model
+        const mismatch = (typeof values.base_url === 'string' && canonicalAiCloudBaseUrl(values.base_url) !== base)
+          || (typeof values.model === 'string' && values.model !== activeModel)
+          || (typeof values.provider === 'string' && values.provider !== provider)
+        if (mismatch && typeof values.api_key !== 'string') throw new Error('LLM_ROUTE_MISMATCH: select the intended model in ZeroWall Settings before forwarding its credential')
+        if (!mismatch) {
+          values.model ??= activeModel
+          values.provider ??= resolved?.provider ?? provider
+          if (base) values.base_url ??= base
+          if (resolved?.api) values.api ??= resolved.api
+          const credentials = ctx.get('zerowallMcpCredentialResolver') as { resolve?: (provider: string, model: string) => Promise<string | undefined> } | undefined
+          const key = resolved?.apiKey ?? await credentials?.resolve?.(provider, model)
+          if (key) values.api_key ??= key
         }
       }
-      if (compactBiomniArgs !== undefined) argsObj.arguments = biomniArgs
+      values.session_id ??= exec.agent?.session.id
+      const environment = ctx.get('zerowallMcpRuntimeEnvironment') as { resolve?: (server: string) => Promise<Record<string, string>> } | undefined
+      const env = await environment?.resolve?.(opts.serverName)
+      if (env && Object.keys(env).length) values.runtime_env = env
+      if (compact) argsObj.arguments = values
+      else Object.assign(argsObj, values)
     }
     let result = await callToolUncached(client, rawName, argsObj, exec, opts)
 
