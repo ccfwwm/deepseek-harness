@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-20-omicverse-agent-route.md
-2026-09-20-omicverse-agent-route.md: 086681c2022eeb3666801ddb508afc3140a9777c
-2026-09-20-omicverse-agent-route.zh.md: c15167e79a4475885d9d3fb1d2a94347d37f2572
+2026-09-20-omicverse-agent-route.md: d9ded5b902b153493079de8af94e3cbb6f9c82f6
+2026-09-20-omicverse-agent-route.zh.md: 21bbc34de4c13c3c866e5969558470dc691c9633

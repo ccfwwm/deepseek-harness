@@ -1,8 +1,8 @@
 # Agent Note: OmicVerse Agent 任务模型路线
 
-[English](2026-09-20-omicverse-agent-route.md) | 中文
-
 Status: implemented
+
+[English](2026-09-20-omicverse-agent-route.md) | 中文
 
 ## Problem
 

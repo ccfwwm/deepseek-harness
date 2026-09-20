@@ -1,8 +1,8 @@
 # Agent Note: OmicVerse Agent task route
 
-English | [中文](2026-09-20-omicverse-agent-route.zh.md)
-
 Status: implemented
+
+English | [中文](2026-09-20-omicverse-agent-route.zh.md)
 
 ## Problem
 
