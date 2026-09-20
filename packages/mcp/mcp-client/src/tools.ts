@@ -634,8 +634,10 @@ function createExecutor(
       const model = typeof route?.model === 'string' ? route.model : undefined
       if (provider && model) {
         const managed = ctx.get('zerowallMcpRouteResolver') as BiomniRouteResolver | undefined
+        const native = ctx.get('llmDeepSeekTaskRouteResolver') as BiomniRouteResolver | undefined
         const generic = ctx.get('llmPiAiTaskRouteResolver') as BiomniRouteResolver | undefined
-        const resolved = await managed?.resolve?.(provider, model) ?? await generic?.resolve?.(provider, model)
+        const resolved = await managed?.resolve?.(provider, model)
+          ?? await native?.resolve?.(provider, model) ?? await generic?.resolve?.(provider, model)
         const base = canonicalAiCloudBaseUrl(resolved?.baseUrl)
           ?? canonicalAiCloudBaseUrl((route as { baseUrl?: string; baseURL?: string })?.baseUrl ?? (route as { baseURL?: string })?.baseURL)
         const activeModel = resolved?.model ?? model

@@ -466,6 +466,16 @@ export function apply(ctx: Context, config: Config): void {
     )
   }
 
+  // Reuse the same snapshot and credential reference as the active adapter.
+  ctx.provide('llmDeepSeekTaskRouteResolver', {
+    resolve: async (provider: string, model: string) => {
+      if (provider !== PROVIDER) return undefined
+      const snapshot = options()
+      return { provider, model, baseUrl: snapshot.baseURL, api: 'openai-completions',
+        apiKey: await resolveApiKey(snapshot) }
+    },
+  } as never)
+
   let userId: AnonymousUserId | undefined
   const resolveUserId = (): AnonymousUserId => userId ??= getOrCreateAnonymousUserId()
   const adapter = new DeepSeekAdapter({

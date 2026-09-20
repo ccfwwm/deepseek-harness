@@ -322,6 +322,7 @@ export class PiAiAdapter extends LlmAdapter {
   /** Host-only task delegation using the exact configured model and credential reference. */
   async resolveTaskRoute(provider: string, model: string) {
     const snapshot = this.current()
+    if (!snapshot.profiles.has(provider)) return undefined
     const profile = this.profileOf(snapshot, provider)
     const descriptor = this.modelOf(snapshot, provider, model)
     return { provider, model: descriptor.id, baseUrl: descriptor.baseUrl, api: descriptor.api,
