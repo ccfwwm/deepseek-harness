@@ -25,6 +25,8 @@ Use this package to stream DeepSeek models through the `deepseek-official` route
 <a id="use-this-package"></a>
 ## Use this package
 
+For Host-side Biomni delegation, `llmDeepSeekTaskRouteResolver` resolves only `deepseek-official`, using the same current endpoint and credential reference as model requests. Other providers return no route; missing configured credentials fail explicitly. Credentials remain private to the Host.
+
 Mount this plugin when a composition streams DeepSeek models through the harness LLM service. It registers the single `deepseek-official` route and resolves connection facts per request, so a composition entry plus an optional user settings section drive the whole adapter.
 
 ### When to choose it

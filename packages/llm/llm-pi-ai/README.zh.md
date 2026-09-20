@@ -25,6 +25,8 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
+仅供 Host 使用的 `llmPiAiTaskRouteResolver` 为 Biomni 任务委派提供已配置的模型、地址、协议与 API Key。它仅解析本适配器管理的供应商，不通过模型工具暴露凭据值。
+
 当组合需要通过 pi-ai 的提供方目录、或通过 pi-ai 已安装目录未描述的网关路由模型请求时挂载本插件。`providers` 字典就是整个配置面：每个键都是请求用 `GenerateOptions.provider` 选择的提供方路由名。
 
 ### 何时选择

@@ -25,6 +25,8 @@ English | [中文](README.zh.md)
 <a id="use-this-package"></a>
 ## Use this package
 
+The Host-only `llmPiAiTaskRouteResolver` supplies the configured model, endpoint, protocol, and API key for Biomni task delegation. It resolves only providers owned by this adapter and does not expose credential values as model tools.
+
 Mount this plugin when a composition routes model requests through pi-ai's provider catalogs or through gateways that pi-ai's installed catalog does not describe. The `providers` dictionary is the whole configuration surface: each key is the provider route name a request selects with `GenerateOptions.provider`.
 
 ### When to choose it

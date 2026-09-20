@@ -25,6 +25,8 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
+Host 侧 Biomni 委派通过 `llmDeepSeekTaskRouteResolver` 仅解析 `deepseek-official`，使用与模型请求相同的当前地址及凭据引用。其他供应商返回空路由；缺少配置的凭据时明确失败。凭据仅供 Host 内部使用。
+
 当组合需要通过 harness LLM 服务流式调用 DeepSeek 模型时挂载本插件。它注册唯一的 `deepseek-official` 路由，并按请求解析连接事实，因此组合条目加可选用户设置分节即可驱动整个适配器。
 
 ### 何时选择
