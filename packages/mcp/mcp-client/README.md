@@ -25,6 +25,8 @@ English | [中文](README.zh.md)
 <a id="use-this-package"></a>
 ## Use this package
 
+ZeroWall Biomni execution on the configured `rmcp` connection injects the active Host model route and credential into a copied outgoing argument object. A1, dynamic tools, and Python tasks share this path; read-only calls do not receive credentials. Automatic forwarding rejects a model-supplied route that differs from the active model. Explicitly selected scientific environment references are resolved by the Host, without adding secrets to the original tool arguments.
+
 Add `dsh-mcp-client` when the model should call tools from an external MCP server as if they were native. One configuration entry per server is the entire setup: give the server a short unique name and a transport, and its tools appear as `mcp__<serverName>__<tool>`. Choose stdio when the server runs as a local program and Streamable HTTP when it runs as a service. If you already use MCP tool servers from another client, the same server rows work here.
 
 ### Minimal configuration

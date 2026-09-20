@@ -46,7 +46,7 @@ afterEach(async () => {
 })
 
 async function loadComposition(
-  options: { withDynamic: boolean; baseURL: string; reuseRoot?: string; enableSessionLog?: boolean },
+  options: { withDynamic: boolean; baseURL: string; apiKeyEnv?: string; reuseRoot?: string; enableSessionLog?: boolean },
 ): Promise<{ ctx: Context; settingsPath: string; credentialsPath: string }> {
   // A reused root is the restart case: the same harness home, its documents
   // exactly as the previous process left them.
@@ -95,6 +95,7 @@ async function loadComposition(
     "  name: '@deepseek-ai/dsh-llm-deepseek'",
     '  config:',
     `    baseURL: ${JSON.stringify(options.baseURL)}`,
+    ...options.apiKeyEnv ? [`    apiKeyEnv: ${options.apiKeyEnv}`] : [],
     '',
   ].join('\n'))
 
@@ -141,6 +142,21 @@ async function loadComposition(
 }
 
 describe('llm-deepseek real dynamic composition', () => {
+  it('delegates the native route with its exact configured credential reference', async () => {
+    vi.stubEnv('CUSTOM_DEEPSEEK_KEY', 'custom-route-key')
+    vi.stubEnv('DEEPSEEK_API_KEY', 'unrelated-key')
+    const { ctx } = await loadComposition({ withDynamic: false,
+      baseURL: 'https://custom.example/v1', apiKeyEnv: 'CUSTOM_DEEPSEEK_KEY' })
+    const resolver = ctx.get('llmDeepSeekTaskRouteResolver') as {
+      resolve: (provider: string, model: string) => Promise<unknown>
+    }
+    await expect(resolver.resolve('deepseek-official', 'deepseek-v4-flash')).resolves.toEqual({
+      provider: 'deepseek-official', model: 'deepseek-v4-flash', baseUrl: 'https://custom.example/v1',
+      api: 'openai-completions', apiKey: 'custom-route-key',
+    })
+    await expect(resolver.resolve('other-provider', 'custom-model')).resolves.toBeUndefined()
+  })
+
   it('keeps session upload off and package inventory on by default in the real Loader composition', async () => {
     vi.stubEnv('DEEPSEEK_API_KEY', 'entry-key')
     const server = await mockServer([{ kind: 'sse', events: textEvents }])

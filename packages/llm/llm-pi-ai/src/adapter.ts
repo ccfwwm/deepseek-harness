@@ -319,6 +319,27 @@ export class PiAiAdapter extends LlmAdapter {
     }
   }
 
+  /**
+   * Resolve Host-only task delegation from the current configuration.
+   * @param provider Configured provider route.
+   * @param model Configured model identifier.
+   * @returns The route and private credential, or undefined for another adapter.
+   */
+  async resolveTaskRoute(provider: string, model: string): Promise<{
+    provider: string
+    model: string
+    baseUrl: string
+    api: string
+    apiKey: string | undefined
+  } | undefined> {
+    const snapshot = this.current()
+    if (!snapshot.profiles.has(provider)) return undefined
+    const profile = this.profileOf(snapshot, provider)
+    const descriptor = this.modelOf(snapshot, provider, model)
+    return { provider, model: descriptor.id, baseUrl: descriptor.baseUrl, api: descriptor.api,
+      apiKey: await this.config.resolveApiKey(provider, profile) }
+  }
+
   override prepareCall(provider: string, model: string, _signal?: AbortSignal): Promise<PreparedAdapterCall> {
     const snapshot = this.current()
     return Promise.resolve({
