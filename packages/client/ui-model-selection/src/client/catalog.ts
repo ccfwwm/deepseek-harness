@@ -30,6 +30,7 @@ export class ModelCatalogDirectory {
   constructor(
     private readonly session: Pick<ClientRemote['session'], 'modelCatalog'>,
     private readonly metadataTimeoutMs = 30_000,
+    private readonly discoverCloudModels?: () => Promise<void>,
   ) {}
 
   private async metadata(request?: { refresh: boolean }): ReturnType<ClientRemote['session']['modelCatalog']> {
@@ -86,7 +87,8 @@ export class ModelCatalogDirectory {
   }
 
   /** Explicitly refresh provider metadata without probing every model. */
-  sync(): Promise<ModelCatalog> {
+  async sync(discover = false): Promise<ModelCatalog> {
+    if (discover) await this.discoverCloudModels?.()
     return this.request({ refresh: true })
   }
 

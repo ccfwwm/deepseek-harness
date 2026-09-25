@@ -372,9 +372,15 @@ export class PiAiAdapter extends LlmAdapter {
       : []
     const declared = [...new Set([...configured, ...modelApi])]
       .filter(protocol => supportedProtocols().includes(protocol))
-    const protocols = declared.length > 0 ? declared : supportedProtocols()
+    // Probe the wire family the route declares. OpenAI Responses is the only
+    // protocol that has an automatic compatibility fallback, and it is tried
+    // before Chat Completions. An Anthropic route must never receive a
+    // speculative OpenAI request.
+    const primaryProtocol = declared[0] ?? 'openai-responses'
+    const candidates = primaryProtocol === 'openai-responses'
+      ? ['openai-responses', 'openai-completions']
+      : [primaryProtocol]
     const attempts: import('@deepseek-ai/dsh-llm').LlmProbeAttempt[] = []
-    let candidates = [...protocols]
     for (let index = 0; index < candidates.length; index += 1) {
       const protocol = candidates[index]
       if (protocol === undefined) break
@@ -433,11 +439,11 @@ export class PiAiAdapter extends LlmAdapter {
         signal?.removeEventListener('abort', abort)
       }
       const failure = attempts.at(-1)?.message ?? ''
-      if (declared.length > 0 && candidates.length === declared.length && explicitlyRejectsProtocol(failure)) {
-        candidates = [...new Set([...candidates, ...supportedProtocols()])]
-      } else if (declared.length > 0) {
-        break
-      }
+      // A bad key, rate limit, timeout, or model failure is not evidence that
+      // this endpoint speaks another protocol. Only an explicit Responses
+      // endpoint rejection permits the Chat Completions fallback.
+      if (index + 1 < candidates.length && explicitlyRejectsProtocol(failure)) continue
+      break
     }
     return attempts
   }

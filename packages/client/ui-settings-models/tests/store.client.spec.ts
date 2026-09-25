@@ -5,6 +5,7 @@ import { RemoteError } from '@deepseek-ai/dsh-client-test-runtime'
 import { SettingsDescribeMirror } from '@deepseek-ai/dsh-client-ui-settings/src/client/settings-mirror.ts'
 import { settingsSchema } from './settings-schema.client.ts'
 import { joinProviderDirectory, ModelsSettingsStore } from '../src/client/store.ts'
+import type { ModelsWireLike } from '../src/client/store.ts'
 
 it.each([false, true])('retains configuration diagnostics when the route is active: %s', (active) => {
   expect(joinProviderDirectory(active ? [{ id: 'openai', name: 'openai' }] : [], [{
@@ -131,7 +132,7 @@ describe('ModelsSettingsStore', () => {
     }
     const modelCatalog = vi.fn((_request?: { check?: boolean }) => Promise.resolve(remoteOk(catalog)))
     ;(face as unknown as { session: { modelCatalog: typeof modelCatalog } }).session = { modelCatalog }
-    const store = new ModelsSettingsStore(face, settingsSchema, mirror)
+    const store = new ModelsSettingsStore(face as unknown as ModelsWireLike, settingsSchema, mirror)
 
     await store.load()
     await vi.waitFor(() => { expect(store.store.getSnapshot().catalogStatus).toBe('ready') })
@@ -155,7 +156,7 @@ describe('ModelsSettingsStore', () => {
     }
     const modelCatalog = vi.fn(() => Promise.resolve(remoteOk(catalog)))
     ;(face as unknown as { session: { modelCatalog: typeof modelCatalog } }).session = { modelCatalog }
-    const store = new ModelsSettingsStore(face, settingsSchema, mirror)
+    const store = new ModelsSettingsStore(face as unknown as ModelsWireLike, settingsSchema, mirror)
 
     await store.syncModels(true, false, true)
 

@@ -107,13 +107,13 @@ export function joinProviderDirectory(
  */
 export interface ModelsWire {
   /** The settings Remote namespace: the redacted read and the profile writes. */
-  settings: SettingsRemote | any
+  settings: SettingsRemote
   /** Credential state and writes for the references provider profiles name. */
-  credentials: ModelsCredentials | any
+  credentials: ModelsCredentials
   /** Provider directory reads and draft endpoint discovery. */
-  llm: ModelsLlm | any
+  llm: ModelsLlm
   /** Host-generation model catalog and explicit health probes. */
-  session?: ModelsSession | any
+  session?: ModelsSession
 }
 
 /** Testable/runtime-compatible input accepted by the page store. */
@@ -247,13 +247,16 @@ export class ModelsSettingsStore {
   private readonly api: Pick<ModelsWire, 'credentials' | 'llm' | 'session'>
   private readonly schema: SettingsSchemaOperations
   private readonly describeFace: SettingsDescribeFace
+  private readonly discoverCloudModels: (() => Promise<void>) | undefined
 
-  constructor(api: ModelsWireLike, schema: SettingsSchemaOperations, describeFace: SettingsDescribeFace)
-  constructor(ctx: ClientContext, schema: SettingsSchemaOperations, describeFace: SettingsDescribeFace)
-  constructor(input: ClientContext | ModelsWireLike, schema: SettingsSchemaOperations, describeFace: SettingsDescribeFace) {
-    this.api = ('remote' in input ? input.remote : input) as Pick<ModelsWire, 'credentials' | 'llm' | 'session'>
+  constructor(
+    input: ClientContext | ModelsWireLike, schema: SettingsSchemaOperations, describeFace: SettingsDescribeFace,
+    discoverCloudModels?: () => Promise<void>,
+  ) {
+    this.api = 'remote' in input ? input.remote : input
     this.schema = schema
     this.describeFace = describeFace
+    this.discoverCloudModels = discoverCloudModels
   }
 
   /** Consume the shared model directory's incremental Host snapshot. */
@@ -283,6 +286,7 @@ export class ModelsSettingsStore {
       s.catalogError = null
     })
     try {
+      if (refresh && !background) await this.discoverCloudModels?.()
       const request = { ...(refresh ? { refresh: true } : {}) }
       const response = await modelCatalog(request)
       if (!response.ok || response.value === undefined) throw new Error(response.error?.message ?? 'model catalog request failed')

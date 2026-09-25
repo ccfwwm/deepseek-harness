@@ -2,6 +2,7 @@
 /** Section, setup-card, and hand-written editor behavior over a scripted wire face. */
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import { bindSnapshotSelector, RemoteError } from '@deepseek-ai/dsh-client-test-runtime'
 import type {
@@ -207,7 +208,7 @@ function scriptedFace(overrides: {
   return { face, update, mutate, set, unset }
 }
 
-type PageContext = ConstructorParameters<typeof ModelsSettingsStore>[0]
+type PageContext = ClientContext
 
 /**
  * The page plugin's context, scripted down to the namespaces the page reaches.
@@ -309,12 +310,12 @@ async function mountDeepSeekCard(overrides: Parameters<typeof scriptedFace>[0] =
 describe('ModelsSection', () => {
   it('interpolates the runtime catalog update time', async () => {
     const { controller } = await mountSection()
-    act(() => controller.acceptModelCatalog({
+    act(() => { controller.acceptModelCatalog({
       default: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
       routableProviders: ['deepseek-official'],
       groups: [],
       failures: [],
-    }))
+    }) })
     const updated = screen.getByText(/^Last synced /u)
     expect(updated.textContent).not.toContain('{time}')
   })

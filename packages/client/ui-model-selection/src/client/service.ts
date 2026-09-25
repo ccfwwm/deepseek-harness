@@ -52,7 +52,19 @@ export class ModelDirectoryResolver extends Service {
   constructor(ctx: Context, config: { blockReason: () => string; metadataTimeoutMs?: number }) {
     super(ctx, 'modelDirectories')
     this.blockReason = config.blockReason
-    this.catalog = new ModelCatalogDirectory(ctx.remote.session, config.metadataTimeoutMs)
+    this.catalog = new ModelCatalogDirectory(ctx.remote.session, config.metadataTimeoutMs, async () => {
+      const account = (ctx.remote as unknown as {
+        zerowallAccount?: {
+          current?: () => Promise<{ ok: boolean; value?: { status?: string } }>
+          discoverModels?: () => Promise<{ ok: boolean; error?: { message: string } }>
+        }
+      }).zerowallAccount
+      if (!account?.current || !account.discoverModels) return
+      const current = await account.current()
+      if (!current.ok || current.value?.status !== 'signedIn') return
+      const result = await account.discoverModels()
+      if (!result.ok) throw new Error(result.error?.message ?? 'AI 云平台模型同步失败')
+    })
     let connection: ConnectionHandle | undefined
     let generationDisposer: (() => void) | undefined
     let connectionRetry: ReturnType<typeof setTimeout> | undefined

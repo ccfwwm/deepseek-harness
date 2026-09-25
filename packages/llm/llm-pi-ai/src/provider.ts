@@ -45,17 +45,17 @@ import { catalogProvider, PiAiCatalogError } from './catalog.ts'
  * override is refused.
  */
 const PROTOCOLS: Readonly<Record<string, () => ProviderStreams>> = {
-  'openai-completions': openAICompletionsApi,
   'openai-responses': openAIResponsesApi,
+  'openai-completions': openAICompletionsApi,
   'anthropic-messages': anthropicMessagesApi,
 }
 
 /**
  * Every wire protocol a configured route may name, most-reached first. The
  * order is the table's and therefore stable; a configuration surface offering
- * a choice presents the first as its default, which is why the protocol a
- * hand-declared gateway most often speaks — and the one endpoint interrogation
- * can read — leads.
+ * a choice presents Responses first because current OpenAI models use that
+ * endpoint by default. Chat Completions remains the explicit compatibility
+ * protocol for older gateways.
  * @returns the supported protocol identifiers.
  */
 export function supportedProtocols(): readonly string[] {

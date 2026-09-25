@@ -93,7 +93,7 @@ export class ModelDirectory {
   /** Explicit metadata synchronization shared by both model entries. */
   async sync(): Promise<ModelDirectoryState> {
     this.assertAvailable()
-    await this.catalog.sync()
+    await this.catalog.sync(true)
     this.syncInputs()
     return this.store.getSnapshot()
   }

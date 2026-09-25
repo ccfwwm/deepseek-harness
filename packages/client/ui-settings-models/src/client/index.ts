@@ -83,7 +83,19 @@ export function apply(ctx: ClientContext): void {
     session: ctx.remote.session,
     settings: ctx.remote.settings,
   }
-  const controller = new ModelsSettingsStore(wire, schema, ctx.settingsScope.describe())
+  const controller = new ModelsSettingsStore(wire, schema, ctx.settingsScope.describe(), async () => {
+    const account = (ctx.remote as unknown as {
+      zerowallAccount?: {
+        current?: () => Promise<{ ok: boolean; value?: { status?: string } }>
+        discoverModels?: () => Promise<{ ok: boolean; error?: { message: string } }>
+      }
+    }).zerowallAccount
+    if (!account?.current || !account.discoverModels) return
+    const current = await account.current()
+    if (!current.ok || current.value?.status !== 'signedIn') return
+    const result = await account.discoverModels()
+    if (!result.ok) throw new Error(result.error?.message ?? 'AI cloud model sync failed')
+  })
   const operations = createModelsOperations(ctx)
   // Warm the provider/model catalog as the desktop starts. The store guards
   // this probe so opening Settings or receiving invalidations does not cause

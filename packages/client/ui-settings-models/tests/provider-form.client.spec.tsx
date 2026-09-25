@@ -2,6 +2,7 @@
 /** Model-list editing, endpoint interrogation, and hand-declared provider creation. */
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import { bindSnapshotSelector, RemoteError } from '@deepseek-ai/dsh-client-test-runtime'
 import type { SettingsNamespaceView } from '@deepseek-ai/dsh-api-remotes/client'
@@ -142,7 +143,7 @@ function scriptedFace(options: {
   return { face, discover, mutate, set, namespace }
 }
 
-type PageContext = ConstructorParameters<typeof ModelsSettingsStore>[0]
+type PageContext = ClientContext
 
 /**
  * The page plugin's context, scripted down to the namespaces the page reaches.
