@@ -48,6 +48,10 @@ async function bench(isLoopback = true, settings?: object, services: object = {}
     // ui-settings apply also provides the settingsSchema service.
     settings: settings ?? scriptedSettingsRemote().settings,
   })
+  ctx.reflect.provide('remote.zerowallAccount', {
+    current: vi.fn(() => Promise.resolve({ ok: true, value: { status: 'signedOut' } })),
+    discoverModels: vi.fn(() => Promise.resolve({ ok: true })),
+  })
   // The fixed Host facts the settings provider reads its persistence from.
   remote.$host = { home: undefined, isLoopback }
   await ctx.plugin({ inject: [...settingsInject], apply: settingsApply }).await()
@@ -75,6 +79,7 @@ describe('ui-settings-models apply', () => {
   it('declares the services it uses', () => {
     expect(inject).toEqual([
       'slots', 'locale', 'remote', 'remote.credentials', 'remote.llm', 'remote.session', 'remote.settings',
+      'remote.zerowallAccount',
       'settingsScope', 'settingsSchema',
     ])
   })

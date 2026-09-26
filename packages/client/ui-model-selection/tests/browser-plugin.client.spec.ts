@@ -69,7 +69,7 @@ async function bench(locale: 'zh' | 'en' = 'zh') {
   const ctx = new Context()
   let defaultSelection: ModelSelection = { provider: 'deepseek-official', model: 'deepseek-v4-flash' }
   let selected = defaultSelection
-  const calls = { models: 0, select: 0 }
+  const calls = { models: 0, select: 0, discover: 0 }
   const modelRequests: unknown[] = []
   let rejectNextSelection = false
   const projections = new Map<SessionId, SnapshotStore<ModelSelectionProjection | undefined>>()
@@ -110,8 +110,13 @@ async function bench(locale: 'zh' | 'en' = 'zh') {
       return Promise.resolve({ ok: true as const, value: { selected } })
     },
   }
+  const accountRemote = {
+    current: () => Promise.resolve({ ok: true as const, value: { status: 'signedIn' } }),
+    discoverModels: () => { calls.discover += 1; return Promise.resolve({ ok: true as const }) },
+  }
   const remote = Object.assign(new TestRemote(ctx), { session: sessionRemote })
   ctx.reflect.provide('remote.session', sessionRemote)
+  ctx.reflect.provide('remote.zerowallAccount', accountRemote)
   const blocks = new Map<SessionId, { reason: string } | undefined>()
   ctx.provide('conversation', {
     blocks: {
@@ -292,6 +297,16 @@ describe('ui-model-selection dual entry', () => {
     b.remote.emit('settings/document-updated', ['agent-default-model', 2])
     await vi.waitFor(() => { expect(b.modelRequests).toHaveLength(before + 1) })
     expect(b.modelRequests.at(-1)).toEqual({ refresh: true })
+  })
+
+  it('refreshes the cloud account through the captured remote outside the apply fiber', async () => {
+    const b = await bench()
+    b.mint('s1')
+    const face = b.seat().inject!(sid('s1'))
+    await face.load()
+    if (face.sync === undefined) throw new Error('model seat sync callback was not registered')
+    await face.sync()
+    expect(b.calls.discover).toBe(1)
   })
 
   it('refreshes metadata without repeating model probes on provider events', async () => {

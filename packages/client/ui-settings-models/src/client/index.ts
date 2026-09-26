@@ -63,6 +63,7 @@ export function refreshIfLoaded(controller: ModelsSettingsStore): void {
  */
 export const inject = [
   'slots', 'locale', 'remote', 'remote.credentials', 'remote.llm', 'remote.session', 'remote.settings',
+  'remote.zerowallAccount',
   'settingsScope', 'settingsSchema',
 ]
 
@@ -76,6 +77,14 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-settings-models: copy dictionaries')
 
   const schema = createSettingsSchemaOperations(ctx.settingsSchema)
+  // Model synchronization runs from store callbacks after this apply fiber
+  // has returned. Capture the dotted account remote while its dependency is
+  // owned here; reading ctx.remote.zerowallAccount later triggers Cordis's
+  // `without inject` guard.
+  const accountRemote = ctx.get('remote.zerowallAccount') as {
+    current?: () => Promise<{ ok: boolean; value?: { status?: string } }>
+    discoverModels?: () => Promise<{ ok: boolean; error?: { message: string } }>
+  } | undefined
   // Every configuration operation rides its owning Remote namespace.
   const wire: ModelsWire = {
     credentials: ctx.remote.credentials,
@@ -84,12 +93,7 @@ export function apply(ctx: ClientContext): void {
     settings: ctx.remote.settings,
   }
   const controller = new ModelsSettingsStore(wire, schema, ctx.settingsScope.describe(), async () => {
-    const account = (ctx.remote as unknown as {
-      zerowallAccount?: {
-        current?: () => Promise<{ ok: boolean; value?: { status?: string } }>
-        discoverModels?: () => Promise<{ ok: boolean; error?: { message: string } }>
-      }
-    }).zerowallAccount
+    const account = accountRemote
     if (!account?.current || !account.discoverModels) return
     const current = await account.current()
     if (!current.ok || current.value?.status !== 'signedIn') return

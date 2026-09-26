@@ -34,10 +34,11 @@ interface LiveState {
 
 /** The `ctx.modelDirectories` session model-selection service. */
 export class ModelDirectoryResolver extends Service {
-  static inject = ['sessions', 'remote', 'remote.session']
+  static inject = ['sessions', 'remote', 'remote.session', 'remote.zerowallAccount']
 
   private readonly live: LiveState = { directories: new Map() }
   private readonly catalog: ModelCatalogDirectory
+  private readonly sessionRemote: Context['remote']['session']
 
   /** Localized composer-block copy; this plugin owns the string it raises. */
   private readonly blockReason: () => string
@@ -52,13 +53,17 @@ export class ModelDirectoryResolver extends Service {
   constructor(ctx: Context, config: { blockReason: () => string; metadataTimeoutMs?: number }) {
     super(ctx, 'modelDirectories')
     this.blockReason = config.blockReason
-    this.catalog = new ModelCatalogDirectory(ctx.remote.session, config.metadataTimeoutMs, async () => {
-      const account = (ctx.remote as unknown as {
-        zerowallAccount?: {
-          current?: () => Promise<{ ok: boolean; value?: { status?: string } }>
-          discoverModels?: () => Promise<{ ok: boolean; error?: { message: string } }>
-        }
-      }).zerowallAccount
+    // Resolve every dotted remote while the service fiber owns its declared
+    // dependencies.  The catalog refresh callback runs later, outside that
+    // fiber; reading `ctx.remote.zerowallAccount` there makes Cordis throw
+    // `cannot get property "remote.zerowallAccount" without inject`.
+    const sessionRemote = ctx.get('remote.session') as Context['remote']['session']
+    this.sessionRemote = sessionRemote
+    const account = ctx.get('remote.zerowallAccount') as {
+      current?: () => Promise<{ ok: boolean; value?: { status?: string } }>
+      discoverModels?: () => Promise<{ ok: boolean; error?: { message: string } }>
+    } | undefined
+    this.catalog = new ModelCatalogDirectory(sessionRemote, config.metadataTimeoutMs, async () => {
       if (!account?.current || !account.discoverModels) return
       const current = await account.current()
       if (!current.ok || current.value?.status !== 'signedIn') return
@@ -212,7 +217,7 @@ export class ModelDirectoryResolver extends Service {
     const binding = sessions.binding(sessionId)
     if (binding === undefined) throw new Error(`ui-model-selection: session "${String(sessionId)}" resolved no binding`)
     const directory = new ModelDirectory(
-      this.ctx.remote.session,
+      this.sessionRemote,
       sessionId,
       () => sessions.subagentAddress(sessionId) === undefined,
       this.catalog,
