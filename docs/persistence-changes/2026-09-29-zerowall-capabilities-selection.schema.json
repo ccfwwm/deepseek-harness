@@ -1,0 +1,90 @@
+{
+  "formatVersion": 2,
+  "roots": [
+    {
+      "key": "event:zerowall/capabilities/selection",
+      "kind": "event",
+      "event": "zerowall/capabilities/selection",
+      "surface": false,
+      "digest": "43a99d16fdf3f12df25c2301dd12b7682326874b965c3f156a150f1d8be13470",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 4,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 6,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "disabled",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "onDemand",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "tools",
+                "type": 2,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "array",
+            "element": 3
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "literal",
+            "value": "zerowall/capabilities/selection"
+          }
+        ]
+      }
+    }
+  ],
+  "types": []
+}

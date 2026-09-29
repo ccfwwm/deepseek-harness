@@ -1,0 +1,28 @@
+# Bilingual-pair consistency record for 2026-09-29-zerowall-capabilities-selection.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/persistence-changes/2026-09-29-zerowall-capabilities-selection.md
+/:
+  en: 3d5a424ae7d7e46b
+  zh: c22a8e4a62d8cc1a
+/2026-09-29-zerowall-capabilities-selection:
+  en: 49aea8a41fc3c80a
+  zh: dfa1a3ece5a2c032
+/2026-09-29-zerowall-capabilities-selection/summary:
+  en: 14f7113682a9190b
+  zh: 187d52a9b4cdd9a1
+/2026-09-29-zerowall-capabilities-selection/table-of-contents:
+  en: 6cf314a069ceb451
+  zh: 9adff678e9ecab3b
+/2026-09-29-zerowall-capabilities-selection/declaration:
+  en: 6907136f28e48c90
+  zh: 02f8298485f3d8e7
+/2026-09-29-zerowall-capabilities-selection/compatibility:
+  en: 6b10ee0245aab114
+  zh: 1ab2131c17f0d9ff
+/2026-09-29-zerowall-capabilities-selection/verification:
+  en: 2877f509580b63c7
+  zh: 43d4e76781fc0f73
+/2026-09-29-zerowall-capabilities-selection/dev-note:
+  en: b75c8458928b72b9
+  zh: 003ba4e17b4b5269
