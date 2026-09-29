@@ -108,6 +108,7 @@ export function validateTypertManifest(pkgName: string, exported: unknown): Type
     }
     const schema = value as Record<string, unknown>
     requireString(pkgName, schema, 'name', 'schema')
+    addLegacyFactory(schema)
     if (typeof schema.create !== 'function') {
       throw new Error(`typert-loader: ${pkgName} TYPERT schema "${schema.name as string}" has no create() factory`)
     }
@@ -278,9 +279,23 @@ function requireStrictCodec(pkgName: string, value: unknown, subject: string): v
       throw new Error(`typert-loader: ${pkgName} ${subject} ${method} must be a function`)
     }
   }
+  addLegacyFactory(codec)
   if (typeof codec.create !== 'function') {
     throw new Error(`typert-loader: ${pkgName} ${subject} has no create() factory`)
   }
+}
+
+/**
+ * rc.1 generated artifacts exposed their Schemastery instance as `schema`.
+ * rc.2 requires a factory so the registry can create an isolated codec. Keep
+ * the compatibility narrowly scoped to that known shape and leave malformed
+ * artifacts subject to the normal strict validation below.
+ */
+function addLegacyFactory(value: Record<string, unknown>): void {
+  if (typeof value.create === 'function' || value.schema === undefined) return
+  const schema = value.schema
+  if (typeof schema !== 'object' && typeof schema !== 'function') return
+  value.create = () => schema
 }
 
 /**

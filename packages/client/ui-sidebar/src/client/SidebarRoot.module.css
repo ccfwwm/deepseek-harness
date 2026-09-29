@@ -576,6 +576,10 @@
   flex: none;
   display: flex;
   flex-direction: column;
+  position: relative;
+  z-index: 21;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
 }
 
 .settingsArea,
@@ -583,10 +587,19 @@
   flex: none;
   min-width: 0;
   width: 100%;
+  -webkit-app-region: no-drag;
+}
+
+.footArea button,
+.footArea a,
+.footArea [role='button'] {
+  -webkit-app-region: no-drag;
 }
 
 .footerActions {
   display: flex;
+  flex-direction: column;
+  align-items: stretch;
 }
 
 .collapsed .footArea {

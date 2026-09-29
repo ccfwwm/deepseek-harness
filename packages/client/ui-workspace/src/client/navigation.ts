@@ -126,6 +126,7 @@ export class DirectoryBrowseError extends Error {
 class UiWorkspaceService extends Service implements UiWorkspace {
   private readonly connecting = new Map<WorkspaceId, Promise<SessionId>>()
   private readonly lifetime = new AbortController()
+  private pendingStartSession: { readonly workspaceId?: WorkspaceId; readonly navigation: AbortSignal } | undefined
   private readonly selection = createSnapshotStore<MainSelection>(
     {}, { persist: { name: 'dsh.sessions.current' } },
   )
@@ -197,6 +198,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
   }
 
   openSession(target: SessionTarget): void {
+    this.pendingStartSession = undefined
     this.replaceMain(target, this.lifetime.signal, 'reveal')
   }
 
@@ -222,16 +224,30 @@ class UiWorkspaceService extends Service implements UiWorkspace {
   startSession(workspaceId?: WorkspaceId): void {
     const workspace = this.workspaces.list.getSnapshot()
     const sessions = this.sessions.list.getSnapshot()
+    if (workspace.phase !== 'ready' || sessions.phase !== 'ready') {
+      // Keep the user's New Session action while the startup catalogs load.
+      // Returning here used to discard the click, leaving first-run users with
+      // no Session and no Workspace to work in.
+      this.ctx.layout.selectPanel(null)
+      const navigation = AbortSignal.any([this.ctx.layout.beginNavigation(), this.lifetime.signal])
+      this.pendingStartSession = { ...(workspaceId === undefined ? {} : { workspaceId }), navigation }
+      return
+    }
+    this.pendingStartSession = undefined
     const current = this.mainReference?.sessionId
     const currentWorkspaceId = current === undefined
       ? undefined
       : workspace.items.find(item => item.sessionIds.includes(current))?.workspaceId
-    const recent = workspace.phase === 'ready' && sessions.phase === 'ready'
-      ? recentWorkspace(workspace.items, sessions.byId)
-      : undefined
+    const recent = recentWorkspace(workspace.items, sessions.byId)
     const target = workspaceId ?? currentWorkspaceId ?? recent
     if (target === undefined) {
-      this.clearMain()
+      const navigation = AbortSignal.any([this.ctx.layout.beginNavigation(), this.lifetime.signal])
+      void this.initializeDefaultWorkspace(navigation).then((prepared) => {
+        if (prepared === undefined || navigation.aborted) return
+        return this.openWorkspace(prepared.workspaceId)
+      }).catch((reason: unknown) => {
+        console.warn('new Session default Workspace failed:', reason)
+      })
       return
     }
     void this.openWorkspace(target).catch(
@@ -289,6 +305,15 @@ class UiWorkspaceService extends Service implements UiWorkspace {
       const workspace = this.workspaces.list.getSnapshot()
       const sessions = this.sessions.list.getSnapshot()
       if (workspace.phase !== 'ready' || sessions.phase !== 'ready') return
+      const pendingStart = this.pendingStartSession
+      if (pendingStart !== undefined) {
+        this.pendingStartSession = undefined
+        if (!pendingStart.navigation.aborted) {
+          initial = 'done'
+          this.startSession(pendingStart.workspaceId)
+          return
+        }
+      }
       if (this.mainReference !== undefined) {
         initial = 'done'
         return

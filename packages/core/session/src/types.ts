@@ -401,6 +401,16 @@ export interface SessionEventMap {
    */
   'request/context': RequestContext
   /**
+   * Historical ZeroWall capability selection metadata. The capability menu
+   * was removed from the stable profile, but existing session logs still
+   * contain this record and must remain readable and lossless.
+   */
+  'zerowall/capabilities/selection': {
+    tools: string[]
+    disabled: string[]
+    onDemand?: string[]
+  }
+  /**
    * Separates inherited or restored history from later lifecycle-owned work.
    * This log-only marker need not be at {@link Session.firstLiveSeq}: a fork
    * seed can already contain its tagged marker and child-owned synthetic

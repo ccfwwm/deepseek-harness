@@ -157,7 +157,7 @@ function TurnMaxTokensItem({ t }: {
 }
 
 /** Right-aligned bubble shared by user and steering rows. */
-function UserStyleBubble({
+export function UserStyleBubble({
   content, renderMessageImages, actions, pending = false, echo = false, referenceLabels = [], skillNames = [],
   previewAttachments, references, t,
 }: {

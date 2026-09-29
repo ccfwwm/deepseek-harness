@@ -127,6 +127,18 @@ export function SettingsRoot(props: SettingsRootComponentProps) {
   // freshly localized text on locale change, and the trigger/header/close
   // seats re-render through their own outlets' subscriptions.
   const rows = useSections(s => s)
+  useEffect(() => {
+    const openRequestedSection = (event: Event) => {
+      const id = (event as CustomEvent<unknown>).detail
+      if (typeof id === 'string' && rows.some(row => row.id === id)) {
+        actions.openSection(id)
+      } else {
+        actions.open()
+      }
+    }
+    window.addEventListener('zerowall:open-settings', openRequestedSection)
+    return () => { window.removeEventListener('zerowall:open-settings', openRequestedSection) }
+  }, [actions, rows])
   const desktopUpdate = useDesktopUpdate(state => state)
   const connectionState = useConnectionState(state => state)
   const previousConnectionState = useRef(connectionState)

@@ -96,7 +96,7 @@ describe('bootClient', () => {
 })
 
 describe('assertEntriesActive', () => {
-  interface FakeEntry { name: string; fiber?: { state: number; inject: Record<string, null> } }
+  interface FakeEntry { name: string; fiber?: { state: number; inject: Record<string, null>; _error?: Error } }
 
   /** Loader-shaped double: entries with scripted fiber states, services by name. */
   function auditCtx(entries: readonly FakeEntry[], services: Record<string, unknown> = {}): Context {
@@ -135,6 +135,11 @@ describe('assertEntriesActive', () => {
 
   it('uses the singular form for one failing entry', () => {
     expect(() => { assertEntriesActive(auditCtx([{ name: 'lost' }]), silent) }).toThrow('web boot: 1 entry did not activate\n')
+  })
+
+  it('includes a plugin apply failure when no browser logger is installed', () => {
+    const ctx = auditCtx([{ name: 'broken', fiber: { state: FIBER_STATE.FAILED, inject: {}, _error: new Error('missing browser API') } }])
+    expect(() => { assertEntriesActive(ctx, silent) }).toThrow('broken: failed: missing browser API')
   })
 
   it('names the recorded import error of a fiberless entry when the module system is supplied', () => {

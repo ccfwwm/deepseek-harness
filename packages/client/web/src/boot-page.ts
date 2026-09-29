@@ -83,11 +83,13 @@ export class BootPage {
   private render(): void {
     const failed = [...this.states].filter(([, state]) => state === 'failed').map(([id]) => id)
     if (this.failure === undefined && failed.length === 0) {
+      delete this.root.dataset.dshBootFailed
       if (this.spinner.parentElement !== this.card) {
         this.card.replaceChildren(this.wordmark, this.spinner, this.hint)
       }
       return
     }
+    this.root.dataset.dshBootFailed = ''
     const report = div(css.failed)
     report.append(div(css.failedTitle, 'Failed to load plugins'))
     for (const id of failed) report.append(div(css.failedItem, id))

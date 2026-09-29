@@ -21666,6 +21666,90 @@
           }
         ]
       }
+    },
+    {
+      "key": "event:zerowall/capabilities/selection",
+      "kind": "event",
+      "event": "zerowall/capabilities/selection",
+      "surface": false,
+      "digest": "43a99d16fdf3f12df25c2301dd12b7682326874b965c3f156a150f1d8be13470",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 4,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 6,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "disabled",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "onDemand",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "tools",
+                "type": 2,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "array",
+            "element": 3
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "literal",
+            "value": "zerowall/capabilities/selection"
+          }
+        ]
+      }
     }
   ],
   "types": [
@@ -29406,7 +29490,7 @@
       },
       "names": [],
       "sources": [
-        "packages/core/session/src/types.ts:427"
+        "packages/core/session/src/types.ts:437"
       ]
     },
     {
@@ -34961,7 +35045,7 @@
         "packages/core/session/src/types.ts#SurfaceOp"
       ],
       "sources": [
-        "packages/core/session/src/types.ts:462"
+        "packages/core/session/src/types.ts:472"
       ]
     },
     {
@@ -42069,6 +42153,88 @@
           {
             "kind": "literal",
             "value": "turn/end"
+          }
+        ]
+      },
+      "names": [],
+      "sources": []
+    },
+    {
+      "digest": "43a99d16fdf3f12df25c2301dd12b7682326874b965c3f156a150f1d8be13470",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 4,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 5,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 6,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "disabled",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "onDemand",
+                "type": 2,
+                "optional": true
+              },
+              {
+                "name": "tools",
+                "type": 2,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "array",
+            "element": 3
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "literal",
+            "value": "zerowall/capabilities/selection"
           }
         ]
       },
@@ -51682,6 +51848,20 @@
           {
             "kind": "literal",
             "value": "next-turn"
+          }
+        ]
+      },
+      "names": [],
+      "sources": []
+    },
+    {
+      "digest": "6397e39ed691db1c556489addcc296f631530f0286f66ab1df13007f8dd8e2db",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "literal",
+            "value": "zerowall/capabilities/selection"
           }
         ]
       },
@@ -73729,7 +73909,7 @@
       },
       "names": [],
       "sources": [
-        "packages/core/session/src/types.ts:464"
+        "packages/core/session/src/types.ts:474"
       ]
     },
     {
@@ -74365,6 +74545,47 @@
       },
       "names": [],
       "sources": []
+    },
+    {
+      "digest": "c844c1f9b63d6a45a0e585f88179c3414bd1d5bc59ae0162c25606340975f007",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "disabled",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "onDemand",
+                "type": 1,
+                "optional": true
+              },
+              {
+                "name": "tools",
+                "type": 1,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "array",
+            "element": 2
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          }
+        ]
+      },
+      "names": [],
+      "sources": [
+        "packages/core/session/src/types.ts:408"
+      ]
     },
     {
       "digest": "c8e6f48878cc2a2f0dc59682280d81f407943fb503f32c64bf9ff3d9393c3eff",

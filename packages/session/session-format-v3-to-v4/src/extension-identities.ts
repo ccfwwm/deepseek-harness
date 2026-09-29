@@ -64,6 +64,8 @@ export const RELEASED_V3_EVENT_TYPES: ReadonlySet<string> = new Set([
   'user/message',
   'web/deepseek-search-llm-request',
   'workspace/changes',
+  // ZeroWall fork-only metadata retained in pre-rc.2 session histories.
+  'zerowall/capabilities/selection',
 ])
 /* jscpd:ignore-end */
 

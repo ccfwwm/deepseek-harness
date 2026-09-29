@@ -8,7 +8,10 @@ import { ElectronWebviewPresentation } from '../src/client/electron/ElectronWebv
 let sequence = 0
 
 /** @returns one isolated, explicitly mounted page with native operations replaced by spies. */
-export function electronFixture(initial?: BrowserTabState) {
+// Vitest 4 exposes an internal Procedure type through inferred mock returns;
+// this test-only fixture must not emit that pnpm-local type in declarations.
+// oxlint-disable-next-line typescript/no-explicit-any -- test fixture intentionally exposes Vitest's inferred mock surface.
+export function electronFixture(initial?: BrowserTabState): any {
   const opens = new Set<(url: string) => void>()
   const reservation: DesktopBrowserReservation = { lease: `lease-${++sequence}` as DesktopBrowserLeaseId, partition: 'partition' }
   const bridge = {

@@ -485,7 +485,11 @@ export class WorkspaceAnalyzer {
       for (const reference of aggregate.parsed.projectReferences ?? []) {
         const configPath = projectConfigPath(reference.path)
         const packageRoot = dirname(configPath)
+        // ZeroWall's aggregate includes the Harness checkout and its own packages.
         if (!isWithin(realPath(packageRoot), join(this.options.root, 'packages'))
+          && !isWithin(realPath(packageRoot), join(this.options.root, 'deepseek-harness', 'packages'))
+          && !isWithin(realPath(packageRoot), join(this.options.root, 'plugins'))
+          && !isWithin(realPath(packageRoot), join(this.options.root, 'store'))
           && !(includeVendor && isWithin(realPath(packageRoot), join(this.options.root, 'vendor')))) continue
         const manifestPath = join(packageRoot, 'package.json')
         if (!existsSync(manifestPath)) continue

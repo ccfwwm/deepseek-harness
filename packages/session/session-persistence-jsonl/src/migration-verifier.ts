@@ -2,6 +2,8 @@
 
 import { Worker } from 'node:worker_threads'
 import type { WorkerOptions } from 'node:worker_threads'
+import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
 import type { JsonlCompression } from './format.ts'
 import type { JsonlExpectedPrefix, JsonlVerifiedGeneration } from './generation.ts'
 
@@ -69,6 +71,7 @@ class VerificationScheduler {
 }
 
 const verificationScheduler = new VerificationScheduler()
+const resolveModule = createRequire(import.meta.url).resolve
 
 function workerSpawn(request: VerificationRequest): { readonly entry: string | URL; readonly options: WorkerOptions } {
   /* v8 ignore next 3 -- built-worker coverage owns the bundled path. */
@@ -80,8 +83,8 @@ function workerSpawn(request: VerificationRequest): { readonly entry: string | U
   }
   const workerEntry = new URL('./worker.ts', import.meta.url)
   const bootstrap = [
-    `import { register as registerEsm } from ${JSON.stringify(import.meta.resolve('tsx/esm/api'))}`,
-    `import { register as registerCjs } from ${JSON.stringify(import.meta.resolve('tsx/cjs/api'))}`,
+    `import { register as registerEsm } from ${JSON.stringify(pathToFileURL(resolveModule('tsx/esm/api')).href)}`,
+    `import { register as registerCjs } from ${JSON.stringify(pathToFileURL(resolveModule('tsx/cjs/api')).href)}`,
     'registerCjs()',
     'registerEsm()',
     `await import(${JSON.stringify(workerEntry.href)})`,

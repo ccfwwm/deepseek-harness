@@ -553,7 +553,7 @@ function clientConfig(id: string, entry: string, clientBanner?: (fileName: strin
       },
       async load(virtualId: string) {
         if (!virtualId.startsWith(CSS_VIRTUAL_PREFIX)) return null
-        const fileId = virtualId.slice(CSS_VIRTUAL_PREFIX.length, -CSS_VIRTUAL_SUFFIX.length)
+        const fileId = virtualAssetPath(virtualId, CSS_VIRTUAL_PREFIX)
         // The virtual id otherwise hides the physical stylesheet from Rolldown's watch graph.
         this.addWatchFile(fileId)
         const source = await readFile(fileId)
@@ -579,7 +579,7 @@ function clientConfig(id: string, entry: string, clientBanner?: (fileName: strin
       },
       async load(virtualId: string) {
         if (!virtualId.startsWith(INLINE_CSS_VIRTUAL_PREFIX)) return null
-        const fileId = virtualId.slice(INLINE_CSS_VIRTUAL_PREFIX.length, -CSS_VIRTUAL_SUFFIX.length)
+        const fileId = virtualAssetPath(virtualId, INLINE_CSS_VIRTUAL_PREFIX)
         this.addWatchFile(fileId)
         const source = await readFile(fileId)
         const { code } = transform({ filename: fileId, code: source, minify: true })
@@ -594,10 +594,13 @@ function clientConfig(id: string, entry: string, clientBanner?: (fileName: strin
       },
       async load(virtualId: string) {
         if (!virtualId.startsWith(GLOBAL_CSS_VIRTUAL_PREFIX)) return null
-        const fileId = virtualId.slice(GLOBAL_CSS_VIRTUAL_PREFIX.length, -CSS_VIRTUAL_SUFFIX.length)
+        const fileId = virtualAssetPath(virtualId, GLOBAL_CSS_VIRTUAL_PREFIX)
         this.addWatchFile(fileId)
         const source = await readFile(fileId)
         const { code } = transform({ filename: fileId, code: source, minify: true })
+        if (virtualId.includes(`${CSS_VIRTUAL_SUFFIX}${INLINE_CSS_QUERY}`)) {
+          return `export default ${JSON.stringify(code.toString())};`
+        }
         return styleInjectionModule(id, fileId, code.toString())
       },
     }],
@@ -657,7 +660,7 @@ function clientInputIsolation(id: string): {
               if (!(external in bundle)) inputs.assertInput(external)
             }
           } else {
-            for (const original of output.originalFileNames) inputs.assertInput(original)
+            for (const original of output.originalFileNames) inputs.assertInput(clientInputFile(original))
           }
         }
       },
@@ -677,7 +680,11 @@ function clientInputIsolation(id: string): {
 function clientInputFile(id: string): string {
   const prefix = [CSS_VIRTUAL_PREFIX, GLOBAL_CSS_VIRTUAL_PREFIX, INLINE_CSS_VIRTUAL_PREFIX]
     .find(prefix => id.startsWith(prefix))
-  return prefix === undefined ? id : id.slice(prefix.length, -CSS_VIRTUAL_SUFFIX.length)
+  const value = prefix === undefined ? id : id.slice(prefix.length)
+  const clean = value.split(/[?#]/u, 1)[0] ?? value
+  return prefix !== undefined && clean.endsWith(CSS_VIRTUAL_SUFFIX)
+    ? clean.slice(0, -CSS_VIRTUAL_SUFFIX.length)
+    : clean
 }
 
 /** Chain tsc's emitted maps into any Client bundle that consumes `lib/types`. */
@@ -726,10 +733,19 @@ const SOURCEMAP_COMMENT = /\n\/\/# sourceMappingURL=.*\s*$/
 
 /** Resolve an emitted JS asset import against its source-tree counterpart. */
 function sourceAssetPath(source: string, importer: string): string {
-  if (!source.startsWith('.') && !isAbsolute(source)) return createRequire(importer).resolve(source)
-  const emitted = resolvePath(dirname(importer), source)
+  const cleanSource = source.split(/[?#]/u, 1)[0] ?? source
+  if (!cleanSource.startsWith('.') && !isAbsolute(cleanSource)) return createRequire(importer).resolve(cleanSource)
+  const emitted = resolvePath(dirname(importer), cleanSource)
   if (existsSync(emitted)) return emitted
   const boundary = emitted.indexOf(TYPES_MARKER)
   if (boundary < 0) return emitted
   return resolvePath(emitted.slice(0, boundary), 'src', emitted.slice(boundary + TYPES_MARKER.length))
+}
+
+/** Remove bundler-added query text before resolving a virtual stylesheet path. */
+function virtualAssetPath(virtualId: string, prefix: string): string {
+  const payload = virtualId.slice(prefix.length)
+  const suffixIndex = payload.indexOf(CSS_VIRTUAL_SUFFIX)
+  const path = suffixIndex < 0 ? payload : payload.slice(0, suffixIndex)
+  return path.split(/[?#]/u, 1)[0] ?? path
 }

@@ -42,6 +42,7 @@ describe('BootPage', () => {
     expect(el.textContent).toContain('@deepseek-ai/dsh-client-ui-tool')
     expect(el.textContent).not.toContain('ok')
     expect(el.textContent).not.toContain('Loading plugins…')
+    expect(el.querySelector('[data-dsh-boot-failed]')).not.toBeNull()
   })
 
   it('shows the complete sweep report', () => {
@@ -51,6 +52,7 @@ describe('BootPage', () => {
     page.setState('a', 'active')
     expect(el.textContent).toContain(report)
     expect(el.textContent).not.toContain('Loading plugins…')
+    expect(el.querySelector('[data-dsh-boot-failed]')).not.toBeNull()
   })
 
   it('detaches on disposal', () => {

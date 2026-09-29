@@ -81,6 +81,7 @@
 | `event:user/message` | event | `3f72db3d87a0c5c43e68be467b4cca728eaf5adc1d5d2b6975ff42bfbd961761` | [`{ type: "user/message" }`](#persistence-type-sha256-3f72db3d87a0c5c43e68be467b4cca728eaf5adc1d5d2b6975ff42bfbd961761) |
 | `event:web/deepseek-search-llm-request` | event | `cf6e3aaf1e2de6480aa0157730a41b9a492108a55304100b0f7e112711dd4331` | [`{ type: "web/deepseek-search-llm-request" }`](#persistence-type-sha256-cf6e3aaf1e2de6480aa0157730a41b9a492108a55304100b0f7e112711dd4331) |
 | `event:workspace/changes` | event | `e308ccf867a5398e316e0af8cb6ce238a8d33a63b9b384c8250a686786285f72` | [`{ type: "workspace/changes" }`](#persistence-type-sha256-e308ccf867a5398e316e0af8cb6ce238a8d33a63b9b384c8250a686786285f72) |
+| `event:zerowall/capabilities/selection` | event | `43a99d16fdf3f12df25c2301dd12b7682326874b965c3f156a150f1d8be13470` | [`{ type: "zerowall/capabilities/selection" }`](#persistence-type-sha256-43a99d16fdf3f12df25c2301dd12b7682326874b965c3f156a150f1d8be13470) |
 
 ## 事件信封
 
@@ -157,7 +158,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }[T]
 ```
 
-来源：[`packages/core/session/src/types.ts:431`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:439`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:462`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:493`](../packages/core/session/src/types.ts)
+来源：[`packages/core/session/src/types.ts:441`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:449`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:472`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:503`](../packages/core/session/src/types.ts)
 
 ## 事件
 
@@ -813,7 +814,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'session/end-seed': { inherited?: true }
 ```
 
-来源：[`packages/core/session/src/types.ts:427`](../packages/core/session/src/types.ts)
+来源：[`packages/core/session/src/types.ts:437`](../packages/core/session/src/types.ts)
 
 <a id="sessiontitle--log-only"></a>
 
@@ -1282,6 +1283,27 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 ```
 
 来源：[`packages/deliverables/workspace-changes/src/types.ts:106`](../packages/deliverables/workspace-changes/src/types.ts)
+
+### `zerowall/*`
+
+<a id="zerowallcapabilitiesselection--log-only"></a>
+
+#### `zerowall/capabilities/selection` — log-only
+
+```ts persistence-catalog
+/**
+ * Historical ZeroWall capability selection metadata. The capability menu
+ * was removed from the stable profile, but existing session logs still
+ * contain this record and must remain readable and lossless.
+ */
+'zerowall/capabilities/selection': {
+  tools: string[]
+  disabled: string[]
+  onDemand?: string[]
+}
+```
+
+来源：[`packages/core/session/src/types.ts:408`](../packages/core/session/src/types.ts)
 
 ## 已解析的持久化类型
 
@@ -2876,6 +2898,14 @@ SHA-256: `a3edd1efd1fef21b72c55e213c8a8b24196b091abde2b89db52be0b2aaae3cfa`
 SHA-256: `8e8155594e07812356b67d732196dda894b0f9c91a5969d51612cf490b0a016d`
 
 `"workspace/changes"`
+
+<a id="persistence-type-sha256-6397e39ed691db1c556489addcc296f631530f0286f66ab1df13007f8dd8e2db"></a>
+
+### `"zerowall/capabilities/selection"`
+
+SHA-256: `6397e39ed691db1c556489addcc296f631530f0286f66ab1df13007f8dd8e2db`
+
+`"zerowall/capabilities/selection"`
 
 <a id="persistence-type-sha256-93d38436347f67c9022aacbc4472e283d722bcab8eb73fc376aaf7b6a6b9fb35"></a>
 
@@ -4626,7 +4656,7 @@ SHA-256: `4e97c3d85c0fc817ee58873c38c25a2474abaaa0af4839311b50b68db3b8cf1a`
 
 SHA-256: `335e242de1fcc17b6ca920fc420d71bec2d76e53e37955c00948b65ab77f05c5`
 
-来源：[`packages/core/session/src/types.ts:462`](../packages/core/session/src/types.ts)
+来源：[`packages/core/session/src/types.ts:472`](../packages/core/session/src/types.ts)
 
 以下类型之一：
 
@@ -5879,6 +5909,20 @@ SHA-256: `119abe2b9c0b2f46ecb31d82b9acba4d4b30e049f655e2475e8b4ae12d5a9e25`
 | `point` | 必需 | `string` |
 | `turn` | 必需 | `number` |
 
+<a id="persistence-type-sha256-c844c1f9b63d6a45a0e585f88179c3414bd1d5bc59ae0162c25606340975f007"></a>
+
+### `{ disabled, onDemand?, tools }`
+
+SHA-256: `c844c1f9b63d6a45a0e585f88179c3414bd1d5bc59ae0162c25606340975f007`
+
+来源：[`packages/core/session/src/types.ts:408`](../packages/core/session/src/types.ts)
+
+| 属性 | 存在性 | 类型 |
+|---|---|---|
+| `disabled` | 必需 | [`string[]`](#persistence-type-sha256-93c33d9687613293f8c95d46c4d922fe9ceae83b84c384beff5c3315abe005f2) |
+| `onDemand` | 可选 | [`string[]`](#persistence-type-sha256-93c33d9687613293f8c95d46c4d922fe9ceae83b84c384beff5c3315abe005f2) |
+| `tools` | 必需 | [`string[]`](#persistence-type-sha256-93c33d9687613293f8c95d46c4d922fe9ceae83b84c384beff5c3315abe005f2) |
+
 <a id="persistence-type-sha256-9e41386b3a0c9572b0d63078492ebb3997da7d3a830d44e0259418bd02f4bcb2"></a>
 
 ### `{ end, start }`
@@ -5898,7 +5942,7 @@ SHA-256: `9e41386b3a0c9572b0d63078492ebb3997da7d3a830d44e0259418bd02f4bcb2`
 
 SHA-256: `bcf0caf62d964b2fcf5404bd5c909cfa9a21c3f3c96e6b7e36d9e33565223825`
 
-来源：[`packages/core/session/src/types.ts:464`](../packages/core/session/src/types.ts)
+来源：[`packages/core/session/src/types.ts:474`](../packages/core/session/src/types.ts)
 
 | 属性 | 存在性 | 类型 |
 |---|---|---|
@@ -6064,7 +6108,7 @@ SHA-256: `e3e77b26f0148755a505f5b8ea843a3be117827d4703bb5754d9dc8ddbef521f`
 
 SHA-256: `17d1afb770d9941936130996da00dc86782cfef731d8d6526162c301256a4ac3`
 
-来源：[`packages/core/session/src/types.ts:427`](../packages/core/session/src/types.ts)
+来源：[`packages/core/session/src/types.ts:437`](../packages/core/session/src/types.ts)
 
 | 属性 | 存在性 | 类型 |
 |---|---|---|
@@ -8727,6 +8771,22 @@ SHA-256: `e308ccf867a5398e316e0af8cb6ce238a8d33a63b9b384c8250a686786285f72`
 | `seq` | 必需 | `number` |
 | `time` | 必需 | `number` |
 | `type` | 必需 | `"workspace/changes"` |
+
+<a id="persistence-type-sha256-43a99d16fdf3f12df25c2301dd12b7682326874b965c3f156a150f1d8be13470"></a>
+
+<a id="persistence-type-eventzerowallcapabilitiesselection"></a>
+
+### `{ type: "zerowall/capabilities/selection" }`
+
+SHA-256: `43a99d16fdf3f12df25c2301dd12b7682326874b965c3f156a150f1d8be13470`
+
+| 属性 | 存在性 | 类型 |
+|---|---|---|
+| `data` | 必需 | [`{ disabled, onDemand?, tools }`](#persistence-type-sha256-c844c1f9b63d6a45a0e585f88179c3414bd1d5bc59ae0162c25606340975f007) |
+| `ignorable` | 可选 | `true` |
+| `seq` | 必需 | `number` |
+| `time` | 必需 | `number` |
+| `type` | 必需 | `"zerowall/capabilities/selection"` |
 
 <a id="persistence-type-sha256-0aa62ab51b36c0e64b134bd03ba8725d758744180a1a447da49beaad194f219f"></a>
 

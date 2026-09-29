@@ -79,6 +79,11 @@ export function assertEntriesActive(ctx: Context, modules: Pick<ClientModuleLoad
     if (state === 'pending') {
       const missing = Object.keys(entry.fiber.inject).filter(service => ctx.get(service) === undefined)
       failures.push(`${name}: pending (waiting for service${missing.length === 1 ? '' : 's'}: ${missing.join(', ') || 'unknown'})`)
+    } else if (state === 'failed') {
+      // Cordis keeps apply failures on the fiber but may have no browser log
+      // exporter. Surface the reason so a failed packaged boot is actionable.
+      const reason = (entry.fiber as unknown as { _error?: unknown })._error
+      failures.push(`${name}: failed${reason === undefined ? '' : `: ${reason instanceof Error ? reason.message : String(reason)}`}`)
     } else {
       failures.push(`${name}: ${state}`)
     }

@@ -7,7 +7,10 @@ import { Recording } from '../src/client/audio.ts'
  * @param options - device failures or an empty final recording.
  * @returns the recording, device controls, and resource observations.
  */
-export function captureFixture(options: { empty?: boolean; recorderError?: boolean; constructError?: boolean } = {}) {
+// Vitest 4 mock inference references a pnpm-local Procedure type during
+// declaration emit; this fixture is consumed only by tests.
+// oxlint-disable-next-line typescript/no-explicit-any -- test fixture intentionally exposes Vitest's inferred mock surface.
+export function captureFixture(options: { empty?: boolean; recorderError?: boolean; constructError?: boolean } = {}): any {
   const trackStop = vi.fn(), close = vi.fn(async () => {}), disposed = vi.fn()
   const decoding = vi.fn(async (_data: ArrayBuffer) => ({ duration: 2 }))
   const rendering = vi.fn(async () => ({ getChannelData: () => new Float32Array([0.5, -0.5]) }))

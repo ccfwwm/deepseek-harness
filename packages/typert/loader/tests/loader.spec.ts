@@ -465,6 +465,29 @@ describe('validateTypertManifest', () => {
     })).toThrow('service "tools".members must be an array')
   })
 
+  it('adapts rc.1 schema fields to rc.2 factories without weakening validation', () => {
+    const legacySchema = { parse: (value: unknown) => value }
+    const legacyCodec = { mode: 'strict', typeSymbol: 'pkg#Legacy', schema: legacySchema }
+    const manifest = {
+      package: 'pkg',
+      face: 'host',
+      schemas: [{ name: 'Legacy', schema: legacySchema }],
+      model: { services: [], events: [], objects: [] },
+      invocations: [{
+        ...strictInvocation(),
+        parameters: [{ ...strictInvocation().parameters[0], codec: legacyCodec }],
+        result: legacyCodec,
+      }],
+    }
+
+    const validated = validateTypertManifest('pkg', manifest)
+    const createOf = (value: unknown) => (value as { create: () => unknown }).create()
+    expect(createOf(validated.schemas[0])).toBe(legacySchema)
+    const invocation = validated.invocations[0]!
+    expect(createOf(invocation.parameters[0]?.codec)).toBe(legacySchema)
+    expect(createOf(invocation.result)).toBe(legacySchema)
+  })
+
   it('validates service, event, object, member, type, and documentation records', () => {
     const complete = completeManifest(zodish)
     expect(validateTypertManifest('pkg', complete)).toBe(complete)

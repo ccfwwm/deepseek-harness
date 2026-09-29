@@ -678,7 +678,7 @@ describe('UiWorkspaceService', () => {
     expect(b.notify).toHaveBeenCalledTimes(3)
   })
 
-  it('uses only an explicit Workspace or the recent-Workspace policy for new Sessions', async () => {
+  it('uses an explicit or recent Workspace, and initializes first-use Workspace for a new Session', async () => {
     const current = summary('current', { cwd: '/w/current-home', updatedAt: 1 })
     const recent = summary('recent', { cwd: '/w/recent-home', updatedAt: 2 })
     const b = bench({
@@ -713,8 +713,23 @@ describe('UiWorkspaceService', () => {
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     b.uiWorkspace.startSession(wid('recent-home'))
     await vi.waitFor(() => { expect(warning).toHaveBeenCalledWith('new session failed:', expect.any(Error)) })
-    const empty = bench()
+    const empty = bench({
+      workspaces: workspaceState(),
+      sessions: sessionState(),
+      configureWorkspaces: (workspaces) => {
+        workspaces.initializeDefault.mockImplementation(async () => {
+          const item = workspace('first-use')
+          workspaces.list.set(workspaceState([item]))
+          return item
+        })
+      },
+    })
     empty.uiWorkspace.startSession()
+    await vi.waitFor(() => {
+      expect(empty.sessions.retain).toHaveBeenCalledWith(sid('created-first-use'), { source: 'mainView' })
+    })
+    expect(empty.workspaces.initializeDefault).toHaveBeenCalledExactlyOnceWith(expect.any(AbortSignal))
+    expect(empty.sessions.create).toHaveBeenCalledWith({ workspaceId: wid('first-use') })
     expect(empty.selectPanel).toHaveBeenCalledWith(null)
 
     const missingMember = bench({
@@ -730,12 +745,43 @@ describe('UiWorkspaceService', () => {
     })
   })
 
-  it('opens nothing when a New Session request has no Workspace to open', () => {
-    const b = bench()
+  it('preserves a New Session request until both startup catalogs are ready', async () => {
+    const b = bench({ configureWorkspaces: (workspaces) => {
+      workspaces.initializeDefault.mockImplementation(async () => {
+        const item = workspace('first-use')
+        workspaces.list.set(workspaceState([item]))
+        return item
+      })
+    } })
 
     b.uiWorkspace.startSession()
 
     expect(b.selectPanel).toHaveBeenCalledWith(null)
+    expect(b.workspaces.initializeDefault).not.toHaveBeenCalled()
+    expect(b.sessions.create).not.toHaveBeenCalled()
+    b.sessions.list.set(sessionState())
+    expect(b.workspaces.initializeDefault).not.toHaveBeenCalled()
+    b.workspaces.list.set(workspaceState())
+
+    await vi.waitFor(() => {
+      expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(sid('created-first-use'), { source: 'mainView' })
+    })
+    expect(b.workspaces.initializeDefault).toHaveBeenCalledExactlyOnceWith(expect.any(AbortSignal))
+    expect(b.sessions.create).toHaveBeenCalledWith({ workspaceId: wid('first-use') })
+  })
+
+  it('does not replay a queued New Session after a newer Session navigation', async () => {
+    const b = bench()
+
+    b.uiWorkspace.startSession()
+    b.uiWorkspace.openSession(sid('manual'))
+    b.sessions.list.set(sessionState())
+    b.workspaces.list.set(workspaceState())
+    await setImmediate()
+
+    expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(sid('manual'), { source: 'mainView' })
+    expect(b.workspaces.initializeDefault).not.toHaveBeenCalled()
+    expect(b.sessions.create).not.toHaveBeenCalled()
   })
 
   it('releases a prepared Workspace target when synchronous preparation supersedes it', async () => {
