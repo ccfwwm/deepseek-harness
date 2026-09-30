@@ -1,8 +1,8 @@
 import { Fragment, memo, useEffect, useMemo, useState } from 'react'
-import type { ReactNode } from 'react'
+import type { DragEvent, ReactNode } from 'react'
 import type { PendingSubmission } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { MessageImageSource } from '@deepseek-ai/dsh-client-ui-conversation/client'
-import { fileExtension, FileTypeIcon, fileSizeText, JsonBlock, projectUserText, StateDot, TextShimmer } from '@deepseek-ai/dsh-client-ui-primitives'
+import { fileExtension, FileTypeIcon, fileSizeText, IconCopyOutlineRegular, IconPlusOutlineRegular, JsonBlock, projectUserText, StateDot, TextShimmer } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChatNodeOwnerProps, ChatNodeViewProps, ChatViewSlotProps } from '../contract/slots.ts'
 import type { ModelRetryNode, TurnErrorNode, UserMessageNode } from '../contract/snapshot.ts'
 import { CompactionItem } from './CompactionItem.tsx'
@@ -15,6 +15,67 @@ type UserFile = Extract<UserMessageNode['content'][number], { type: 'file' }>
 type PresentedAttachment =
   | { readonly type: 'image'; readonly image: MessageImageSource }
   | { readonly type: 'file'; readonly file: UserFile['attachment'] }
+
+interface FileActionScope { readonly sessionId: string; readonly cwd?: string }
+const HISTORY_ATTACHMENT_MIME = 'application/x-zerowall-history-attachment'
+
+function UserFileCard({ file, actionScope, t }: {
+  file: UserFile['attachment']
+  actionScope?: FileActionScope
+  t: ChatViewSlotProps['t']
+}) {
+  const [busy, setBusy] = useState(false)
+  const [feedback, setFeedback] = useState<{ error: boolean; text: string } | null>(null)
+  const action = (kind: 'open' | 'copy' | 'readd'): void => {
+    if (actionScope === undefined || busy) return
+    setBusy(true)
+    setFeedback(null)
+    const complete = (success: boolean, error?: string): void => {
+      setBusy(false)
+      setFeedback(success
+        ? kind === 'open' ? null : { error: false, text: t(kind === 'copy' ? 'message.fileCopied' : 'message.fileAdded') }
+        : { error: true, text: error || t('message.fileActionFailed') })
+    }
+    const detail = {
+      file,
+      attachmentId: String(file.attachmentId),
+      sessionId: actionScope.sessionId,
+      ...(actionScope.cwd === undefined ? {} : { cwd: actionScope.cwd }),
+      complete,
+    }
+    const event = new CustomEvent(`zerowall:attachment-${kind}`, { cancelable: true, detail })
+    window.dispatchEvent(event)
+    if (!event.defaultPrevented) complete(false, t('message.fileActionUnavailable'))
+  }
+  const nameAndSize = <>
+    <FileTypeIcon path={file.name} className={css.fileIcon} />
+    <span className={css.fileContent}>
+      <span className={css.fileName}>{file.name}</span>
+      <span className={css.fileMeta}>
+        {[fileExtension(file.name).toUpperCase().slice(0, 8), fileSizeText(file.bytes)]
+          .filter(Boolean).join(' ')}
+      </span>
+    </span>
+  </>
+  const startDrag = (event: DragEvent<HTMLDivElement>): void => {
+    if (actionScope === undefined || busy) { event.preventDefault(); return }
+    event.dataTransfer.effectAllowed = 'copy'
+    event.dataTransfer.setData(HISTORY_ATTACHMENT_MIME, JSON.stringify({
+      sessionId: actionScope.sessionId,
+      attachmentId: String(file.attachmentId),
+    }))
+  }
+  return <div className={css.fileCard} title={file.name} draggable={actionScope !== undefined && !busy} onDragStart={startDrag}>
+    {actionScope === undefined
+      ? <span className={css.filePreviewButton}>{nameAndSize}</span>
+      : <button type="button" className={css.filePreviewButton} disabled={busy} onClick={() => action('open')} aria-label={t('message.filePreview', { name: file.name })}>{nameAndSize}</button>}
+    {actionScope !== undefined && <div className={css.fileActions}>
+      <button type="button" disabled={busy} title={t('message.fileCopy')} aria-label={t('message.fileCopy')} onClick={() => action('copy')}><IconCopyOutlineRegular size={15} /></button>
+      <button type="button" disabled={busy} title={t('message.fileReadd')} aria-label={t('message.fileReadd')} onClick={() => action('readd')}><IconPlusOutlineRegular size={15} /></button>
+    </div>}
+    {feedback !== null && <span className={feedback.error ? css.fileError : css.fileSuccess} role={feedback.error ? 'alert' : 'status'}>{feedback.text}</span>}
+  </div>
+}
 
 function contentParts(content: readonly unknown[]): {
   text: string
@@ -161,7 +222,7 @@ function TurnMaxTokensItem({ t }: {
 /** Right-aligned bubble shared by user and steering rows. */
 export function UserStyleBubble({
   content, renderMessageImages, actions, pending = false, echo = false, referenceLabels = [], skillNames = [],
-  previewAttachments, references, t,
+  previewAttachments, references, fileActionScope, t,
 }: {
   content: readonly unknown[]
   renderMessageImages: ChatNodeOwnerProps['renderMessageImages']
@@ -178,6 +239,7 @@ export function UserStyleBubble({
   /** Local submission-echo attachments replacing the content-derived attachment sequence. */
   previewAttachments?: readonly PresentedAttachment[]
   references?: Pick<ChatNodeOwnerProps, 'openFile' | 'openSkill'>
+  fileActionScope?: FileActionScope
   t: ChatViewSlotProps['t']
 }): ReactNode {
   const { text, attachments: contentAttachments, rest } = contentParts(content)
@@ -205,16 +267,7 @@ export function UserStyleBubble({
                 </Fragment>
               )
               : (
-                <span key={`file:${index}`} className={css.fileCard} title={attachment.file.name}>
-                  <FileTypeIcon path={attachment.file.name} className={css.fileIcon} />
-                  <span className={css.fileContent}>
-                    <span className={css.fileName}>{attachment.file.name}</span>
-                    <span className={css.fileMeta}>
-                      {[fileExtension(attachment.file.name).toUpperCase().slice(0, 8), fileSizeText(attachment.file.bytes)]
-                        .filter(Boolean).join(' ')}
-                    </span>
-                  </span>
-                </span>
+                <UserFileCard key={`file:${index}`} file={attachment.file} {...fileActionScope === undefined ? {} : { actionScope: fileActionScope }} t={t} />
               ))}
           </div>
         )}
@@ -318,13 +371,14 @@ export function PendingSubmissionBubble({ submission, renderMessageImages, t }: 
 
 /** User and admitted-steering keyed Chat renderer. */
 export const UserMessageNodeView = memo(function UserMessageNodeView({
-  node, renderMessageImages, openFile, openSkill, t,
+  node, renderMessageImages, openFile, openSkill, sessionId, cwd, t,
 }: ChatNodeViewProps<'user' | 'steering'>) {
   const data = node.data
   return (
     <UserStyleBubble
       content={data.content}
       references={{ openFile, openSkill }}
+      {...sessionId === undefined ? {} : { fileActionScope: { sessionId, ...(cwd === undefined ? {} : { cwd }) } }}
       renderMessageImages={renderMessageImages}
       {...data.referenceLabels === undefined ? {} : { referenceLabels: data.referenceLabels }}
       {...data.skillNames === undefined ? {} : { skillNames: data.skillNames }}

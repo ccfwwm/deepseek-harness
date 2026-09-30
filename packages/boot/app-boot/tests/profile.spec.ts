@@ -356,6 +356,56 @@ describe('loadProfile', () => {
       .toEqual([...PROFILE_TEMPLATES.web?.bundles ?? []])
   })
 
+  it('moves Free Search into existing web profiles without changing their patch or other bundles', () => {
+    const anchor = stageInstallation({
+      '@deepseek-ai/dsh-base': { patch: '[]\n' },
+      '@deepseek-ai/dsh-web-app': { patch: '[]\n' },
+      'dsh-free-search': { patch: '- insert: [{ id: web-search-free, name: dsh-free-search, config: { provider: bing } }]\n' },
+      'custom-bundle': { patch: '[]\n' },
+    })
+    for (const additionalBundles of [[], ['custom-bundle']]) {
+      const home = tmp()
+      const dir = resolveProfileDir('web', home)
+      const originalBundles = ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', ...additionalBundles]
+      initProfile(dir, originalBundles)
+      const patchPath = join(dir, PROFILE_PATCH_FILENAME)
+      const userPatch = '- id: web-search-free\n  config: { provider: ddg }\n'
+      writeFileSync(patchPath, userPatch)
+
+      const profile = loadProfile('t', 'web', anchor, home)
+      expect(readProfileManifest('t', dir).dsh?.profile?.bundles).toEqual([...originalBundles, 'dsh-free-search'])
+      expect(readFileSync(patchPath, 'utf8')).toBe(userPatch)
+      expect(profile.layers.map(layer => layer.packageName)).toContain('dsh-free-search')
+      expect(composeEntries([...profile.layers.map(layer => layer.patches), profile.patches])
+        .find(entry => entry.id === 'web-search-free')?.config).toEqual({ provider: 'ddg' })
+    }
+  })
+
+  it('mounts one editable File Review bundle in ZeroWall web profiles', () => {
+    const anchor = stageInstallation({
+      '@deepseek-ai/dsh-base': { patch: '[]\n' },
+      '@deepseek-ai/dsh-web-app': { patch: '[]\n' },
+      'dsh-free-search': { patch: '[]\n' },
+      'dsh-file-review': { patch: '- insert: [{ id: file-review, name: dsh-file-review }]\n' },
+    })
+    const home = tmp()
+    const dir = resolveProfileDir('web', home)
+    initProfile(dir, ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-free-search'])
+    const patchPath = join(dir, PROFILE_PATCH_FILENAME)
+    writeFileSync(patchPath, '- id: unrelated\n  disabled: true\n')
+    vi.stubEnv('ZEROWALL_USER_DATA_DIR', join(home, 'user-data'))
+    try {
+      const profile = loadProfile('t', 'web', anchor, home)
+      expect(profile.layers.map(layer => layer.packageName).filter(name => name === 'dsh-file-review')).toEqual(['dsh-file-review'])
+      expect(readProfileManifest('t', dir).dsh?.profile?.bundles?.filter(name => name === 'dsh-file-review')).toEqual(['dsh-file-review'])
+      expect(readFileSync(patchPath, 'utf8')).toBe('- id: unrelated\n  disabled: true\n')
+      loadProfile('t', 'web', anchor, home)
+      expect(readProfileManifest('t', dir).dsh?.profile?.bundles?.filter(name => name === 'dsh-file-review')).toEqual(['dsh-file-review'])
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
   it('normalizes only the exact installation-owned headless bundle tuple', () => {
     const anchor = stageInstallation({
       '@deepseek-ai/dsh-base': { patch: '[]\n' },

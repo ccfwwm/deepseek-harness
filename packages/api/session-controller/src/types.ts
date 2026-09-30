@@ -270,6 +270,28 @@ export interface SessionListValue {
   readonly items: readonly SessionSummary[]
 }
 
+/** Start one desktop-owned move of a stored Session directory to OS trash. */
+export interface SessionPrepareDeleteRequest {
+  readonly sessionId: SessionId
+}
+
+/** Opaque lease and backend-resolved directory for the desktop trash API. */
+export interface SessionPrepareDeleteValue {
+  readonly token: string
+  readonly path: string
+}
+
+/** Finish or cancel one prepared Session deletion. */
+export interface SessionFinishDeleteRequest {
+  readonly sessionId: SessionId
+  readonly token: string
+}
+
+/** Acknowledgement after the addressed deletion transition has completed. */
+export interface SessionFinishDeleteValue {
+  readonly completed: boolean
+}
+
 /** Session search request. */
 export interface SessionSearchRequest {
   readonly query: string

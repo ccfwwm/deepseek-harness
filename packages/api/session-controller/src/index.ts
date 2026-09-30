@@ -1,5 +1,7 @@
 /** Session Remote owner: cold reads, explicit Agent commands, and live control state. */
 
+import { randomUUID } from 'node:crypto'
+import { lstat } from 'node:fs/promises'
 import { hostname } from 'node:os'
 import { resolve } from 'node:path'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -38,6 +40,8 @@ import type {
   SessionControlFrame,
   SessionCreateRequest,
   SessionCreateValue,
+  SessionFinishDeleteRequest,
+  SessionFinishDeleteValue,
   SessionFollowFrame,
   SessionFollowRequest,
   SessionForkRequest,
@@ -50,6 +54,8 @@ import type {
   SessionPageRequest,
   SessionPromptRequest,
   SessionPromptValue,
+  SessionPrepareDeleteRequest,
+  SessionPrepareDeleteValue,
   SessionRenameRequest,
   SessionRenameValue,
   SessionSearchRequest,
@@ -105,6 +111,7 @@ export class SessionController extends TypertRemoteService {
     'fs',
     'llm',
     'sessions',
+    'sessionPersistence',
     'sessionProjections',
     'sessionQuery',
     'typert',
@@ -126,6 +133,7 @@ export class SessionController extends TypertRemoteService {
   private readonly revealPath: (path: string, signal: AbortSignal) => Promise<void>
   private readonly canOpenPath: () => boolean
   private readonly promotions = new Set<Promise<void>>()
+  private readonly deletionLeases = new Map<SessionId, string>()
 
   /**
    * @param ctx - Host context containing the Session capability assembly.
@@ -168,7 +176,7 @@ export class SessionController extends TypertRemoteService {
       ctx.emit('api-session/added', this.listState.summaryFor(session))
     })
     ctx.on('session/disposed', (session) => {
-      ctx.emit('api-session/removed', session.id)
+      if (!this.agents.isDeleting(session.id)) ctx.emit('api-session/removed', session.id)
     })
     const publishAgentAvailability = ({ agent }: { agent: Agent }): undefined => {
       if (ctx.sessions.get(agent.id) === agent.session) {
@@ -251,6 +259,105 @@ export class SessionController extends TypertRemoteService {
   @Remote('list')
   async list(_request: SessionListRequest, signal: AbortSignal): Promise<SessionListValue> {
     return { items: await this.listState.list(signal) }
+  }
+
+  /**
+   * Reserve one Session for a desktop trash move. The exact owned Agent and
+   * Host activity providers have stopped before the path is returned.
+   * @param request - Session to reserve.
+   * @returns opaque lease and backend-owned directory.
+   */
+  @Remote('prepareDelete')
+  async prepareDelete(request: SessionPrepareDeleteRequest): Promise<SessionPrepareDeleteValue> {
+    const sessionId = request.sessionId
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/u.test(sessionId)) {
+      throw new RemoteError('gateway/bad-request', 'Invalid session id', {})
+    }
+    const stored = await this.ctx.sessionPersistence.stat(sessionId)
+    if (stored === undefined || stored.header.cwd === undefined) {
+      throw new RemoteError('session/not-found', `session "${sessionId}" has no stored directory`, { sessionId })
+    }
+    if (stored.header.origin === 'subagent') {
+      throw new RemoteError('session/agent-busy', `session "${sessionId}" belongs to a subagent`, {
+        reason: 'delete the owning conversation first',
+      })
+    }
+    await this.agents.prepareDeletion(sessionId)
+    try {
+      await this.ctx.parallel('workspace/session-stop', { sessionId })
+      const activity = await this.ctx.waterfall(
+        'workspace/session-activity', { sessionId }, () => Promise.resolve([]),
+      )
+      if (activity.length > 0) {
+        throw new RemoteError('session/agent-busy', `session "${sessionId}" still has active work`, {
+          reason: 'active Host work did not stop',
+        })
+      }
+      const path = await this.ctx.sessionPersistence.directory(sessionId)
+      if (path === undefined) {
+        throw new RemoteError('gateway/internal', 'Session persistence cannot resolve a deletion directory', {})
+      }
+      const info = await lstat(path)
+      if (!info.isDirectory() || info.isSymbolicLink()) {
+        throw new RemoteError('gateway/internal', 'Session directory is not a regular directory', {})
+      }
+      const token = randomUUID()
+      this.deletionLeases.set(sessionId, token)
+      return { token, path }
+    } catch (error) {
+      this.agents.finishDeletion(sessionId)
+      throw error
+    }
+  }
+
+  /**
+   * Remove durable Workspace references after the desktop moved the directory.
+   * A missing in-memory lease is accepted only for crash recovery when the
+   * stored Session is independently confirmed absent.
+   * @param request - Session and lease returned by prepareDelete.
+   * @returns acknowledgement after registry cleanup and list notification.
+   */
+  @Remote('commitDelete')
+  async commitDelete(request: SessionFinishDeleteRequest): Promise<SessionFinishDeleteValue> {
+    const { sessionId, token } = request
+    const lease = this.deletionLeases.get(sessionId)
+    if (!/^[0-9a-f]{8}-[0-9a-f-]{27,}$/iu.test(token) || (lease !== undefined && lease !== token)) {
+      throw new RemoteError('gateway/bad-request', 'Invalid Session deletion lease', {})
+    }
+    if (lease === undefined) await this.agents.prepareDeletion(sessionId)
+    try {
+      if (await this.ctx.sessionPersistence.stat(sessionId) !== undefined) {
+        throw new RemoteError('session/agent-busy', `session "${sessionId}" is still stored`, {
+          reason: 'the directory has not moved to trash',
+        })
+      }
+      await this.ctx.workspaceRegistry.forgetRemovedSession(sessionId)
+      this.ctx.emit('api-session/removed', sessionId)
+      this.deletionLeases.delete(sessionId)
+      this.agents.finishDeletion(sessionId)
+      return { completed: true }
+    } catch (error) {
+      if (lease === undefined) this.agents.finishDeletion(sessionId)
+      throw error
+    }
+  }
+
+  /**
+   * Release a prepared deletion after the desktop trash move fails or is cancelled.
+   * @param request - Session and opaque lease returned by prepareDelete.
+   * @returns acknowledgement after the Session may be activated again.
+   */
+  @Remote('abortDelete')
+  abortDelete(request: SessionFinishDeleteRequest): SessionFinishDeleteValue {
+    const lease = this.deletionLeases.get(request.sessionId)
+    if (lease !== undefined && lease !== request.token) {
+      throw new RemoteError('gateway/bad-request', 'Invalid Session deletion lease', {})
+    }
+    if (lease !== undefined) {
+      this.deletionLeases.delete(request.sessionId)
+      this.agents.finishDeletion(request.sessionId)
+    }
+    return { completed: true }
   }
 
   /**

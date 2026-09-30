@@ -199,6 +199,17 @@ export abstract class SessionPersistence extends Service {
    * @returns one snapshot per stored session.
    */
   abstract list(options?: SessionPersistenceListOptions): Promise<readonly SessionPersistenceSnapshot[]>
+
+  /**
+   * Resolve the owned directory of one stored Session when the backend has a
+   * directory-per-session layout. Callers must still check existence and
+   * canonical containment before moving the directory.
+   * @param _id - stored Session identity.
+   * @returns its absolute directory, or undefined when absent or unsupported.
+   */
+  directory(_id: SessionId): Promise<string | undefined> {
+    return Promise.resolve(undefined)
+  }
 }
 
 export default SessionPersistence

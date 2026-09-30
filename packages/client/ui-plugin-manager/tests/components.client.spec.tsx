@@ -800,6 +800,27 @@ describe('PluginManagerPage', () => {
       expect(document.querySelector('[data-plugin-row-detail]')).toBeNull()
       expect(document.querySelector('[data-plugin-detail="dsh-better-sidebar"]')).toBeTruthy()
     })
+
+    it('opens the Free Search and File Review rows targeted by ZeroWall settings shortcuts', () => {
+      const packages = [
+        pkg({ name: 'dsh-free-search', rows: [row({ rowId: 'web-search-free', moduleName: 'dsh-free-search' })] }),
+        pkg({ name: 'dsh-file-review', rows: [row({ rowId: 'file-review', moduleName: 'dsh-file-review' })] }),
+      ]
+      const rows = new Set(['dsh-free-search#web-search-free', 'dsh-file-review#file-review'])
+      const bodies: SlotBodies = {
+        'plugins.row.config:dsh-free-search#web-search-free': view => view === 'page' ? <form aria-label="Free Search settings" /> : null,
+        'plugins.row.config:dsh-file-review#file-review': view => view === 'page' ? <form aria-label="File Review settings" /> : null,
+      }
+      const b = renderTab({ packages }, { rows }, bodies)
+
+      act(() => { b.navigation.actions.setView({ kind: 'row', name: 'dsh-free-search', rowId: 'web-search-free' }) })
+      const search = document.querySelector('[data-plugin-row-detail="dsh-free-search#web-search-free"]') as HTMLElement
+      expect(within(search).getByRole('form', { name: 'Free Search settings' })).toBeTruthy()
+
+      act(() => { b.navigation.actions.setView({ kind: 'row', name: 'dsh-file-review', rowId: 'file-review' }) })
+      const review = document.querySelector('[data-plugin-row-detail="dsh-file-review#file-review"]') as HTMLElement
+      expect(within(review).getByRole('form', { name: 'File Review settings' })).toBeTruthy()
+    })
   })
 
   describe('detail contributions', () => {

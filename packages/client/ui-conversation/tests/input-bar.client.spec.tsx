@@ -9,6 +9,7 @@
 // the shell (jsdom's beforeinput lacks the ranges Lexical needs).
 
 import './control-row-dom.ts'
+import React from 'react'
 import type { InboxState } from '@deepseek-ai/dsh-agent/types'
 import type { GlobalStandardProps } from '@deepseek-ai/dsh-client-ui-slots'
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
@@ -339,6 +340,60 @@ describe('composer placeholder visibility', () => {
 })
 
 describe('image draft rail', () => {
+  it('accepts a dragged history attachment only in the matching composer session', () => {
+    const { view } = bench({ addFiles: vi.fn(() => null) })
+    const card = view.container.querySelector('[data-composer-card]')!
+    const seen = vi.fn((event: Event) => {
+      event.preventDefault()
+      ;(event as CustomEvent<{ complete: (success: boolean) => void }>).detail.complete(true)
+    })
+    window.addEventListener('zerowall:attachment-readd', seen)
+    try {
+      const transfer = (sessionId: string) => ({
+        types: ['application/x-zerowall-history-attachment'],
+        getData: () => JSON.stringify({ sessionId, attachmentId: 'sha256:example' }),
+        dropEffect: 'none',
+      })
+      const matching = transfer(SID)
+      fireEvent.dragOver(card, { dataTransfer: matching })
+      expect(matching.dropEffect).toBe('copy')
+      fireEvent.drop(card, { dataTransfer: matching })
+      expect(seen).toHaveBeenCalledOnce()
+      expect((seen.mock.calls[0]![0] as CustomEvent<{ sessionId: string; attachmentId: string }>).detail).toMatchObject({
+        sessionId: SID, attachmentId: 'sha256:example',
+      })
+
+      fireEvent.drop(card, { dataTransfer: transfer('different-session') })
+      expect(seen).toHaveBeenCalledOnce()
+    } finally {
+      window.removeEventListener('zerowall:attachment-readd', seen)
+    }
+  })
+
+  it('accepts re-added history files only for the currently viewed session', () => {
+    const addFiles = vi.fn(() => null)
+    const { props, view } = bench({ addFiles })
+    const file = new File([Buffer.from('document')], 'history.txt', { type: 'text/plain' })
+    const current = vi.fn()
+    const first = new CustomEvent('zerowall:attachment-files', { cancelable: true, detail: { sessionId: SID, files: [file], complete: current } })
+    act(() => window.dispatchEvent(first))
+    expect(first.defaultPrevented).toBe(true)
+    expect(addFiles).toHaveBeenCalledWith([file], undefined)
+    expect(current).toHaveBeenCalledWith(true, undefined)
+
+    act(() => view.rerender(<InputBar {...props} sessionId={'new-session' as SessionId} />))
+    addFiles.mockClear()
+    const stale = new CustomEvent('zerowall:attachment-files', { cancelable: true, detail: { sessionId: SID, files: [file], complete: vi.fn() } })
+    act(() => window.dispatchEvent(stale))
+    expect(stale.defaultPrevented).toBe(false)
+    expect(addFiles).not.toHaveBeenCalled()
+
+    const next = new CustomEvent('zerowall:attachment-files', { cancelable: true, detail: { sessionId: 'new-session', files: [file], complete: vi.fn() } })
+    act(() => window.dispatchEvent(next))
+    expect(next.defaultPrevented).toBe(true)
+    expect(addFiles).toHaveBeenCalledWith([file], undefined)
+  })
+
   it('collects clipboard files while preserving text from a mixed paste', async () => {
     const addFiles = vi.fn(() => null)
     const { textarea, shell } = bench({ addFiles })

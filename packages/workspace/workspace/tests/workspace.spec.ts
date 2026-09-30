@@ -191,6 +191,25 @@ afterEach(async () => {
 })
 
 describe('WorkspaceRegistry lifecycle and bootstrap', () => {
+  it('forgets a removed Session in workspace order and global sets without changing neighbors', async () => {
+    const cwd = await makeDir('delete-membership')
+    const first = await harness({ sessions: [header('remove-me', cwd), header('keep-me', cwd)] })
+    const workspace = first.registry.list()[0]!
+    await first.registry.pinSession(SessionId('remove-me'))
+    await first.registry.archiveSession(SessionId('keep-me'))
+    first.setSessions([header('keep-me', cwd)])
+    await first.registry.forgetRemovedSession(SessionId('remove-me'))
+    await first.registry.forgetRemovedSession(SessionId('remove-me'))
+    expect(workspace.sessionIds).toEqual(['keep-me'])
+    expect(first.registry.pinnedSessionIds).toEqual([])
+    expect(first.registry.archivedSessionIds).toEqual(['keep-me'])
+    await first.fiber.dispose()
+    const second = await harness({ pool: first.pool, sessions: [header('keep-me', cwd)] })
+    expect(second.registry.list()[0]?.sessionIds).toEqual(['keep-me'])
+    expect(second.registry.pinnedSessionIds).toEqual([])
+    expect(second.registry.archivedSessionIds).toEqual(['keep-me'])
+  })
+
   it('stays pending without sessionPersistence and never opens or marks the domain', async () => {
     const pool = new MemoryMediaPool()
     const ctx = await storageContext(pool)

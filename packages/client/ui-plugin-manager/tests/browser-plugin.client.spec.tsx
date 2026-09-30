@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import assert from 'node:assert/strict'
+import { createElement } from 'react'
 import { Context, Service } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { cleanup, render } from '@testing-library/react'
@@ -72,6 +73,8 @@ describe('ui-plugin-manager browser plugin', () => {
     b.ctx.pluginNavigation.openBundle('dsh-navigation-test')
     expect(b.panelInfo.getSnapshot().activePanelId).toBe(PANEL_ID)
     expect(navigation.getSnapshot()).toEqual({ view: { kind: 'package', name: 'dsh-navigation-test' } })
+    b.ctx.pluginNavigation.openRow('dsh-navigation-test', 'search-row')
+    expect(navigation.getSnapshot()).toEqual({ view: { kind: 'row', name: 'dsh-navigation-test', rowId: 'search-row' } })
     b.selectPanel(null)
     expect(navigation.getSnapshot()).toEqual({ view: { kind: 'list' } })
     b.selectPanel(PANEL_ID)
@@ -139,9 +142,11 @@ describe('ui-plugin-manager browser plugin', () => {
     const icon = b.slots.entries('sidebar.panellist')[0]!
     expect(icon.component).toBe(PluginsPanelIcon)
     const unread = () => { throw new Error('The sidebar icon must not read application state') }
-    const glyph = render(<PluginsPanelIcon size={18} active={false}
-      usePanelInfo={unread} useSessions={unread} useSessionStatus={unread} useSessionRetainInfo={unread}
-      useWorkspaces={unread} useResource={unread} />)
+    const glyph = render(createElement(PluginsPanelIcon, {
+      size: 18, active: false,
+      usePanelInfo: unread, useSessions: unread, useSessionStatus: unread, useSessionRetainInfo: unread,
+      useWorkspaces: unread, useResource: unread,
+    }))
     expect(glyph.container.querySelector('svg')?.getAttribute('width')).toBe('18')
     expect(icon.options).toMatchObject({ id: PANEL_ID, order: 0 })
     expect(icon.locale).toBe(NS)

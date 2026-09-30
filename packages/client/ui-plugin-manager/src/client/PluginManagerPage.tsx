@@ -50,6 +50,20 @@ export type PluginManagerPageProps =
 type RenderConfig = PluginManagerPageProps['renderSlot']
 type ResolveText = PluginManagerFace['resolveText']
 
+/** A shipped row can supply a configuration page without a managed bundle card. */
+type VisibleItem = OfficialItem & { readonly rowConfigKey?: string }
+
+function renderItemConfig(item: VisibleItem, renderSlot: RenderConfig, view: 'summary' | 'page', form?: ConfigPageForm): ReactNode {
+  return item.rowConfigKey === undefined
+    ? renderSlot('plugins.item', { view, form }, { only: item.id })
+    : renderSlot('plugins.row.config', { view, form }, { entryKey: item.rowConfigKey })
+}
+
+function rowConfigLabel(key: string): string {
+  const packageName = key.slice(0, key.lastIndexOf('#')).replace(/^@[^/]+\//, '').replace(/^dsh-/, '')
+  return packageName.split('-').filter(Boolean).map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ')
+}
+
 type RowPhase = NonNullable<PackageRow['phase']>
 
 /** How long the list marks a package an install just enabled. */
@@ -421,14 +435,14 @@ function PackageCard({ pkg, t, resolveText, busy, highlighted, onOpen, onSetEnab
  * the registration, and the one-liner the entry renders in its summary view.
  */
 function ItemCard({ item, t, onOpen, renderSlot }: {
-  readonly item: OfficialItem
+  readonly item: VisibleItem
   readonly t: Translate
   readonly onOpen: () => void
   readonly renderSlot: RenderConfig
 }): ReactNode {
   return (
     <li className={`${css.card} ${css.cardLink}`} data-plugin-item={item.id}>
-      <CardHead title={item.label} t={t} onOpen={onOpen} icon={itemArtwork(item.id)} description={renderSlot('plugins.item', { view: 'summary' }, { only: item.id })} />
+      <CardHead title={item.label} t={t} onOpen={onOpen} icon={itemArtwork(item.id)} description={renderItemConfig(item, renderSlot, 'summary')} />
     </li>
   )
 }
@@ -455,7 +469,7 @@ function packageRef(pkg: PackageView): PluginPackageRef {
  * one-liner, the form the entry renders, and the contributed sections.
  */
 function ItemDetail({ item, t, onBack, renderSlot, form }: {
-  readonly item: OfficialItem
+  readonly item: VisibleItem
   readonly t: Translate
   readonly onBack: () => void
   readonly renderSlot: RenderConfig
@@ -476,11 +490,11 @@ function ItemDetail({ item, t, onBack, renderSlot, form }: {
           <h3 className={css.detailTitle}>{item.label}</h3>
           {renderSlot('plugins.detail.badge', { subject })}
         </div>
-        <p className={css.detailDesc}>{renderSlot('plugins.item', { view: 'summary' }, { only: item.id })}</p>
+        <p className={css.detailDesc}>{renderItemConfig(item, renderSlot, 'summary')}</p>
       </div>
       <div className={css.detailSections}>
         <section className={css.detailSection} data-plugin-config>
-          {renderSlot('plugins.item', { view: 'page', form }, { only: item.id })}
+          {renderItemConfig(item, renderSlot, 'page', form)}
         </section>
         {renderSlot('plugins.detail.section', { subject })}
       </div>
@@ -1284,7 +1298,18 @@ export function PluginManagerPage(props: PluginManagerPageProps): ReactNode {
   const loaded = state.status === 'ready' || state.status === 'error'
   const refreshing = state.refreshStatus === 'refreshing'
   const openPkg = view.kind === 'package' || view.kind === 'row' ? listed.find(pkg => pkg.name === view.name) : undefined
-  const openItem = view.kind === 'item' ? ledger.items.find(item => item.id === view.id) : undefined
+  const visibleItems: VisibleItem[] = [
+    ...ledger.items,
+    ...[...ledger.rows].flatMap((key) => {
+      const separator = key.lastIndexOf('#')
+      if (separator <= 0 || separator === key.length - 1) return []
+      const packageName = key.slice(0, separator)
+      const rowId = key.slice(separator + 1)
+      if (listed.some(pkg => pkg.name === packageName && pkg.rows.some(row => row.rowId === rowId))) return []
+      return [{ id: `row:${key}`, label: rowConfigLabel(key), rowConfigKey: key }]
+    }),
+  ]
+  const openItem = view.kind === 'item' ? visibleItems.find(item => item.id === view.id) : undefined
   const openRow = view.kind === 'row' && openPkg !== undefined ? openPkg.rows.find(row => row.rowId === view.rowId) : undefined
   const showsCards = openPkg === undefined && openItem === undefined
   const activated = listed.find(pkg => pkg.name === activation && pkg.enabled && !state.busy.includes(pkg.name))
@@ -1311,7 +1336,7 @@ export function PluginManagerPage(props: PluginManagerPageProps): ReactNode {
   // The Official group: the bundles the installation ships, then the plugins that registered their configuration.
   const officialCards = [
     ...official.map(packageCard),
-    ...ledger.items.map(item => (
+    ...visibleItems.map(item => (
       <ItemCard key={`item:${item.id}`} item={item} t={t} renderSlot={renderSlot} onOpen={() => { setView({ kind: 'item', id: item.id }) }} />
     )),
   ]
@@ -1418,7 +1443,7 @@ export function PluginManagerPage(props: PluginManagerPageProps): ReactNode {
         )
         : null}
       {loaded && openItem !== undefined
-        ? <ItemDetail form={formFor(openItem.id)} item={openItem} t={t} renderSlot={renderSlot} onBack={() => { setView({ kind: 'list' }) }} />
+        ? <ItemDetail form={formFor(openItem.rowConfigKey?.split('#').at(-1) ?? openItem.id)} item={openItem} t={t} renderSlot={renderSlot} onBack={() => { setView({ kind: 'list' }) }} />
         : null}
       {loaded && showsCards
         ? officialCards.length === 0 && mine.length === 0 && state.status !== 'error'

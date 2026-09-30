@@ -4,7 +4,7 @@ import { mkdir } from 'node:fs/promises'
 import type { Context } from '@deepseek-ai/cordis'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
 import type {
-  Agent, AgentOptions, AgentSetup, ModelSelection as AgentModelSelection, ModelSelectionRef,
+  Agent, AgentHandle, AgentOptions, AgentSetup, ModelSelection as AgentModelSelection, ModelSelectionRef,
 } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry'
@@ -140,11 +140,16 @@ export async function inspectApiSession(
 export class ApiSessionAgentController {
   private readonly resumes = new Map<SessionId, Promise<Agent>>()
   private readonly creations = new Map<SessionId, Promise<Agent>>()
+  private readonly ownedHandles = new Map<SessionId, AgentHandle>()
+  private readonly deleting = new Set<SessionId>()
   private readonly selections = new WeakMap<Agent, InstalledSelection>()
   private readonly imageAdmissionChains = new WeakMap<Agent, Promise<void>>()
 
   /** @param ctx - Host context carrying Agent, model, persistence, and Typert services. */
   constructor(private readonly ctx: Context) {
+    ctx.on('agent/disposed', ({ agent }) => {
+      if (this.ownedHandles.get(agent.id)?.agent === agent) this.ownedHandles.delete(agent.id)
+    })
     ctx.typert.lookups.configure('agent', async (sessionId: SessionId) => {
       const found = await this.resolveAgent(sessionId)
       if ('error' in found) throw found.error
@@ -168,6 +173,7 @@ export class ApiSessionAgentController {
    * @returns the live Agent or a stable Session-domain failure.
    */
   async resolveAgent(sessionId: SessionId): Promise<ApiSessionAgentResult> {
+    if (this.deleting.has(sessionId)) return { error: this.deletingError(sessionId) }
     return this.resolve(sessionId)
   }
 
@@ -177,7 +183,51 @@ export class ApiSessionAgentController {
    * @returns the live Agent or a stable Session-domain failure.
    */
   async resolveObservedAgent(observation: SessionObservation): Promise<ApiSessionAgentResult> {
+    if (this.deleting.has(observation.header.id)) {
+      return { error: this.deletingError(observation.header.id) }
+    }
     return this.resolve(observation.header.id, observation)
+  }
+
+  /** Fence new activation, then stop and drain the exact Agent owned by this controller. */
+  async prepareDeletion(sessionId: SessionId): Promise<void> {
+    if (this.deleting.has(sessionId)) throw this.deletingError(sessionId)
+    this.deleting.add(sessionId)
+    try {
+      const pending = [this.resumes.get(sessionId), this.creations.get(sessionId)]
+        .filter((value): value is Promise<Agent> => value !== undefined)
+      await Promise.allSettled(pending)
+      const live = this.ctx.agents.get(sessionId)
+      const owned = this.ownedHandles.get(sessionId)
+      if (live !== undefined && owned?.agent !== live) {
+        throw new RemoteError('session/agent-busy', `session "${sessionId}" is owned by another runtime`, {
+          reason: 'the live Agent cannot be stopped by the Session controller',
+        })
+      }
+      await owned?.dispose()
+      if (this.ctx.agents.get(sessionId) !== undefined || this.ctx.sessions.get(sessionId) !== undefined) {
+        throw this.deletingError(sessionId)
+      }
+    } catch (error) {
+      this.deleting.delete(sessionId)
+      throw error
+    }
+  }
+
+  /** Release a deletion fence after abort or committed removal. */
+  finishDeletion(sessionId: SessionId): void {
+    this.deleting.delete(sessionId)
+  }
+
+  /** Whether a disposal notification is part of a prepared deletion. */
+  isDeleting(sessionId: SessionId): boolean {
+    return this.deleting.has(sessionId)
+  }
+
+  private deletingError(sessionId: SessionId): ApiSessionAgentError {
+    return new RemoteError('session/agent-busy', `session "${sessionId}" is being deleted`, {
+      reason: 'the Session is reserved for deletion',
+    })
   }
 
   private async resolve(
@@ -242,6 +292,7 @@ export class ApiSessionAgentController {
     checkPersistedIdentity: boolean,
     presetId?: string,
   ): Promise<Agent> {
+    if (this.deleting.has(sessionId)) throw this.deletingError(sessionId)
     let creation = this.creations.get(sessionId)
     if (creation === undefined) {
       creation = this.createOrAdopt(sessionId, cwd, checkPersistedIdentity, presetId)
@@ -434,11 +485,11 @@ export class ApiSessionAgentController {
     if (published !== undefined && hasApiSessionSubagentOwner(this.ctx, published, live)) {
       throw new ApiSessionSubagentOwnership(sessionId)
     }
-    return (await this.ctx.agents.resume({
+    return this.adoptHandle(await this.ctx.agents.resume({
       resumeSessionId: sessionId,
       agentOptions: this.agentOptions(),
       setup: composition.setup,
-    })).agent
+    }))
   }
 
   private async createOrAdopt(
@@ -466,11 +517,11 @@ export class ApiSessionAgentController {
         const storedPreset = this.presetForObservation(observation)
         this.assertPresetUnchanged(sessionId, presetId, storedPreset)
         const composition = await this.composeAgent(storedPreset)
-        return (await this.ctx.agents.resume({
+        return this.adoptHandle(await this.ctx.agents.resume({
           resumeSessionId: sessionId,
           agentOptions: this.agentOptions(),
           setup: composition.setup,
-        })).agent
+        }))
       } catch (error: unknown) {
         if (!(error instanceof SessionQueryError)
           || error.code !== 'SESSION_QUERY_SESSION_NOT_FOUND') throw error
@@ -483,7 +534,7 @@ export class ApiSessionAgentController {
       throw new Error(`failed to ensure project directory "${cwd}": ${String(error)}`, { cause: error })
     }
     const composition = await this.composeAgent(presetId)
-    return (await this.ctx.agents.create({
+    return this.adoptHandle(await this.ctx.agents.create({
       sessionId,
       agentOptions: this.agentOptions(),
       meta: {
@@ -491,7 +542,12 @@ export class ApiSessionAgentController {
         ...(composition.agentPreset === undefined ? {} : { agentPreset: composition.agentPreset }),
       },
       setup: composition.setup,
-    })).agent
+    }))
+  }
+
+  private adoptHandle(handle: AgentHandle): Agent {
+    this.ownedHandles.set(handle.agent.id, handle)
+    return handle.agent
   }
 
   private agentOptions(): AgentOptions {

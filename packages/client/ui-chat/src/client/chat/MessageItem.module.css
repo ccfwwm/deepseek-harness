@@ -319,17 +319,55 @@
 
 .fileCard {
   display: inline-flex;
-  flex: 0 0 240px;
+  flex: 0 0 260px;
   align-items: center;
-  gap: 10px;
-  width: 240px;
+  flex-wrap: wrap;
+  width: 260px;
   min-height: 64px;
-  padding: 8px 12px;
+  padding: 6px;
   border: 0.5px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.12));
   border-radius: var(--dsw-radius-xl);
   background: var(--dsw-specific-input-major, transparent);
   box-sizing: border-box;
 }
+
+.filePreviewButton {
+  display: inline-flex;
+  flex: 1 1 auto;
+  align-items: center;
+  min-width: 0;
+  min-height: 48px;
+  padding: 2px 6px;
+  gap: 10px;
+  border: 0;
+  border-radius: var(--dsw-radius-md);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+button.filePreviewButton { cursor: pointer; }
+button.filePreviewButton:hover { background: var(--dsw-alias-interactive-bg-hover); }
+
+.fileActions { display: inline-flex; flex: none; gap: 2px; }
+.fileActions button {
+  display: inline-grid;
+  place-items: center;
+  width: 25px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+.fileActions button:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.fileActions button:disabled, button.filePreviewButton:disabled { cursor: wait; }
+.filePreviewButton:focus-visible, .fileActions button:focus-visible { outline: 2px solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary)); }
+.fileError, .fileSuccess { flex-basis: 100%; padding: 0 6px 5px; font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }
+.fileError { color: var(--dsw-alias-state-error-primary, #d43b3b); }
+.fileSuccess { color: var(--dsw-alias-state-business-primary); }
 
 .fileIcon {
   flex: none;

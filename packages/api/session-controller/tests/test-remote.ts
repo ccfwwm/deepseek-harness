@@ -41,6 +41,8 @@ import type {
   SessionControlFrame,
   SessionCreateRequest,
   SessionCreateValue,
+  SessionFinishDeleteRequest,
+  SessionFinishDeleteValue,
   SessionForkRequest,
   SessionForkValue,
   SessionFollowFrame,
@@ -54,6 +56,8 @@ import type {
   SessionPageRequest,
   SessionPromptRequest,
   SessionPromptValue,
+  SessionPrepareDeleteRequest,
+  SessionPrepareDeleteValue,
   SessionRenameRequest,
   SessionRenameValue,
   SessionSearchRequest,
@@ -74,6 +78,9 @@ export interface TestSessionRemote {
   list(request: SessionListRequest, signal?: AbortSignal): Promise<RemoteResult<SessionListValue>>
   search(request: SessionSearchRequest, signal?: AbortSignal): Promise<RemoteResult<SessionSearchValue>>
   create(request: SessionCreateRequest): Promise<RemoteResult<SessionCreateValue>>
+  prepareDelete(request: SessionPrepareDeleteRequest): Promise<RemoteResult<SessionPrepareDeleteValue>>
+  commitDelete(request: SessionFinishDeleteRequest): Promise<RemoteResult<SessionFinishDeleteValue>>
+  abortDelete(request: SessionFinishDeleteRequest): Promise<RemoteResult<SessionFinishDeleteValue>>
   selectModel(request: SessionSelectModelRequest): Promise<RemoteResult<SessionSelectModelValue>>
   modelCatalog(): Promise<RemoteResult<ModelCatalog>>
   rename(request: SessionRenameRequest): Promise<RemoteResult<SessionRenameValue>>
@@ -360,6 +367,9 @@ export function createSessionTestRemote(
       signal,
     ),
     create: request => remoteResult(() => direct.create(request)),
+    prepareDelete: request => remoteResult(() => direct.prepareDelete(request)),
+    commitDelete: request => remoteResult(() => direct.commitDelete(request)),
+    abortDelete: request => remoteResult(() => direct.abortDelete(request)),
     selectModel: request => remoteResult(() => direct.selectModel(request)),
     modelCatalog: () => remoteResult(() => direct.modelCatalog()),
     rename: request => remoteResult(() => direct.rename(request)),

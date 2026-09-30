@@ -181,7 +181,7 @@ export const PROFILE_TEMPLATES: Record<string, ProfileTemplate> = {
     bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-acp-app'],
   },
   web: {
-    bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'],
+    bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-free-search'],
   },
   headless: {
     bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-headless'],
@@ -196,6 +196,7 @@ export const PROFILE_TEMPLATES: Record<string, ProfileTemplate> = {
 
 /** Installation-owned bundle tuples normalized to the shipped template. */
 const INSTALLATION_OWNED_PROFILE_TUPLES: Record<string, readonly string[]> = {
+  web: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'],
   headless: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', '@deepseek-ai/dsh-headless'],
 }
 
@@ -582,14 +583,23 @@ function normalizeShippedProfile(name: string, dir: string, manifest: ProfileMan
   const bundles = manifest.dsh?.profile?.bundles
   if (template === undefined || bundles === undefined) return manifest
   const isRetiredTuple = installationOwned !== undefined && sameBundles(bundles, installationOwned)
-  if (!isRetiredTuple) return manifest
+  const nextBundles = isRetiredTuple ? [...template.bundles] : [...bundles]
+  if (name === 'web' && nextBundles.includes('@deepseek-ai/dsh-web-app')) {
+    // Profile-owned rows can be edited in Plugins. Keep existing user bundle
+    // lists and patches intact while admitting each product bundle once.
+    if (!nextBundles.includes('dsh-free-search')) nextBundles.push('dsh-free-search')
+    if (process.env.ZEROWALL_USER_DATA_DIR && !nextBundles.includes('dsh-file-review')) {
+      nextBundles.push('dsh-file-review')
+    }
+  }
+  if (sameBundles(bundles, nextBundles)) return manifest
   const normalized: ProfileManifest = {
     ...manifest,
     dsh: {
       ...manifest.dsh,
       profile: {
         ...manifest.dsh?.profile,
-        bundles: [...template.bundles],
+        bundles: nextBundles,
       },
     },
   }

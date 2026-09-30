@@ -466,6 +466,12 @@ class JsonlSessionPersistence extends SessionPersistence {
     }
   }
 
+  /** Resolve the directory containing every generation and artifact of one stored Session. */
+  override async directory(id: SessionId): Promise<string | undefined> {
+    const snapshot = await this.stat(id)
+    return snapshot === undefined ? undefined : sessionDir(this.root, snapshot.header.cwd, id)
+  }
+
   /**
    * List every stored session visible to this process: materialized artifacts
    * plus this process's created-but-unmaterialized sessions.

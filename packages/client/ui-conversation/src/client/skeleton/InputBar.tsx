@@ -14,7 +14,7 @@
  */
 
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { ChangeEvent, KeyboardEvent, MouseEvent } from 'react'
+import type { ChangeEvent, DragEvent, KeyboardEvent, MouseEvent } from 'react'
 import clsx from 'clsx'
 import {
   IconPlusOutlineMedium, IconWarningOutlineRegular, Toast, Tooltip,
@@ -41,6 +41,7 @@ import { observeControlRow } from './control-row-layout.ts'
 import css from './InputBar.module.css'
 
 export type InputBarProps = ComposerBarProps
+const HISTORY_ATTACHMENT_MIME = 'application/x-zerowall-history-attachment'
 
 export const InputBar = memo(function InputBar({
   useSession, useInput, inputActions, keyboard, addFiles, removeAttachment, resolveDraftAttachments,
@@ -208,8 +209,8 @@ export const InputBar = memo(function InputBar({
   // client-side size or count limit and upload as soon as they are picked.
   // The host enforces the same image limits at submit for callers that bypass
   // this composer.
-  const intakeFiles = useCallback((files: readonly File[], directories?: ReadonlySet<File>): void => {
-    if (subagent !== null || addFiles === undefined || files.length === 0) return
+  const intakeFiles = useCallback((files: readonly File[], directories?: ReadonlySet<File>): string | null => {
+    if (subagent !== null || addFiles === undefined || files.length === 0) return t('attachment.dropBlocked')
     const rejected = ((): string | null => {
       if (imageLimits !== undefined) {
         const mediaTypes = imageLimits.mediaTypes as readonly string[]
@@ -230,9 +231,61 @@ export const InputBar = memo(function InputBar({
       return addFiles(files, directories)
     })()
     if (rejected !== null) showToast(rejected)
+    return rejected
   }, [subagent, addFiles, attachments, imageLimits, showToast, t])
 
+  useEffect(() => {
+    const acceptHistoryFile = (event: Event): void => {
+      const detail = (event as CustomEvent<{
+        sessionId?: unknown
+        files?: unknown
+        complete?: (success: boolean, error?: string) => void
+      }>).detail
+      if (detail?.sessionId !== sessionId || event.defaultPrevented) return
+      event.preventDefault()
+      if (locked || machineBusy || subagent !== null || addFiles === undefined
+        || !Array.isArray(detail.files) || detail.files.length !== 1 || !(detail.files[0] instanceof File)) {
+        detail.complete?.(false, t('attachment.dropBlocked'))
+        return
+      }
+      const rejected = intakeFiles(detail.files)
+      detail.complete?.(rejected === null, rejected ?? undefined)
+    }
+    window.addEventListener('zerowall:attachment-files', acceptHistoryFile)
+    return () => window.removeEventListener('zerowall:attachment-files', acceptHistoryFile)
+  }, [sessionId, locked, machineBusy, subagent, addFiles, intakeFiles, t])
+
   const canAcceptDrop = subagent === null && !locked && !machineBusy && addFiles !== undefined
+
+  const onHistoryDragOver = (event: DragEvent<HTMLDivElement>): void => {
+    if (!event.dataTransfer.types.includes(HISTORY_ATTACHMENT_MIME)) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = canAcceptDrop ? 'copy' : 'none'
+  }
+  const onHistoryDrop = (event: DragEvent<HTMLDivElement>): void => {
+    if (!event.dataTransfer.types.includes(HISTORY_ATTACHMENT_MIME)) return
+    event.preventDefault()
+    event.stopPropagation()
+    if (!canAcceptDrop || sessionId === undefined) { showToast(t('attachment.dropBlocked')); return }
+    let transfer: unknown
+    try { transfer = JSON.parse(event.dataTransfer.getData(HISTORY_ATTACHMENT_MIME)) }
+    catch { showToast(t('attachment.dropBlocked')); return }
+    if (typeof transfer !== 'object' || transfer === null || !('sessionId' in transfer) || !('attachmentId' in transfer)
+      || transfer.sessionId !== sessionId || typeof transfer.attachmentId !== 'string' || transfer.attachmentId.length === 0) {
+      showToast(t('attachment.dropBlocked'))
+      return
+    }
+    const readd = new CustomEvent('zerowall:attachment-readd', {
+      cancelable: true,
+      detail: {
+        sessionId,
+        attachmentId: transfer.attachmentId,
+        complete: (success: boolean, error?: string) => { if (!success) showToast(error ?? t('attachment.dropBlocked')) },
+      },
+    })
+    window.dispatchEvent(readd)
+    if (!readd.defaultPrevented) showToast(t('attachment.dropBlocked'))
+  }
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const onPickFiles = (e: ChangeEvent<HTMLInputElement>): void => {
@@ -378,6 +431,8 @@ export const InputBar = memo(function InputBar({
         data-composer-card
         onClick={workspaceTrigger ? onRequestWorkspace : undefined}
         onPointerDown={workspaceTrigger ? (e) => { e.stopPropagation() } : undefined}
+        onDragOver={onHistoryDragOver}
+        onDrop={onHistoryDrop}
       >
         {sessionId !== undefined && (
           <div className={css.overlayAnchor}>{renderSlot('conversation.input.overlay', {})}</div>

@@ -160,6 +160,8 @@ export interface ChatNodeInjected {
 export interface ChatNodeOwnerProps {
   /** Renderer-owned Node portion selected by the grouping Definition. */
   groupPart?: string
+  /** Viewed Session for actions on durable file attachments. */
+  sessionId?: SessionId
   cwd?: string | undefined
   /** Open the current source file of a skill referenced by a sent message. */
   openSkill: (name: string) => void

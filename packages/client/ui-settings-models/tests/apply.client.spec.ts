@@ -69,6 +69,27 @@ function declare(slots: SlotRegistry): () => void {
 }
 
 describe('ui-settings-models apply', () => {
+  it('skips automatic welcome and API-key prompts in ZeroWall while keeping Models available', async () => {
+    vi.stubGlobal('zerowallDesktop', { info: vi.fn() })
+    const { ctx, slots } = await bench()
+    declare(slots)
+    try {
+      await ctx.plugin({ inject: [...inject], apply }).await()
+      expect(slots.entries('settings.section').map(entry => entry.options.id)).toEqual(['models'])
+      const onboarding = slots.entries('settings.onboarding')
+      expect(onboarding.map(entry => entry.options.id)).toEqual(['deepseek-official'])
+      const credential = onboarding[0]!.inject
+      if (typeof credential !== 'function') throw new Error('Expected the credential onboarding inject factory.')
+      const injected = credential()
+      expect(injected.automatic).toBe(false)
+      const operations = injected.operations
+      expect(typeof operations === 'object' && operations !== null && 'storeCredential' in operations
+        && typeof operations.storeCredential === 'function').toBe(true)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('keeps manual credential onboarding available when the native shell owns automatic onboarding', async () => {
     const { ctx, slots } = await bench()
     declare(slots)

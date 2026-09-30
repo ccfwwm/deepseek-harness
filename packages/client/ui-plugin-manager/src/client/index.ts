@@ -39,6 +39,8 @@ declare module '@deepseek-ai/cordis' {
        * @param packageName - npm package name of the bundle.
        */
       openBundle(packageName: string): void
+      /** Open one bundle row's registered configuration page. */
+      openRow(packageName: string, rowId: string): void
     }
   }
 }
@@ -132,6 +134,10 @@ export function apply(ctx: ClientContext): void {
       openBundle: (packageName: string) => {
         ctx.layout.selectPanel(PANEL_ID)
         instance.actions.setView({ kind: 'package', name: packageName })
+      },
+      openRow: (packageName: string, rowId: string) => {
+        ctx.layout.selectPanel(PANEL_ID)
+        instance.actions.setView({ kind: 'row', name: packageName, rowId })
       },
     })
     yield () => { void disposeNavigation() }

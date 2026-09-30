@@ -265,6 +265,7 @@ export function ChatView({
                 usePresentation={usePresentation}
                 useStore={useStore}
                 actions={actions}
+                sessionId={sessionId}
                 cwd={cwd}
                 openFile={requestOpenFile}
                 openSkill={openSkill}
