@@ -289,6 +289,11 @@ export function assertReleasedPayloadSemantics(event: SessionFormatEvent, versio
       nonEmptyString(data['apiVersion'], `${label} apiVersion`)
       deepSeekSearchBodyValue(data['body'], `${label} body`)
       return
+    case 'zerowall/reviewer/report':
+      // The reviewer plugin owns this payload. Top-level member admission and
+      // lossless JSON validation happen in validation.ts; nested report fields
+      // intentionally remain opaque across DSH format migrations.
+      return
     /* v8 ignore next -- the frozen disposition rejects unknown types before semantic dispatch. */
     default:
       throw new SessionFormatError(`released payload validator is missing event ${JSON.stringify(event.type)}`)

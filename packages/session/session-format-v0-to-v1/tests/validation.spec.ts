@@ -140,6 +140,13 @@ const validPayloads: Readonly<Record<string, SessionFormatJsonValue>> = {
       tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 1 }],
     },
   },
+  'zerowall/reviewer/report': {
+    id: 'review-1', turn: 1, summary: '历史审核报告',
+    findings: [{ messageIndex: 0, claim: 'claim', evidence: 'evidence', fix: 'fix', verdict: 'warn', severity: 'low', status: 'open', futureField: { preserved: true } }],
+    reviewerModel: 'mock/model', reviewerBackend: 'local', reviewStatus: 'passed', evidenceCoverage: 100,
+    coverageGaps: [], coverageGapDetails: [{ code: 'future-gap', private: { preserved: true } }],
+    correction: 'none', reReviewed: false,
+  },
 }
 
 function v1Artifact(type: string, data: SessionFormatJsonValue) {
@@ -174,6 +181,7 @@ function invalidLeafMutations(
   value: SessionFormatJsonValue,
   path: readonly string[] = [],
 ): Array<{ readonly path: string; readonly value: SessionFormatJsonValue }> {
+  if (type === 'zerowall/reviewer/report') return []
   const joined = path.join('.')
   const opaque = RELEASED_V0_EVENT_DISPOSITIONS[type]?.opaque.includes(path[0] as string) === true
     || path.at(-1) === 'replayState'
@@ -214,11 +222,12 @@ function replaceAtPath(value: SessionFormatJsonValue, path: string, replacement:
 describe('released event and payload inventory', () => {
   it('has an executable valid fixture for every frozen released-v0 event type', () => {
     expect(Object.keys(validPayloads).sort()).toEqual([...RELEASED_V0_EVENT_TYPES].sort())
-    expect(RELEASED_V0_EVENT_TYPES).toHaveLength(51)
+    expect(RELEASED_V0_EVENT_TYPES).toHaveLength(52)
     expect(RELEASED_V0_EVENT_TYPES.filter(type => !KNOWN_SESSION_EVENT_TYPES.has(type))).toEqual([
       'assistant/chunk',
       'tool/code-dispatch',
       'tool/code-dispatch-start',
+      'zerowall/reviewer/report',
     ])
     expect(KNOWN_SESSION_EVENT_TYPES.has('tool/ptc-dispatch')).toBe(true)
     expect(KNOWN_SESSION_EVENT_TYPES.has('tool/ptc-dispatch-start')).toBe(true)
@@ -295,6 +304,14 @@ describe('released event and payload inventory', () => {
       expect(() => { assertPayload(type, data) }).not.toThrow()
       expect(data).toEqual(validPayloads[type])
     }
+  })
+
+  it('keeps ZeroWall reviewer reports opaque and lossless through v0 to v1', () => {
+    const data = structuredClone(validPayloads['zerowall/reviewer/report']!)
+    const row = { type: 'zerowall/reviewer/report', seq: 0, time: 1, data }
+    expect(() => restoreV0ToV1(v0Header, [row])).not.toThrow()
+    expect(restoreV0ToV1(v0Header, [row]).events[0]!.data).toEqual(data)
+    expect(() => assertPayload('zerowall/reviewer/report', data)).not.toThrow()
   })
 
   it('refuses opaque members that are not lossless JSON without snapshotting them', () => {

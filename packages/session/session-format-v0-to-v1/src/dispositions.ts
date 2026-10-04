@@ -123,6 +123,14 @@ export const RELEASED_V0_EVENT_DISPOSITIONS: Readonly<Record<string, ReleasedV0P
   'turn/start': disposition(['turn']),
   'user/message': disposition(['role', 'id', 'content', 'source']),
   'web/deepseek-search-llm-request': disposition(['endpoint', 'apiVersion', 'body']),
+  // ZeroWall reviewer owns the report schema. The migration only validates
+  // that the event is a JSON object with the released envelope members and
+  // carries the report losslessly; it must not interpret reviewer fields.
+  'zerowall/reviewer/report': disposition(
+    ['id', 'turn', 'summary', 'findings', 'reviewerModel', 'reviewerBackend', 'reviewStatus', 'evidenceCoverage', 'coverageGaps'],
+    ['reviewerEffort', 'citationCoverage', 'hasUnverifiedEvidence', 'summaryEvidenceStatus', 'coverageGapDetails', 'correction', 'reReviewed'],
+    ['findings', 'coverageGaps', 'coverageGapDetails'],
+  ),
 })
 
 /** Stable sorted released-v0 event inventory. */
