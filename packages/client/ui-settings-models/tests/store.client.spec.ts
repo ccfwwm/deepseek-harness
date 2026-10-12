@@ -6,6 +6,11 @@ import { SettingsDescribeMirror } from '@deepseek-ai/dsh-client-ui-settings/src/
 import { settingsSchema } from './settings-schema.client.ts'
 import { joinProviderDirectory, ModelsSettingsStore, providerUsable } from '../src/client/store.ts'
 
+it('retains managed configuration mode before a provider has any live routes', () => {
+  expect(joinProviderDirectory([], [{ provider: 'managed', displayName: 'Managed account', settingsNs: 'account', settingsPath: [], configurationMode: 'managed' }]))
+    .toEqual([{ provider: 'managed', displayName: 'Managed account', settingsNs: 'account', settingsPath: [], configurationMode: 'managed', active: false }])
+})
+
 it.each([false, true])('retains configuration diagnostics when the route is active: %s', (active) => {
   expect(joinProviderDirectory(active ? [{ id: 'openai', name: 'openai' }] : [], [{
     provider: 'openai', displayName: 'openai', settingsNs: 'llm-pi-ai', settingsPath: ['providers', 'openai'],

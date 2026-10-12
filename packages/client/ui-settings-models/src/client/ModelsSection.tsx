@@ -338,11 +338,11 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
   // One fact decides both first-run postures on this page and the onboarding
   // step: whether the user already has a provider to talk to.
   const anyUsable = state.rows.some(providerUsable)
-  const configured = state.rows.filter(row => row.configured)
+  const configured = state.rows.filter(row => row.configured || row.entry.configurationMode === 'managed')
   const configurable = state.rows.filter(row => state.namespaces.has(row.entry.settingsNs))
   const addable: AddableRow[] = state.rows.flatMap((row) => {
     const namespace = state.namespaces.get(row.entry.settingsNs)
-    return namespace === undefined || row.configured ? [] : [{ row, namespace }]
+    return namespace === undefined || row.configured || row.entry.configurationMode === 'managed' ? [] : [{ row, namespace }]
   })
   // Hand-declared routes live in the pi-ai namespace, which is also the only
   // one whose schema names the protocols one may speak; without it mounted
@@ -396,6 +396,10 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
         )}
       <ul className={styles['rows']}>
         {configured.map((row) => {
+          if (row.entry.configurationMode === 'managed') return <li key={row.entry.provider} className={styles['rowCard']}>
+            <strong>{row.entry.displayName}</strong>
+            {renderSlot('settings.models.provider-card', { provider: row.entry, configured: row.configured, keyConfigured: false }, { entryKey: row.entry.settingsNs })}
+          </li>
           const target = targetOf(row)
           const namespace = state.namespaces.get(target.settingsNs)
           /* v8 ignore next -- the join marks a row configured only when its namespace resolved */

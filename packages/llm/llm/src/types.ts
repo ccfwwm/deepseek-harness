@@ -243,6 +243,8 @@ export type ModelModality = ModelModalityMap[keyof ModelModalityMap]
  * provider alongside its live/dormant state.
  */
 export interface LlmConfigurableProvider {
+  /** Managed providers use their plugin's provider card instead of API-key forms. */
+  configurationMode?: 'api-key' | 'managed'
   /** Provider route key this entry activates when configured. */
   provider: string
   /** Human-readable provider name for configuration surfaces. */

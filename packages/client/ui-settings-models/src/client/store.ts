@@ -24,6 +24,7 @@ const PROBE_ROUTE = '\u0000probe'
 
 /** One provider row after joining the configurable directory with live routes. */
 export interface ProviderDirectoryEntry {
+  readonly configurationMode?: 'api-key' | 'managed'
   readonly provider: string
   readonly displayName: string
   readonly settingsNs: string
@@ -50,6 +51,7 @@ export function joinProviderDirectory(
     displayName: entry.displayName,
     settingsNs: entry.settingsNs,
     settingsPath: [...entry.settingsPath],
+    ...entry.configurationMode === undefined ? {} : { configurationMode: entry.configurationMode },
     active: active.has(entry.provider),
     ...entry.declared === undefined ? {} : { declared: entry.declared },
     ...entry.error === undefined ? {} : { error: entry.error },
