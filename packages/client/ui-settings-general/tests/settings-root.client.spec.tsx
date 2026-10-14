@@ -20,6 +20,7 @@ const usePanelInfo: GlobalStandardProps['usePanelInfo'] = selector => selector({
 
 afterEach(() => {
   cleanup()
+  localStorage.removeItem('dsh.settings.panel-size.v1')
   vi.useRealTimers()
 })
 
@@ -274,6 +275,23 @@ describe('SettingsRoot trigger', () => {
 })
 
 describe('SettingsPanel chrome seats', () => {
+  it('persists keyboard resizing, restores it on reopening, and resets the preference', () => {
+    mount()
+    openPanel()
+    const dialog = screen.getByRole('dialog')
+    const initialWidth = dialog.style.width
+    const handle = screen.getByRole('button', { name: 'Resize settings window' })
+    fireEvent.keyDown(handle, { key: 'ArrowLeft' })
+    expect(dialog.style.width).not.toBe(initialWidth)
+    const savedWidth = dialog.style.width
+    expect(localStorage.getItem('dsh.settings.panel-size.v1')).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    openPanel()
+    expect(screen.getByRole('dialog').style.width).toBe(savedWidth)
+    fireEvent.click(screen.getByRole('button', { name: 'Reset size' }))
+    expect(screen.getByRole('dialog').style.width).toBe(initialWidth)
+    expect(localStorage.getItem('dsh.settings.panel-size.v1')).toBeNull()
+  })
   it('names the dialog via aria-labelledby pointing at the header seat node', () => {
     mount()
     openPanel()

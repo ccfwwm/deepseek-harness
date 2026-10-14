@@ -22,6 +22,7 @@ import type { ConnectionIndicatorState } from '@deepseek-ai/dsh-client-ui-primit
 import type { SettingsRootComponentProps, SettingsSectionRow } from './shell-contract.ts'
 import css from './SettingsRoot.module.css'
 import { DesktopUpdateIndicator } from './DesktopUpdateIndicator.tsx'
+import { fitSettingsPanel, parseSettingsPanelSize, type SettingsPanelSize } from './settings-panel-size.ts'
 
 const RECOVERY_CONFIRMATION_MS = 2_000
 
@@ -44,6 +45,7 @@ type PanelProps = {
   activeId: string | undefined
   onSelect: (id: string) => void
   onClose: () => void
+  t: SettingsRootComponentProps['t']
 }
 
 /**
@@ -51,13 +53,33 @@ type PanelProps = {
  * header button, a mask click, and document-level Escape (mounted only while
  * open, so the listener lifetime is the panel's).
  */
-function SettingsPanel({ rows, renderSlot, activeId, onSelect, onClose }: PanelProps) {
+function SettingsPanel({ rows, renderSlot, activeId, onSelect, onClose, t }: PanelProps) {
   // Entries can unmount underneath the requested id, so the render-time
   // projection falls back to the first row when the id is gone.
   const active = rows.find(r => r.id === activeId)?.id ?? rows[0]?.id
   const titleId = useId()
 
   const panel = useRef<HTMLDivElement>(null)
+  const storageKey = 'dsh.settings.panel-size.v1'
+  const [preferred, setPreferred] = useState<SettingsPanelSize | undefined>(() => {
+    try { return parseSettingsPanelSize(localStorage.getItem(storageKey)) }
+    catch (_error) { return undefined /* Storage can be disabled by browser policy. */ }
+  })
+  const [viewport, setViewport] = useState({ width: innerWidth, height: innerHeight })
+  const size = fitSettingsPanel(preferred, viewport)
+  const drag = useRef<{ x: number; y: number; size: SettingsPanelSize } | undefined>(undefined)
+  const saveSize = (next: SettingsPanelSize | undefined) => {
+    setPreferred(next)
+    try {
+      if (next === undefined) localStorage.removeItem(storageKey)
+      else localStorage.setItem(storageKey, JSON.stringify(next))
+    } catch (_error) { /* Resizing remains available when storage is disabled. */ }
+  }
+  useEffect(() => {
+    const resize = () => { setViewport({ width: innerWidth, height: innerHeight }) }
+    window.addEventListener('resize', resize)
+    return () => { window.removeEventListener('resize', resize) }
+  }, [])
   useModalLayer(panel, true, onClose)
 
   // Portalled beside #root like the Modal primitive: a covering surface mounted
@@ -67,7 +89,7 @@ function SettingsPanel({ rows, renderSlot, activeId, onSelect, onClose }: PanelP
   return createPortal((
     <div className={css.overlay} role="presentation">
       <div className={css.mask} aria-hidden="true" onClick={onClose} />
-      <div ref={panel} tabIndex={-1} data-shortcut-modal="settings" className={css.panel} role="dialog" aria-modal="true" aria-labelledby={titleId}>
+      <div ref={panel} tabIndex={-1} data-shortcut-modal="settings" className={css.panel} style={size} role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <nav className={css.nav}>
           <div className={css.navTitle} id={titleId} tabIndex={-1}
             data-modal-autofocus={active === undefined ? '' : undefined}>{renderSlot('settings.header', {})}</div>
@@ -89,7 +111,7 @@ function SettingsPanel({ rows, renderSlot, activeId, onSelect, onClose }: PanelP
         </nav>
         <div className={css.content}>
           <div className={css.header}>
-            <div className={css.actions}>{renderSlot('settings.action', {})}</div>
+            <div className={css.actions}><button type="button" className={css.resetSize} onClick={() => { saveSize(undefined) }}>{t('panel.resetSize')}</button>{renderSlot('settings.action', {})}</div>
             <button type="button" className={css.close} onClick={onClose}>
               <IconCloseOutlineRegular size={14} />
               <span className={css.hiddenLabel}>{renderSlot('settings.close', {})}</span>
@@ -99,6 +121,33 @@ function SettingsPanel({ rows, renderSlot, activeId, onSelect, onClose }: PanelP
             {active !== undefined && renderSlot('settings.section', { close: onClose }, { only: active })}
           </div>
         </div>
+        <button type="button" className={css.resizeHandle} aria-label={t('panel.resize')} title={t('panel.resizeHint')}
+          onPointerDown={(event) => {
+            if (event.button !== 0) return
+            event.preventDefault()
+            event.currentTarget.focus()
+            event.currentTarget.setPointerCapture(event.pointerId)
+            drag.current = { x: event.clientX, y: event.clientY, size }
+          }}
+          onPointerMove={(event) => {
+            const start = drag.current
+            if (start === undefined) return
+            saveSize(fitSettingsPanel({
+              width: start.size.width + 2 * (event.clientX - start.x),
+              height: start.size.height + 2 * (event.clientY - start.y),
+            }, viewport))
+          }}
+          onPointerUp={(event) => { drag.current = undefined; event.currentTarget.releasePointerCapture(event.pointerId) }}
+          onLostPointerCapture={() => { drag.current = undefined }}
+          onKeyDown={(event) => {
+            if (event.key === 'Home') { event.preventDefault(); saveSize(undefined); return }
+            if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return
+            event.preventDefault()
+            saveSize(fitSettingsPanel({
+              width: size.width + (event.key === 'ArrowRight' ? 40 : event.key === 'ArrowLeft' ? -40 : 0),
+              height: size.height + (event.key === 'ArrowDown' ? 40 : event.key === 'ArrowUp' ? -40 : 0),
+            }, viewport))
+          }}>◢</button>
       </div>
     </div>
   ), document.body)
@@ -262,6 +311,7 @@ export function SettingsRoot(props: SettingsRootComponentProps) {
           activeId={activeId}
           onSelect={actions.select}
           onClose={close}
+          t={t}
         />
       )}
       {/* Dialog chrome and `#root` inert ownership live inside each step's

@@ -22,7 +22,7 @@ Use this package to give the dsh web client a Settings panel, connection-recover
 
 -----
 
-The Settings panel uses a shared 800 × 800 layout, bounded by the viewport. Longer sections scroll inside the content column; the Account entry uses the account icon. The panel portals beside `#root` rather than inside it, so a macOS window drag region a chrome row declares later in document order cannot swallow its controls.
+The Settings panel defaults to 1040 × 820, bounded by the viewport with at least 24px margins. Drag its bottom-right handle or use arrow keys on the handle to resize; Reset size or Home restores the default. Dimensions persist locally, while narrow viewports move navigation above the content. Longer sections scroll inside the content column; the Account entry uses the account icon. The panel portals beside `#root` rather than inside it, so a macOS window drag region a chrome row declares later in document order cannot swallow its controls.
 
 <a id="use-this-package"></a>
 ## Use this package
