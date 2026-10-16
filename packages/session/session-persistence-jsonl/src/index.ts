@@ -98,6 +98,8 @@ export interface Config {
   root: string
   /** Physical encoding; defaults to checksummed Zstandard frames. */
   compression?: JsonlCompression
+  /** Reviewed log-only types whose old writers omitted `ignorable`; adapts reads without rewriting historical generations. */
+  legacyInformationalEventTypes?: string[]
 }
 
 /** One stored event graph whose producer has established immutable sharing. */
@@ -246,6 +248,7 @@ class JsonlSessionPersistence extends SessionPersistence {
   static Config: z<Config> = z.object({
     root: z.string().required(),
     compression: JsonlCompressionSchema,
+    legacyInformationalEventTypes: z.array(z.string()).default([]),
   })
 
   /** Backend label for diagnostics and effects; shadows `Service.name` without changing the service key. */
@@ -663,7 +666,8 @@ class JsonlSessionPersistence extends SessionPersistence {
           }),
         },
         validateRelatedSources,
-        verifyCurrentFile: verifyCurrentGenerationInWorker,
+        verifyCurrentFile: (path, compression, id, count, prefix, signal) =>
+          verifyCurrentGenerationInWorker(path, compression, id, count, prefix, signal, this.config.legacyInformationalEventTypes),
         validateHistoricalHeader: headerValue => this.validateSourceIdentity(
           selected,
           headerValue,
@@ -678,7 +682,7 @@ class JsonlSessionPersistence extends SessionPersistence {
     const meta = this.currentHeader(prepared.artifact.header)
     assertStoredId(id, meta)
     const events = prepared.artifact.events as SessionEvent[]
-    validateStoredEvents(meta, events, { kind: 'jsonl', path: selected.sourcePath })
+    validateStoredEvents(meta, events, { kind: 'jsonl', path: selected.sourcePath }, this.config.legacyInformationalEventTypes)
     const stored: PreparedStoredLog = {
       status: 'prepared',
       validateRelatedSources,
@@ -810,7 +814,7 @@ class JsonlSessionPersistence extends SessionPersistence {
     signal?.throwIfAborted()
     assertStoredId(expectedId, parsed.meta)
     const location = this.locate(parsed.meta)
-    validateStoredEvents(parsed.meta, parsed.events, location)
+    validateStoredEvents(parsed.meta, parsed.events, location, this.config.legacyInformationalEventTypes)
     const { events, ...rest } = parsed
     const stored: CurrentStoredLog = {
       status: 'current',

@@ -210,6 +210,7 @@ export interface JsonlGenerationRuntime {
     expectedId: string,
     expectedEventCount: number,
     expectedPrefix?: JsonlExpectedPrefix,
+    legacyInformationalEventTypes?: readonly string[],
   ): Promise<JsonlVerifiedGeneration>
 }
 
@@ -487,6 +488,7 @@ async function decodeStreamingMigration(
  * @param expectedId - Session identity expected in the header.
  * @param expectedEventCount - exact logical event count expected after decoding.
  * @param expectedPrefix - verified migration prefix; an append tail may be present and is not validated.
+ * @param legacyInformationalEventTypes - reviewed informational extension types admitted by the deployment.
  * @returns stable physical identity and digest for publication comparison.
  */
 export async function verifyJsonlCurrentGeneration(
@@ -495,8 +497,9 @@ export async function verifyJsonlCurrentGeneration(
   expectedId: string,
   expectedEventCount: number,
   expectedPrefix?: JsonlExpectedPrefix,
+  legacyInformationalEventTypes?: readonly string[],
 ): Promise<JsonlVerifiedGeneration> {
-  return defaultGenerationRuntime.verify(path, compression, expectedId, expectedEventCount, expectedPrefix)
+  return defaultGenerationRuntime.verify(path, compression, expectedId, expectedEventCount, expectedPrefix, legacyInformationalEventTypes)
 }
 
 async function verifyCurrentGeneration(
@@ -506,6 +509,7 @@ async function verifyCurrentGeneration(
   expectedEventCount: number,
   fs: GenerationFileSystem,
   expectedPrefix?: JsonlExpectedPrefix,
+  legacyInformationalEventTypes?: readonly string[],
 ): Promise<JsonlVerifiedGeneration> {
   const before = await fs.stat(path)
   const bytes = await fs.readFile(path)
@@ -525,7 +529,7 @@ async function verifyCurrentGeneration(
   }
   const snapshot = { bytes, identity: after }
   const generation = decodeCurrentGeneration(snapshot.bytes, compression)
-  validateStoredEvents(generation.meta, generation.events, { kind: 'jsonl', path })
+  validateStoredEvents(generation.meta, generation.events, { kind: 'jsonl', path }, legacyInformationalEventTypes)
   if (generation.meta.id !== expectedId) {
     throw new Error(`current session generation contains id "${generation.meta.id}", expected "${expectedId}"`)
   }
@@ -1022,8 +1026,8 @@ export function createJsonlGenerationRuntime(
   return {
     readStable: (path, signal) => readStableSnapshot(path, signal, internals.fs),
     prepare: options => prepareMigration(options, internals),
-    verify: (path, compression, expectedId, expectedEventCount, expectedPrefix) => verifyCurrentGeneration(
-      path, compression, expectedId, expectedEventCount, internals.fs, expectedPrefix,
+    verify: (path, compression, expectedId, expectedEventCount, expectedPrefix, legacyInformationalEventTypes) => verifyCurrentGeneration(
+      path, compression, expectedId, expectedEventCount, internals.fs, expectedPrefix, legacyInformationalEventTypes,
     ),
   }
 }

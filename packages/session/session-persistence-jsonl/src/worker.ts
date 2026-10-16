@@ -11,6 +11,7 @@ interface VerificationRequest {
   readonly expectedId: string
   readonly expectedEventCount: number
   readonly expectedPrefix?: JsonlExpectedPrefix
+  readonly legacyInformationalEventTypes?: readonly string[]
 }
 
 function parseRequest(value: unknown): VerificationRequest {
@@ -21,6 +22,8 @@ function parseRequest(value: unknown): VerificationRequest {
     || typeof request.expectedId !== 'string'
     || !Number.isSafeInteger(request.expectedEventCount)
     || (request.expectedEventCount as number) < 0
+    || request.legacyInformationalEventTypes !== undefined && (!Array.isArray(request.legacyInformationalEventTypes)
+      || !request.legacyInformationalEventTypes.every(type => typeof type === 'string'))
     || request.expectedPrefix !== undefined
       && (!Number.isSafeInteger(request.expectedPrefix.bytes)
         || request.expectedPrefix.bytes < 0
@@ -43,6 +46,7 @@ async function verify(): Promise<void> {
       request.expectedId,
       request.expectedEventCount,
       request.expectedPrefix,
+      request.legacyInformationalEventTypes,
     )
     port.postMessage({ ok: true, result })
   } catch (error: unknown) {

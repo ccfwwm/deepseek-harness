@@ -42,6 +42,8 @@ Choose this backend when consumers benefit from one artifact per session — nav
 
 `root` is required and has no default: a `process.cwd()` default would scatter session files as the process's cwd changes. An existing root must be a readable directory; an absent root is created on first materialization.
 
+Deployments repairing a reviewed extension-writer bug may explicitly set `legacyInformationalEventTypes` to a list of informational event names. Only missing `ignorable` markers on unknown, log-only records are adapted in the decoded view. Raw historical bytes remain unchanged; all other unknown required events, invalid markers, and surface metadata still refuse. The default empty list preserves strict admission independently of installed plugins.
+
 | Field | Default | Meaning |
 |---|---|---|
 | `root` | required | Root directory for all session files |

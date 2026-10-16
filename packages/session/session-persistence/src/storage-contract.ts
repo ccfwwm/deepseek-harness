@@ -58,10 +58,14 @@ export function assertVersion(
  * does not know, unless its writer marked it `ignorable: true` — silently
  * skipping an unknown required event could reconstruct a wrong session (the
  * envelope contract on `SessionEvent.ignorable`). Unknown required types and
- * retired pre-release shapes refuse here; this validator performs no migration.
+ * retired pre-release shapes refuse here. An explicit deployment policy may
+ * adapt legacy informational markers in the decoded view; no stored generation
+ * or native event semantics are changed.
  * @param meta - the stored header the events belong to.
  * @param events - exclusively owned decoded events; validated in place.
  * @param location - the backend's artifact location for refusals, when one exists.
+ * @param legacyInformationalEventTypes - reviewed log-only types whose old writers omitted the marker;
+ *   only the decoded view is adapted, never the stored bytes.
  * @returns the same array, validated and frozen.
  * @throws {SessionFormatUnsupportedError} for unknown event types.
  * @throws {SessionPersistenceCorruptionError} for records that fail validation.
@@ -70,8 +74,18 @@ export function validateStoredEvents(
   meta: SessionHeader,
   events: SessionEvent[],
   location?: SessionLocation,
+  legacyInformationalEventTypes: readonly string[] = [],
 ): SessionEvent[] {
-  for (const event of events) {
+  for (const [index, stored] of events.entries()) {
+    // Deployment-owned compatibility is independent of which optional plugins
+    // are loaded. Required unknown types still refuse by default; native event
+    // semantics and invalid explicit markers are never relaxed.
+    const event = !KNOWN_SESSION_EVENT_TYPES.has(stored.type)
+      && stored.ignorable === undefined
+      && legacyInformationalEventTypes.includes(stored.type)
+      && stored.surfaceOp === undefined && stored.sourceEventSeqs === undefined
+      ? { ...stored, ignorable: true as const } : stored
+    events[index] = event
     if (!KNOWN_SESSION_EVENT_TYPES.has(event.type) && event.ignorable !== true) {
       throw unsupported(
         `session "${meta.id}" contains event type "${event.type}" (seq ${event.seq}) unknown to this harness and not marked ignorable; refusing to interpret the log — it was likely written by a newer harness`,

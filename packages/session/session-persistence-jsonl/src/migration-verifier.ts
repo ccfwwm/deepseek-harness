@@ -13,6 +13,7 @@ interface VerificationRequest {
   readonly expectedId: string
   readonly expectedEventCount: number
   readonly expectedPrefix?: JsonlExpectedPrefix
+  readonly legacyInformationalEventTypes?: readonly string[]
 }
 
 type VerificationResponse =
@@ -106,6 +107,7 @@ function workerSpawn(request: VerificationRequest): { readonly entry: string | U
  * @param expectedEventCount - exact logical event count expected after decoding.
  * @param expectedPrefix - verified physical prefix; an append tail may be present and is not validated.
  * @param signal - optional cancellation for scheduler wait and Worker execution.
+ * @param legacyInformationalEventTypes - explicit read compatibility for reviewed informational extension records.
  * @returns stable physical identity and digest observed by the worker.
  */
 export function verifyCurrentGenerationInWorker(
@@ -115,6 +117,7 @@ export function verifyCurrentGenerationInWorker(
   expectedEventCount: number,
   expectedPrefix?: JsonlExpectedPrefix,
   signal?: AbortSignal,
+  legacyInformationalEventTypes?: readonly string[],
 ): Promise<JsonlVerifiedGeneration> {
   return verificationScheduler.run(() => runVerificationWorker(
     path,
@@ -123,6 +126,7 @@ export function verifyCurrentGenerationInWorker(
     expectedEventCount,
     expectedPrefix,
     signal,
+    legacyInformationalEventTypes,
   ), signal)
 }
 
@@ -133,10 +137,12 @@ function runVerificationWorker(
   expectedEventCount: number,
   expectedPrefix?: JsonlExpectedPrefix,
   signal?: AbortSignal,
+  legacyInformationalEventTypes?: readonly string[],
 ): Promise<JsonlVerifiedGeneration> {
   signal?.throwIfAborted()
   const request: VerificationRequest = {
     path, compression, expectedId, expectedEventCount,
+    ...(legacyInformationalEventTypes === undefined ? {} : { legacyInformationalEventTypes }),
     ...(expectedPrefix === undefined ? {} : { expectedPrefix }),
   }
   const { entry, options } = workerSpawn(request)
