@@ -10,6 +10,7 @@ import {
   DEFAULT_PROFILE_BUNDLES, bundlePatchPaths, initProfile, PROFILE_TEMPLATES, readProfileManifest,
   resolveBundleDir, resolveProfileDir, loadOverlayPatches, composeEntries, readProfileVersionExemptions,
   evaluatePluginCompatibility, pluginCompatibilityWarning, type ProfileManifest,
+  type ProfilePnpmInvocation,
 } from '@deepseek-ai/dsh-app-boot'
 import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
 import { parseInstallSpec } from './install-spec.ts'
@@ -30,6 +31,7 @@ export interface PackageOperationContext {
 
 /** Output and cancellation policy for one pnpm operation. */
 export interface PackageOperationOptions {
+  beginTransaction?: ProfilePnpmInvocation['beginTransaction']
   /** The pnpm executable name or path; resolved through `PATH` like the `dsh plugin` command. Defaults to `pnpm`. */
   command?: string
   /** Prefix arguments for an application-owned executable. */
@@ -155,7 +157,7 @@ function namedSpecs(args: readonly string[]): string[] {
 
 /** The manifest a named spec would install, read without installing it.
  * A path spec is read from disk. A registry spec asks pnpm's own configuration for the version the
- * range selects and its peer requirements. A git or tarball spec needs the fetch itself, so the
+ * range selects and its dsh requirements (`engines` and peerDependencies). A git or tarball spec needs the fetch itself, so the
  * check after installation is what judges it.
  * @param dir Profile directory the lookup runs in.
  * @param spec Anchored install spec.
@@ -175,7 +177,7 @@ async function namedSpecManifest(
   }
   if (parsed.kind !== 'registry') return undefined
   const viewed = await execa(options.command ?? 'pnpm', [
-    ...options.args ?? [], 'view', parsed.spec, 'name', 'version', 'peerDependencies', '--json',
+    ...options.args ?? [], 'view', parsed.spec, 'name', 'version', 'engines', 'peerDependencies', '--json',
     ...flags, '--config.fetch-retries=0',
   ], {
     cwd: dir, env: environment, extendEnv: false, reject: false, stdin: 'ignore',
@@ -280,8 +282,25 @@ function bundleComponentManifests(manifest: ProfileManifest, dir: string, anchor
  * @param options Output, activation and cancellation policy.
  * @returns Exit status, whether the silence bound stopped the run, and the diagnostic path.
  * A compatibility denial returns exit code 1. Service output is bounded; CLI output uses inherited descriptors.
+ * The diagnostic file is closed on return or rejection, including preparation and spawn failures.
  */
 export async function runProfilePnpm(
+  context: PackageOperationContext, args: readonly string[], options: PackageOperationOptions,
+): Promise<PackageResult> {
+  const dir = context.dir ?? resolveProfileDir(context.profile, context.home)
+  const transaction = options.env?.ZEROWALL_PROFILE_TRANSACTION_ID === undefined
+    ? await options.beginTransaction?.(dir) : undefined
+  let accepted = false
+  try {
+    const result = await runProfilePnpmOperation(context, args, {
+      ...options, env: { ...options.env, ...transaction?.env },
+    })
+    accepted = result.exitCode === 0 && result.timedOut !== true && options.signal?.aborted !== true
+    return result
+  } finally { await transaction?.finish(accepted) }
+}
+
+async function runProfilePnpmOperation(
   context: PackageOperationContext, args: readonly string[], options: PackageOperationOptions,
 ): Promise<PackageResult> {
   const dir = context.dir ?? resolveProfileDir(context.profile, context.home)
@@ -291,7 +310,7 @@ export async function runProfilePnpm(
   await mkdir(logRoot, { recursive: true, mode: 0o700 })
   const logDir = await mkdtemp(join(logRoot, 'operation-'))
   const logPath = join(logDir, 'pnpm.log')
-  const log = await open(logPath, 'wx', 0o600)
+  await using log = await open(logPath, 'wx', 0o600)
   if (active !== undefined) {
     await log.write(active)
     await log.close()
@@ -348,7 +367,7 @@ export async function runProfilePnpm(
       }
     } catch (error) { void error; continue }
   }
-  if (preflight.length > 0) return rejected(preflight, 'nothing was installed')
+  if (preflight.length > 0) return await rejected(preflight, 'nothing was installed')
   const cancellation = new AbortController()
   // A service run captures output, so execa terminates the tree it leads when the
   // run is killed: a lifecycle script outlives the pnpm process that started it.
@@ -497,7 +516,12 @@ export async function runProfilePnpm(
         }
       }
       if (warnings.length > 0) {
-        // A bundle component's peers need installed contents, so this rejection lands after pnpm
+        if (options.env?.ZEROWALL_PROFILE_TRANSACTION_ID !== undefined) {
+          // The application restores the exact tree after this result reaches
+          // its lifecycle boundary; a network reinstall cannot restore bytes.
+          return await rejected(warnings, 'application transaction will restore the previous profile')
+        }
+        // A bundle component's requirements need installed contents, so this rejection lands after pnpm
         // replaced the tree: restore the files, then reinstall the restored lockfile so the version
         // that worked before this run keeps loading. A profile that had no lockfile is reinstalled
         // from its restored manifest without creating one, which removes what this run added.

@@ -1,16 +1,32 @@
 /** Controlled browser audio devices with real Recording ownership and conversion. */
-import { vi } from 'vitest'
+import { vi, type Mock } from 'vitest'
 import { Recording } from '../src/client/audio.ts'
+
+interface CaptureFixture {
+  recording: Recording
+  getUserMedia: Mock<(constraints: MediaStreamConstraints) => Promise<CaptureFixture['stream']>>
+  stream: { getTracks(): CaptureTrack[]; getAudioTracks(): CaptureTrack[] }
+  track: EventTarget
+  trackStop: Mock<() => void>
+  close: Mock<() => Promise<void>>
+  disposed: Mock<() => void>
+  decoding: Mock<(data: ArrayBuffer) => Promise<{ duration: number }>>
+  rendering: Mock<() => Promise<{ getChannelData(): Float32Array }>>
+  offline: Mock<(...args: [number, number, number]) => {
+    destination: object
+    createBufferSource(): { buffer: null; connect(): void; start(): void }
+    startRendering: CaptureFixture['rendering']
+  }>
+  failRecorder(): void
+}
+type CaptureTrack = EventTarget & { stop(): void; label: string; getSettings(): MediaTrackSettings }
 
 /**
  * Install per-test audio devices; callers restore globals and release acquired recordings.
  * @param options - device failures or an empty final recording.
  * @returns the recording, device controls, and resource observations.
  */
-// Vitest 4 mock inference references a pnpm-local Procedure type during
-// declaration emit; this fixture is consumed only by tests.
-// oxlint-disable-next-line typescript/no-explicit-any -- test fixture intentionally exposes Vitest's inferred mock surface.
-export function captureFixture(options: { empty?: boolean; recorderError?: boolean; constructError?: boolean } = {}): any {
+export function captureFixture(options: { empty?: boolean; recorderError?: boolean; constructError?: boolean } = {}): CaptureFixture {
   const trackStop = vi.fn(), close = vi.fn(async () => {}), disposed = vi.fn()
   const decoding = vi.fn(async (_data: ArrayBuffer) => ({ duration: 2 }))
   const rendering = vi.fn(async () => ({ getChannelData: () => new Float32Array([0.5, -0.5]) }))
@@ -39,13 +55,18 @@ export function captureFixture(options: { empty?: boolean; recorderError?: boole
   const offline = vi.fn(function Offline(_channels: number, _frames: number, _rate: number) {
     return { destination: {}, createBufferSource: () => ({ buffer: null, connect() {}, start() {} }), startRendering: rendering }
   })
-  vi.stubGlobal('navigator', { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop: trackStop }] }) } })
+  const track = new EventTarget()
+  const audioTrack = Object.assign(track, { stop: trackStop, label: 'Fixture microphone',
+    getSettings: (): MediaTrackSettings => ({ groupId: 'fixture-input' }) })
+  const stream = { getTracks: () => [audioTrack], getAudioTracks: () => [audioTrack] }
+  const getUserMedia = vi.fn(async (_constraints: MediaStreamConstraints) => stream)
+  vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } })
   vi.stubGlobal('MediaRecorder', Recorder)
   vi.stubGlobal('AudioContext', function Audio() { return { state: 'running', close, decodeAudioData: decoding,
     createMediaStreamSource: () => ({ connect: vi.fn() }),
     createAnalyser: () => ({ fftSize: 256, getFloatTimeDomainData: (buffer: Float32Array) => { buffer.fill(0.25) } }),
   } })
   vi.stubGlobal('OfflineAudioContext', offline)
-  return { recording: new Recording(disposed), trackStop, close, disposed, decoding, rendering, offline,
+  return { recording: new Recording(disposed), getUserMedia, stream, track, trackStop, close, disposed, decoding, rendering, offline,
     failRecorder: () => { failRecorder() } }
 }
