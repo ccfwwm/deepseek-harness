@@ -81,7 +81,8 @@ export interface UiWorkspace {
   /**
    * Create a fresh Session, or reuse a blank when preparing an explicit draft. A creation the Host
    * refuses is shown through the Workspace notice and leaves the selection as it was.
-   * @param workspaceId - explicit target; absent inherits the current or most recent Workspace.
+   * @param workspaceId - explicit target; absent inherits the current or most recent Workspace,
+   * falling back to the Host default directory only when that directory cannot be prepared.
    * @param options - initial content and the reused blank's preset; existing text or attachments
    * are preserved unless clearPreviousDraft is true.
    */
@@ -156,7 +157,11 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     readonly attempt: Promise<SessionId>
   }>()
   private readonly lifetime = new AbortController()
-  private pendingStartSession: { readonly workspaceId?: WorkspaceId; readonly navigation: AbortSignal } | undefined
+  private pendingStartSession: {
+    readonly workspaceId?: WorkspaceId
+    readonly options?: StartSessionOptions
+    readonly navigation: AbortSignal
+  } | undefined
   private readonly selection = createSnapshotStore<MainSelection>(
     {}, { persist: { name: 'dsh.sessions.current' } },
   )
@@ -291,11 +296,20 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     workspaceId: WorkspaceId,
     beforeOpen: ((sessionId: SessionId) => void) | undefined,
     reuse: Pick<StartSessionOptions, 'agentPreset'> | undefined,
+    allowDefaultDirectory = false,
   ): Promise<void> {
     const navigation = AbortSignal.any([this.ctx.layout.beginNavigation(), this.lifetime.signal])
     let sessionId: SessionId
     try {
-      sessionId = await this.connectBlank(workspaceId, reuse)
+      try {
+        sessionId = await this.connectBlank(workspaceId, reuse)
+      } catch (error: unknown) {
+        if (!allowDefaultDirectory || navigation.aborted
+          || sessionCreateErrorOf(error)?.rpcError.code !== 'session/cwd-unavailable') throw error
+        // Only an inherited directory failure permits changing the location.
+        // The Host owns its default cwd; preset and model failures stay visible.
+        sessionId = await this.sessions.create(reuse?.agentPreset === undefined ? {} : { agentPreset: reuse.agentPreset })
+      }
     } catch (error: unknown) {
       // Reported here, not in connectWorkspace: startup restoration calls that
       // directly and stays console-only.
@@ -326,13 +340,17 @@ class UiWorkspaceService extends Service implements UiWorkspace {
       && (draftOptions.prompt !== undefined || draftOptions.clearPreviousDraft === true)
     const workspace = this.workspaces.list.getSnapshot()
     const sessions = this.sessions.list.getSnapshot()
-    if (workspace.phase !== 'ready' || sessions.phase !== 'ready') {
+    if (workspace.phase !== 'ready') {
       // Keep the user's New Session action while the startup catalogs load.
       // Returning here used to discard the click, leaving first-run users with
       // no Session and no Workspace to work in.
       this.ctx.layout.selectPanel(null)
       const navigation = AbortSignal.any([this.ctx.layout.beginNavigation(), this.lifetime.signal])
-      this.pendingStartSession = { ...(workspaceId === undefined ? {} : { workspaceId }), navigation }
+      this.pendingStartSession = {
+        ...(workspaceId === undefined ? {} : { workspaceId }),
+        ...(options === undefined ? {} : { options: { ...options } }),
+        navigation,
+      }
       return
     }
     this.pendingStartSession = undefined
@@ -342,23 +360,31 @@ class UiWorkspaceService extends Service implements UiWorkspace {
       : workspace.items.find(item => item.sessionIds.includes(current))?.workspaceId
     const recent = recentWorkspace(workspace.items, sessions.byId)
     const target = workspaceId ?? currentWorkspaceId ?? recent
+    const beforeOpen = initializeDraft && draftOptions !== undefined ? (id: SessionId) => {
+      const binding = this.sessions.binding(id)
+      if (binding === undefined) this.draftPreparationFailed()
+      this.prepareDraft(binding, draftOptions)
+    } : undefined
+    const reuse = draftOptions === undefined ? undefined : agentPreset === undefined ? {} : { agentPreset }
     if (target === undefined) {
       const navigation = AbortSignal.any([this.ctx.layout.beginNavigation(), this.lifetime.signal])
       void this.initializeDefaultWorkspace(navigation).then((prepared) => {
-        if (prepared === undefined || navigation.aborted) return
-        return this.openWorkspace(prepared.workspaceId)
+        if (navigation.aborted) return
+        if (prepared === undefined) {
+          this.notify({ kind: 'createFailed', message: this.ctx.locale.bind('workspace')('draft.workspaceRequired') })
+          return
+        }
+        return this.openWorkspace(prepared.workspaceId, beforeOpen, reuse)
       }).catch((reason: unknown) => {
         console.warn('new Session default Workspace failed:', reason)
       })
       return
     }
-    const opening = draftOptions === undefined
-      ? this.openWorkspaceSession(target, undefined, undefined)
-      : this.openWorkspace(target, initializeDraft ? (id) => {
-        const binding = this.sessions.binding(id)
-        if (binding === undefined) this.draftPreparationFailed()
-        this.prepareDraft(binding, draftOptions)
-      } : undefined, agentPreset === undefined ? {} : { agentPreset })
+    const opening = workspaceId === undefined
+      ? this.openWorkspaceSession(target, beforeOpen, reuse, true)
+      : draftOptions === undefined
+        ? this.openWorkspaceSession(target, undefined, undefined)
+        : this.openWorkspace(target, beforeOpen, reuse)
     void opening.catch(
       (reason: unknown) => { console.warn('new session failed:', reason) },
     )
@@ -431,7 +457,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
         this.pendingStartSession = undefined
         if (!pendingStart.navigation.aborted) {
           initial = 'done'
-          this.startSession(pendingStart.workspaceId)
+          this.startSession(pendingStart.workspaceId, pendingStart.options)
           return
         }
       }

@@ -728,6 +728,65 @@ describe('UiWorkspaceService', () => {
     expect(b.notify).toHaveBeenCalledTimes(3)
   })
 
+  it.each(['current', 'recent'] as const)('recovers an inherited %s directory failure in the Host default without changing the preset or draft', async (source) => {
+    const history = summary('offline-history', { cwd: '/w/offline', updatedAt: 9 })
+    const b = bench({ workspaces: workspaceState([workspace('offline', [history.id])]), sessions: sessionState([history]) })
+    await vi.waitFor(() => { expect(b.sessions.retain).toHaveBeenCalledOnce() })
+    if (source === 'current') b.uiWorkspace.openSession(history.id)
+    b.sessions.create.mockClear()
+    b.sessions.retain.mockClear()
+    b.sessions.create.mockRejectedValueOnce(new SessionCreateError(new RemoteError(
+      'session/cwd-unavailable', 'directory is unavailable', { cwd: '/w/offline' },
+    ), undefined))
+
+    b.uiWorkspace.startSession(undefined, { agentPreset: 'selected-preset', prompt: 'retained draft' })
+
+    await vi.waitFor(() => { expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(sid('created-none'), { source: 'mainView' }) })
+    expect(b.sessions.create.mock.calls).toEqual([
+      [{ workspaceId: wid('offline'), agentPreset: 'selected-preset' }], [{ agentPreset: 'selected-preset' }],
+    ])
+    expect(b.requestDraftInitialization).toHaveBeenCalledExactlyOnceWith(
+      b.sessions.retained.at(-1)!.reference.binding, { prompt: 'retained draft' },
+    )
+    expect(b.notify).not.toHaveBeenCalled()
+    expect(b.workspaces.initializeDefault).not.toHaveBeenCalled()
+  })
+
+  it.each(['explicit', 'preset'] as const)('does not recover an %s failure by changing the requested location or preset', async (kind) => {
+    const b = bench({ workspaces: workspaceState([workspace('offline')]), sessions: sessionState() })
+    await vi.waitFor(() => { expect(b.sessions.retain).toHaveBeenCalledOnce() })
+    b.sessions.create.mockClear()
+    b.sessions.retain.mockClear()
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const refusal = kind === 'explicit'
+      ? new RemoteError('session/cwd-unavailable', 'directory unavailable', { cwd: '/w/offline' })
+      : new RemoteError('agent-preset/not-found', 'preset unavailable', { agentPreset: 'selected-preset', available: [] })
+    b.sessions.create.mockRejectedValueOnce(new SessionCreateError(refusal, undefined))
+
+    b.uiWorkspace.startSession(kind === 'explicit' ? wid('offline') : undefined, { agentPreset: 'selected-preset' })
+
+    await vi.waitFor(() => { expect(b.notify).toHaveBeenCalledOnce() })
+    expect(b.sessions.create).toHaveBeenCalledExactlyOnceWith({ workspaceId: wid('offline'), agentPreset: 'selected-preset' })
+    expect(b.sessions.retain).not.toHaveBeenCalled()
+  })
+
+  it('does not start a default-directory recovery after later navigation', async () => {
+    const b = bench({ workspaces: workspaceState([workspace('offline')]), sessions: sessionState() })
+    await vi.waitFor(() => { expect(b.sessions.retain).toHaveBeenCalledOnce() })
+    b.sessions.create.mockClear()
+    b.sessions.retain.mockClear()
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const pending = Promise.withResolvers<SessionId>()
+    b.sessions.create.mockReturnValueOnce(pending.promise)
+    b.uiWorkspace.startSession()
+    b.layout.selectPanel('other-panel' as MainPanelId)
+    pending.reject(new SessionCreateError(new RemoteError('session/cwd-unavailable', 'directory unavailable', { cwd: '/w/offline' }), undefined))
+    await setImmediate()
+    expect(b.sessions.create).toHaveBeenCalledExactlyOnceWith({ workspaceId: wid('offline') })
+    expect(b.sessions.retain).not.toHaveBeenCalled()
+    expect(b.notify).not.toHaveBeenCalled()
+  })
+
   it('uses an explicit or recent Workspace, and initializes first-use Workspace for a new Session', async () => {
     const current = summary('current', { cwd: '/w/current-home', updatedAt: 1 })
     const recent = summary('recent', { cwd: '/w/recent-home', updatedAt: 2 })
@@ -987,15 +1046,15 @@ describe('UiWorkspaceService', () => {
       },
     )
 
-    it('requests a Workspace without clearing the current selection when no Workspace is available', () => {
+    it('requests a Workspace without clearing the current selection when no Workspace is available', async () => {
       const backing = persistSelection({})
-      const b = bench()
+      const b = bench({ workspaces: workspaceState(), sessions: sessionState([summary('ungrouped')]) })
       b.uiWorkspace.openSession(sid('ungrouped'))
       b.selectPanel.mockClear()
 
       b.uiWorkspace.startSession(undefined, { prompt: 'unsent' })
 
-      expect(b.notify).toHaveBeenCalledExactlyOnceWith({ kind: 'createFailed', message: 'Choose a workspace first.' })
+      await vi.waitFor(() => { expect(b.notify).toHaveBeenCalledExactlyOnceWith({ kind: 'createFailed', message: 'Choose a workspace first.' }) })
       expect(b.sessions.create).not.toHaveBeenCalled()
       expect(b.requestDraftInitialization).not.toHaveBeenCalled()
       expect(b.sessions.retained[0]!.release).not.toHaveBeenCalled()
@@ -1005,7 +1064,7 @@ describe('UiWorkspaceService', () => {
 
     it('reports an unknown explicit Workspace without preparing a draft or changing selection', async () => {
       const backing = persistSelection({})
-      const b = bench()
+      const b = bench({ workspaces: workspaceState() })
       const opening = vi.spyOn(b.uiWorkspace, 'openWorkspace')
       const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
       b.uiWorkspace.openSession(sid('previous'))

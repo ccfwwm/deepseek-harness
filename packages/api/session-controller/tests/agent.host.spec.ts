@@ -357,6 +357,6 @@ describe('ApiSession creation', () => {
     const file = join(parent, 'file')
     writeFileSync(file, 'not a directory')
     await expect(agents.createSession({ cwd: join(file, 'child'), reusable: () => true }))
-      .rejects.toThrow('failed to ensure project directory')
+      .rejects.toMatchObject({ code: 'session/cwd-unavailable', details: { cwd: join(file, 'child') } })
   })
 })

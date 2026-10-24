@@ -110,6 +110,10 @@ describe('Session creation failures', () => {
 
   it.each([
     {
+      error: new RemoteError('session/cwd-unavailable', 'project directory unavailable', { cwd: '/offline' }),
+      code: 'session/cwd-unavailable',
+    },
+    {
       error: new RemoteError(
         'agent-preset/invalid',
         'agent-presets: preset "broken" failed to mount: invalid composition',

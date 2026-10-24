@@ -618,7 +618,7 @@ export class ApiSessionAgentController {
     try {
       await mkdir(cwd, { recursive: true })
     } catch (error: unknown) {
-      throw new Error(`failed to ensure project directory "${cwd}": ${String(error)}`, { cause: error })
+      throw new RemoteError('session/cwd-unavailable', `failed to ensure project directory "${cwd}": ${String(error)}`, { cwd }, { cause: error })
     }
     return this.adoptHandle(await this.ctx.agents.create({
       sessionId,
