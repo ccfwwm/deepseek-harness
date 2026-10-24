@@ -39,6 +39,7 @@ interface HarnessOptions {
   liveSessions?: SessionHeader[]
   sessionStore?: boolean
   backend?: StorageBackend
+  startupPathProbeTimeoutMs?: number
 }
 
 /** Boot the real storage/domain/registry composition over controllable header-only peers. */
@@ -70,7 +71,7 @@ async function harness(options: HarnessOptions = {}) {
 
   const changes: DomainChanged[] = []
   ctx.on('domain/changed', (change) => { changes.push(change) })
-  const fiber = await ctx.plugin(WorkspaceRegistry)
+  const fiber = await ctx.plugin(WorkspaceRegistry, { startupPathProbeTimeoutMs: options.startupPathProbeTimeoutMs ?? 1000 })
   const initChanges = [...changes]
   changes.length = 0
   return {
@@ -192,6 +193,105 @@ afterEach(async () => {
 })
 
 describe('WorkspaceRegistry lifecycle and bootstrap', () => {
+  it('resolves one cwd once for every history header sharing it', async () => {
+    const cwd = await makeDir('shared-history-path')
+    const normalize = vi.spyOn(workspacePaths, 'realpathNormalize')
+    onTestFinished(() => normalize.mockRestore())
+    const result = await harness({ sessions: Array.from({ length: 100 }, (_, i) => header(`shared-${i}`, cwd, i)) })
+    onTestFinished(() => result.ctx.fiber.dispose())
+    expect(normalize).toHaveBeenCalledTimes(1)
+    expect(result.registry.list()[0]!.sessionIds).toHaveLength(100)
+  })
+
+  it('activates while a historical path never resolves and retains its durable membership through a rename', async () => {
+    const cwd = await makeDir('unresponsive-history-path')
+    const id = WorkspaceId('unresponsive-workspace')
+    const pool = storedPool([[id, record(cwd, ['kept'])]], { initialized: true, workspaceIds: [id] })
+    const normalize = vi.spyOn(workspacePaths, 'realpathNormalize').mockImplementation(() => new Promise<string>(() => {}))
+    onTestFinished(() => normalize.mockRestore())
+    const result = await harness({ pool, sessions: [header('kept', cwd), header('unowned', cwd)], startupPathProbeTimeoutMs: 10 })
+    onTestFinished(() => result.ctx.fiber.dispose())
+    expect(result.fiber.state).toBe(2)
+    const workspace = result.registry.get(id)!
+    expect(workspace.sessionIds).toEqual(['kept'])
+    await workspace.setTitle('Retained during path lookup')
+    expect(storedRecord(pool, id).sessionIds).toEqual(['kept'])
+    expect(normalize).toHaveBeenCalledTimes(1)
+    normalize.mockRestore()
+    await expect(workspace.attachSession(SessionId('unowned'))).resolves.toBeUndefined()
+    expect(workspace.sessionIds).toEqual(['unowned', 'kept'])
+  })
+
+  it('validates a late path result and notifies consumers without rewriting the stored account', async () => {
+    const cwd = await makeDir('late-history-path')
+    const elsewhere = await makeDir('late-history-elsewhere')
+    const id = WorkspaceId('late-workspace')
+    const pool = storedPool([[id, record(cwd, ['candidate'])]], { initialized: true, workspaceIds: [id] })
+    const lookup = Promise.withResolvers<string>()
+    const normalize = vi.spyOn(workspacePaths, 'realpathNormalize').mockReturnValue(lookup.promise)
+    onTestFinished(() => normalize.mockRestore())
+    const result = await harness({ pool, sessions: [header('candidate', cwd)], startupPathProbeTimeoutMs: 10 })
+    onTestFinished(() => result.ctx.fiber.dispose())
+    const projection = vi.fn()
+    result.ctx.on('workspace/projection-changed', projection)
+    expect(result.registry.get(id)!.sessionIds).toEqual(['candidate'])
+    lookup.resolve(elsewhere)
+    await vi.waitFor(() => expect(projection).toHaveBeenCalledWith([id]))
+    expect(result.registry.get(id)!.sessionIds).toEqual([])
+    expect(storedRecord(pool, id).sessionIds).toEqual(['candidate'])
+  })
+
+  it('finishes a deferred first history bootstrap only after the late path is validated', async () => {
+    const local = await makeDir('partial-history-local')
+    const slow = await makeDir('partial-history-slow')
+    const lookup = Promise.withResolvers<string>()
+    const original = workspacePaths.realpathNormalize
+    const normalize = vi.spyOn(workspacePaths, 'realpathNormalize').mockImplementation(path => path === slow ? lookup.promise : original(path))
+    onTestFinished(() => normalize.mockRestore())
+    const result = await harness({ sessions: [header('local', local), header('slow', slow)], startupPathProbeTimeoutMs: 10 })
+    onTestFinished(() => result.ctx.fiber.dispose())
+    expect(result.registry.list().map(workspace => workspace.path)).toEqual([local])
+    expect(storedState(result.pool).initialized).toBe(false)
+    lookup.resolve(slow)
+    await vi.waitFor(() => expect(result.registry.list()).toHaveLength(2))
+    expect(storedState(result.pool).initialized).toBe(true)
+    expect(result.registry.list().find(workspace => workspace.path === slow)!.sessionIds).toEqual(['slow'])
+  })
+
+  it('ignores late historical probe completions after its provider is disposed', async () => {
+    const cwd = await makeDir('disposed-history-path')
+    const lookup = Promise.withResolvers<string>()
+    const normalize = vi.spyOn(workspacePaths, 'realpathNormalize').mockReturnValue(lookup.promise)
+    onTestFinished(() => normalize.mockRestore())
+    const result = await harness({ sessions: [header('late', cwd)], startupPathProbeTimeoutMs: 10 })
+    const projection = vi.fn()
+    result.ctx.on('workspace/projection-changed', projection)
+    const before = JSON.stringify(storedState(result.pool))
+    await result.fiber.dispose()
+    lookup.resolve(cwd)
+    await new Promise(resolve => setTimeout(resolve, 25))
+    expect(JSON.stringify(storedState(result.pool))).toBe(before)
+    expect(projection).not.toHaveBeenCalled()
+    expect(result.pool.media.get('workspace')!.tables.has('workspaces')).toBe(false)
+    await result.ctx.fiber.dispose()
+  })
+
+  it('publishes a completed historical path while another path remains unresponsive', async () => {
+    const slow = await makeDir('independent-slow-history')
+    const never = await makeDir('independent-never-history')
+    const lookup = Promise.withResolvers<string>()
+    const normalize = vi.spyOn(workspacePaths, 'realpathNormalize').mockImplementation(path =>
+      path === slow ? lookup.promise : new Promise<string>(() => {}))
+    onTestFinished(() => normalize.mockRestore())
+    const result = await harness({ sessions: [header('slow', slow), header('never', never)], startupPathProbeTimeoutMs: 10 })
+    onTestFinished(() => result.ctx.fiber.dispose())
+    const projection = vi.fn()
+    result.ctx.on('workspace/projection-changed', projection)
+    lookup.resolve(slow)
+    await vi.waitFor(() => expect(projection).toHaveBeenCalledTimes(1))
+    expect(result.registry.list().map(workspace => workspace.path)).toEqual([slow])
+    expect(storedState(result.pool).initialized).toBe(false)
+  })
   it('forgets a removed Session in workspace order and global sets without changing neighbors', async () => {
     const cwd = await makeDir('delete-membership')
     const first = await harness({ sessions: [header('remove-me', cwd), header('keep-me', cwd)] })
@@ -863,6 +963,25 @@ describe('header-validated membership projection', () => {
     await workspace.setTitle('Pruned')
     expect(storedRecord(pool, id).sessionIds).toEqual([])
   })
+
+  it.each(['EACCES', 'ENOTCONN', 'ECONNRESET', 'ETIMEDOUT', 'EHOSTUNREACH', 'ENETUNREACH'])(
+    'retains existing network-path accounts through a %s availability failure',
+    async (code) => {
+      const cwd = process.platform === 'win32' ? '\\\\wsl.localhost\\Unavailable\\home' : '//unavailable/share/home'
+      const id = WorkspaceId(`network-unavailable-${code}`)
+      const pool = storedPool([[id, record(cwd, ['kept'])]], { initialized: true, workspaceIds: [id] })
+      const spy = vi.spyOn(workspacePaths, 'realpathNormalize').mockRejectedValue(Object.assign(new Error(code), { code }))
+      onTestFinished(() => spy.mockRestore())
+      const result = await harness({ pool, sessions: [header('kept', cwd), header('unowned', cwd)] })
+      onTestFinished(() => result.ctx.fiber.dispose())
+      const workspace = result.registry.get(id)!
+      expect(workspace.sessionIds).toEqual(['kept'])
+      await workspace.setTitle('Network history retained')
+      expect(storedRecord(pool, id).sessionIds).toEqual(['kept'])
+      await expect(workspace.attachSession(SessionId('unowned'))).rejects.toThrow(/does not resolve/)
+      expect(workspace.sessionIds).toEqual(['kept'])
+    },
+  )
 
   it('clears the missing-path exemption when a later header index resolves elsewhere or becomes invalid', async () => {
     const dir = await makeDir('reindexed-missing')

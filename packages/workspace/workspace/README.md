@@ -48,6 +48,8 @@ The package needs a session store, a session persistence backend, and the storag
 
 With these rows mounted, creating a project shows up in the list immediately and survives a restart; the first start also groups existing sessions by the directory they ran in. If a required peer is missing, the workspace feature stays unavailable until it is mounted.
 
+`startupPathProbeTimeoutMs` defaults to 1000 ms and bounds the startup wait for historical directory probes. Headers sharing a cwd reuse one probe. Slow network or WSL paths finish in the background; existing recorded membership remains visible until validation finishes, and first-use history bootstrap stays resumable until every probe settles. Create and attach still require successful canonical-path and directory validation.
+
 ### Creating and ordering projects
 
 Create a project from any fully qualified directory that exists: filesystem roots such as `C:\` and ordinary directories are valid. Relative paths, Windows drive-relative paths such as `C:work`, missing paths, and files are rejected without creating a project; creating a project for a directory that already has one returns the existing project unchanged. Rename a project at any time, and move it to any position in the list:
@@ -91,7 +93,7 @@ This section explains the design decisions behind the feature and points at the 
 ### Design philosophy
 
 - **One record per canonical path.** `fs.realpath` is the single uniqueness canon: paths are stored canonicalized, so a symlink to an owned directory collides, and uniqueness is string equality of canonical paths.
-- **Membership starts from the recorded account.** The header index validates ordered `sessionIds`; missing-directory candidates retain their account, while other invalid candidates are filtered on read and pruned by the next mutation. The strict canonical-path index used for history bootstrap includes existing directories only.
+- **Membership starts from the recorded account.** The header index validates ordered `sessionIds`; missing-directory and pending-probe candidates retain their account, while other invalid candidates are filtered on read and pruned by the next mutation. The strict canonical-path index used for history bootstrap includes validated existing directories only.
 - **Header-only reads.** Bootstrap and attach validation read `SessionHeader` fields only; event bodies are never loaded.
 - **Two-write mutations with an explicit marker.** Create and delete persist a `pendingMutation` marker before the record/order pair can diverge, so startup completes exactly the interrupted operation and unmarked divergence fails loud as corruption.
 - **Serialized writes.** Registry operations run on one operation chain; entity mutations go through `table.update` on the domain write chain, stamping `updatedAt` and deciding membership at their chain slot.

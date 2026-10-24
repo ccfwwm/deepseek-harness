@@ -40,7 +40,7 @@ installFailLoud('dsh')
 const ctx = await boot('dsh', resolveConfigPath(argv[2], process.env.DSH_SNAPSHOT))
 ```
 
-`installFailLoud` 会为未处理 rejection 或未捕获异常向 stderr 写一条带标签的 `util.inspect` 诊断，在固定超时内等待界面的 release 钩子，然后以 1 退出；控制流不会回到失败的操作，因为只有抛出点知道哪些状态仍然完整，事件循环只运行到 release 结束或超时。有了这个入口，启动会保留所有能够激活的插件。启用但失败的插件会产生带标签的警告。required entry 失败时，启动会拆卸整个应用并以非零码退出；profile 中不存在的 required id 和已禁用的 required entry 不影响启动。全局 required list 覆盖共享 Agent 执行、应用 endpoint，以及 Web 启动与传输：`agent-loop`、`webserver`、`web-runtime`、`modules`、`connection`、`headless-runner`、`acp` 和 `sdk-jsonrpc-server`。
+`installFailLoud` 会为未处理 rejection 或未捕获异常向 stderr 写一条带标签的 `util.inspect` 诊断，在固定超时内等待界面的 release 钩子，然后以 1 退出；控制流不会回到失败的操作，因为只有抛出点知道哪些状态仍然完整，事件循环只运行到 release 结束或超时。有了这个入口，启动会保留所有能够激活的插件。启用但失败的插件会产生带标签的警告。required entry 失败时，启动会拆卸整个应用并以非零码退出；profile 中不存在的 required id 和已禁用的 required entry 不影响启动。全局 required list 覆盖共享 Agent 执行、应用 endpoint，以及 Web 启动与传输：`agent-loop`、`webserver`、`web-runtime`、`modules`、`connection`、`workspace`、`session-controller`、`workspace-controller`、`headless-runner`、`acp` 和 `sdk-jsonrpc-server`。
 
 <a id="profiles"></a>
 ### Profile
@@ -93,7 +93,7 @@ profile 导入插件前，DSH 会将其声明的 DSH 版本要求与 `getDshRunt
 
 profile 重载返回未变化的已有故障诊断，不让无关修改因此失败。新增未激活条目、配置或 fiber 变化、诊断变化都会使重载失败；被移除的 fiber 仍须完成释放。显式启用的目标必须成功激活，即使它的故障早于本次操作。`recomposeProfile(ctx, patches, binName, { requiredIds, running })` 与 runtime resolution 一起执行一次重新组合：它移除新一代组合不再列出的行，并在其包仍有映射时等待这些行释放完成，发布可重新计算的 resolution 的最新一代，使兼容性预检读取已发布的包，应用新一代组合，启动更新后没有运行中 fiber 的 `running` 条目和导入失败的条目，然后判定激活结果。`running` 列出调用方停止其中部分条目之前正在运行的条目；之后每个失败的条目都计为新的故障。新一代组合应用之前的失败会把移除的行放回原位置，从而重新启动它们，并重新启动 `running` 条目。等待服务的条目报告为警告（required 条目除外），因此出现提供方后它即启动；`reconcileProfilePatches()` 以同样方式判定它。resolution 拒绝的发布属于这种失败，并报告 `package-moved`。Config Editor 使用的 `reconcileProfilePatches()` 应用并判定 patch，不发布 resolution，也不重试失败的导入。导入失败的条目以 Loader 再次导入时返回的错误报告，因此若导入现在成功，判定该条目时会对模块求值；变更前记录的激活状态不执行任何导入，因此之前导入失败的条目无论现在的错误是什么，都计为同一个故障。成功重载在生命周期结束及诊断检查通过后发出 `app-boot/config-reload`，包括未启用 HMR 时的程序化更新。事件不携带 diff 或解析后的配置。成功重载在生命周期结束及诊断检查通过后返回；仅 volatile 的条目变化由 Loader 在更新过程中提交。
 
-Loader 结算后，app-boot 在仅 optional 条目未激活时输出警告。如果已启用的 required 条目无法激活，`boot()` 会在释放资源后以 `StartupError` 拒绝。独立管理生命周期的 logger exporter 会保留异步资源释放期间的警告和错误记录，并在 `boot()` 结算前释放。其消息分组列出所有失败插件和等待的服务，标记 required 条目，并保留原始堆栈、嵌套原因和聚合错误成员。CLI 仅输出该消息一次，并在保存[完整启动诊断](../../../apps/cli/reference/README.zh.md#startup-diagnostics)后以退出码 1 结束；其他异常保留正常堆栈输出。表中的“终止启动”指释放已挂载插件并以非零码退出，不报告就绪；“继续”指保留成功运行的插件。后续配置 HMR 不会再次执行 required 启动审计，也不会回滚整个更新。
+所需条目激活后，`boot()` 即报告就绪，可选插件导入和生命周期工作继续在后台运行。后台任务结算后，app-boot 会报告未激活的可选条目。如果已启用的 required 条目无法激活，`boot()` 会在释放资源后以 `StartupError` 拒绝。独立管理生命周期的 logger exporter 会保留异步资源释放期间的警告和错误记录，并在失败的 `boot()` 结算前释放。其消息分组列出失败插件和等待的服务，标记 required 条目，并保留原始堆栈、嵌套原因和聚合错误成员；required 失败时已结算的可选条目也会纳入。CLI 仅输出该消息一次，并在保存[完整启动诊断](../../../apps/cli/reference/README.zh.md#startup-diagnostics)后以退出码 1 结束；其他异常保留正常堆栈输出。表中的“终止启动”指释放已挂载插件并以非零码退出，不报告就绪；“继续”指保留成功运行的插件。Profile 重新组合和健康检查仍等待 Loader 完整结算，后续配置 HMR 不会再次执行 required 启动审计，也不会回滚整个更新。
 
 | 失败模式 | Optional 条目启动时 | Required 条目启动时 | 后续配置 HMR |
 |---|---|---|---|

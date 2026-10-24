@@ -4342,7 +4342,7 @@ export interface WebRuntimeConfig {
 ```ts config-catalog
 /** Plugin config: composed deployment settings plus per-invocation command-line values. */
 export interface Config {
-  /** Permit default-browser handoff after the Loader tree settles; an SSH launch suppresses it. */
+  /** Permit default-browser handoff after required startup entries activate; an SSH launch suppresses it. */
   openBrowser: boolean
   /** Print the URL line on activation; a non-interactive layer can turn it off. */
   printUrl: boolean
@@ -4559,6 +4559,23 @@ export interface Config {
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-working-directory -->
 
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-workspace -->
+<a id="deepseek-aidsh-workspace"></a>
+
+## `@deepseek-ai/dsh-workspace`
+
+- `inject`: `storageDomain` · `sessionPersistence`
+- `source`: [`packages/workspace/workspace/src/index.ts:44`](../packages/workspace/workspace/src/index.ts)
+
+```ts config-catalog
+/** Startup history-index policy; explicit workspace mutations always validate the real path. */
+export interface Config {
+  /** Maximum startup wait for historical cwd probes; slow probes finish in the background. */
+  startupPathProbeTimeoutMs?: number
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-workspace -->
+
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-workspace-changes -->
 <a id="deepseek-aidsh-workspace-changes"></a>
 
@@ -4700,7 +4717,6 @@ export interface Config {
 | `@deepseek-ai/dsh-tool-working-directory` | `tools` · `workingDirectory` | [`packages/session/tool-working-directory/src/index.ts`](../packages/session/tool-working-directory/src/index.ts) |
 | `@deepseek-ai/dsh-user-questions` | — | [`packages/interaction/user-questions/src/index.ts`](../packages/interaction/user-questions/src/index.ts) |
 | `@deepseek-ai/dsh-webhook` | `agents` · `agentDefaultModel` · `agentPresets` · `permissionPresets` · `sessionTitle` · `workspaceRegistry` | [`packages/experimental/webhook/src/index.ts`](../packages/experimental/webhook/src/index.ts) |
-| `@deepseek-ai/dsh-workspace` | `storageDomain` · `sessionPersistence` | [`packages/workspace/workspace/src/index.ts`](../packages/workspace/workspace/src/index.ts) |
 <!-- END GENERATED config-catalog:no-config -->
 
 ## Seam 包（不可直接加载）

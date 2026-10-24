@@ -8,6 +8,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, stat } from 'node:fs/promises'
 import { Context, Service } from '@deepseek-ai/cordis'
+import z from '@deepseek-ai/schemastery'
 import type { SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import type { DomainGlobal, KvTable } from '@deepseek-ai/dsh-storage-domain'
@@ -37,6 +38,12 @@ export type WorkspaceId = WorkspaceIdBrand
  */
 export function WorkspaceId(id: string): WorkspaceId {
   return id as WorkspaceId
+}
+
+/** Startup history-index policy; explicit workspace mutations always validate the real path. */
+export interface Config {
+  /** Maximum startup wait for historical cwd probes; slow probes finish in the background. */
+  startupPathProbeTimeoutMs?: number
 }
 
 /**
@@ -117,6 +124,12 @@ declare module '@deepseek-ai/cordis' {
 
   interface Events {
     /**
+     * Historical cwd validation changed the in-memory membership projection.
+     * @param ids - Registered workspaces whose current projection should be read again.
+     * @mode emit
+     */
+    'workspace/projection-changed'(ids: readonly WorkspaceId[]): void
+    /**
      * Ask the composed providers what still runs for a session before it is
      * archived. A listener prepends its own {@link SessionActivity} entries to
      * the result of `next()`; the registry's innermost callback returns an
@@ -162,13 +175,17 @@ const compareHeaders = (left: SessionHeader, right: SessionHeader): number =>
 
 /**
  * Durable workspace registry. Startup waits for `sessionPersistence`, builds
- * one canonical-cwd header index, and completes the one-time history
- * bootstrap before the service becomes active. The persistence dependency is
+ * one canonical-cwd header index. Historical cwd probes have a startup budget;
+ * pending paths retain existing accounts and finish bootstrap in the background.
+ * The persistence dependency is
  * mandatory so an unavailable peer can never be mistaken for an empty
  * history and commit the initialized marker.
  */
 export class WorkspaceRegistry extends Service {
   static inject = ['storageDomain', 'sessionPersistence']
+  static Config: z<Config> = z.object({
+    startupPathProbeTimeoutMs: z.natural().min(1).default(1000),
+  })
 
   private table?: KvTable<WorkspaceId, WorkspaceRecord>
   private global?: DomainGlobal<WorkspaceDomainState>
@@ -178,21 +195,29 @@ export class WorkspaceRegistry extends Service {
   private readonly sessionPaths = new Map<SessionId, string>()
   private readonly missingSessionPaths = new Set<SessionId>()
   private readonly invalidSessionPaths = new Map<SessionId, string>()
+  private readonly pendingSessionPaths = new Set<SessionId>()
+  private readonly pathChecks = new Map<SessionId, object>()
+  private readonly pathIndexAbort = new AbortController()
+  private readonly startupPathTasks: Promise<boolean>[] = []
   private operationTail: Promise<void> = Promise.resolve()
 
   private readonly host: WorkspaceEntityHost = {
     table: () => this.requireTable(),
-    candidateMatches: (id, path) => this.sessionPaths.get(id) === path || this.missingSessionPaths.has(id),
+    candidateMatches: (id, path) => this.sessionPaths.get(id) === path || this.missingSessionPaths.has(id)
+      || this.pendingSessionPaths.has(id),
     readSessionHeader: id => this.readSessionHeader(id),
     rememberSessionPath: (id, path) => {
       this.sessionPaths.set(id, path)
       this.missingSessionPaths.delete(id)
       this.invalidSessionPaths.delete(id)
+      this.pendingSessionPaths.delete(id)
+      this.pathChecks.delete(id)
     },
   }
 
-  constructor(ctx: Context) {
+  constructor(ctx: Context, private readonly config: Config = {}) {
     super(ctx, 'workspaceRegistry')
+    ctx.effect(() => () => this.pathIndexAbort.abort(), 'workspace.pathIndex')
   }
 
   /** Open the domain, finish bootstrap when required, and rebuild the ordered cache. */
@@ -207,16 +232,26 @@ export class WorkspaceRegistry extends Service {
     this.validateStoredState(this.state)
     if (!this.state.initialized) {
       const headers = await this.listStoredHeaders()
-      await this.replaceHeaderIndex(headers)
-      await this.bootstrap(headers)
+      await this.replaceHeaderIndex(headers, true)
+      await this.bootstrap(headers, this.pendingSessionPaths.size === 0)
     } else if (this.table.size > 0) {
-      await this.replaceHeaderIndex(await this.listStoredHeaders())
+      await this.replaceHeaderIndex(await this.listStoredHeaders(), true)
     }
 
-    await this.indexLiveSessions()
+    await this.indexLiveSessions(true)
     this.validateStoredState(this.requireState())
     this.rebuildEntities()
     this.reportFilteredCandidates()
+    for (const task of this.startupPathTasks) void task.then(async (applied) => {
+      if (!applied || this.pathIndexAbort.signal.aborted) return
+      await this.enqueueOperation(async () => {
+        if (this.pathIndexAbort.signal.aborted) return
+        if (!this.requireState().initialized) {
+          await this.bootstrap([...this.headers.values()], this.pendingSessionPaths.size === 0)
+        }
+        this.ctx.emit('workspace/projection-changed', this.requireState().workspaceIds)
+      })
+    }).catch(error => this.ctx.logger.warn('workspace historical path indexing failed: %s', error))
   }
 
   /**
@@ -429,6 +464,9 @@ export class WorkspaceRegistry extends Service {
       }
       this.headers.delete(sessionId)
       this.sessionPaths.delete(sessionId)
+      this.pendingSessionPaths.delete(sessionId)
+      this.missingSessionPaths.delete(sessionId)
+      this.pathChecks.delete(sessionId)
       this.invalidSessionPaths.delete(sessionId)
     })
   }
@@ -671,7 +709,7 @@ export class WorkspaceRegistry extends Service {
     await this.setState({ ...state, pendingMutation: undefined })
   }
 
-  private async bootstrap(headers: readonly SessionHeader[]): Promise<void> {
+  private async bootstrap(headers: readonly SessionHeader[], initialized = true): Promise<void> {
     const table = this.requireTable()
     const state = this.requireState()
     const groupsByPath = new Map<string, SessionHeader[]>()
@@ -749,6 +787,12 @@ export class WorkspaceRegistry extends Service {
       })
       .map(([id]) => id)
 
+    // Table writes are durable here; publish entities before the order event
+    // lets a live Workspace feed discover newly bootstrapped records.
+    for (const id of workspaceIds) {
+      this.entities.set(id, new WorkspaceEntity(this.host, id, table.get(id) as WorkspaceRecord))
+    }
+
     if (!sameIds(state.workspaceIds, workspaceIds)) {
       await this.setState({
         initialized: false,
@@ -758,7 +802,7 @@ export class WorkspaceRegistry extends Service {
       })
     }
     await this.setState({
-      initialized: true,
+      initialized,
       workspaceIds,
       archivedSessionIds: state.archivedSessionIds,
       pinnedSessionIds: state.pinnedSessionIds,
@@ -816,41 +860,85 @@ export class WorkspaceRegistry extends Service {
     }
   }
 
-  private async replaceHeaderIndex(headers: readonly SessionHeader[]): Promise<void> {
+  private async replaceHeaderIndex(headers: readonly SessionHeader[], startup = false): Promise<void> {
     this.headers.clear()
     this.sessionPaths.clear()
     this.missingSessionPaths.clear()
     this.invalidSessionPaths.clear()
-    await this.indexHeaders(headers)
+    this.pendingSessionPaths.clear()
+    this.pathChecks.clear()
+    await this.indexHeaders(headers, startup)
   }
 
-  private async indexHeaders(headers: readonly SessionHeader[]): Promise<void> {
-    for (const header of headers) await this.indexHeader(header)
-  }
-
-  private async indexHeader(header: SessionHeader): Promise<void> {
-    this.headers.set(header.id, header)
-    this.sessionPaths.delete(header.id)
-    this.missingSessionPaths.delete(header.id)
-    if (header.cwd === undefined) {
-      this.invalidSessionPaths.set(header.id, 'header has no cwd')
+  private async indexHeaders(headers: readonly SessionHeader[], startup = false): Promise<void> {
+    const byPath = new Map<string | undefined, SessionHeader[]>()
+    for (const header of headers) {
+      const group = byPath.get(header.cwd)
+      if (group) group.push(header)
+      else byPath.set(header.cwd, [header])
+    }
+    const groups = [...byPath.values()]
+    const tasks = groups.map(group => this.indexHeaderGroup(group))
+    const complete = Promise.all(tasks)
+    if (!startup) {
+      await complete
       return
     }
+    let timer: ReturnType<typeof setTimeout> | undefined
     try {
-      const path = await realpathNormalize(header.cwd)
-      if (!(await stat(path)).isDirectory()) {
-        this.invalidSessionPaths.set(header.id, `cwd '${header.cwd}' is not a directory`)
-        return
-      }
-      this.sessionPaths.set(header.id, path)
-      this.invalidSessionPaths.delete(header.id)
-    } catch (error) {
-      if (fullyQualifiedWorkspacePath(header.cwd)
-        && error instanceof Error && 'code' in error && error.code === 'ENOENT') {
-        this.missingSessionPaths.add(header.id)
-      }
-      this.invalidSessionPaths.set(header.id, `cwd '${header.cwd}' does not resolve`)
+      await Promise.race([
+        complete,
+        new Promise<void>((resolve) => { timer = setTimeout(resolve, this.config.startupPathProbeTimeoutMs ?? 1000) }),
+      ])
+    } finally {
+      clearTimeout(timer)
     }
+    if (this.pendingSessionPaths.size === 0) return
+    this.startupPathTasks.push(...tasks.filter((_, index) => groups[index]?.some(header => this.pendingSessionPaths.has(header.id))))
+  }
+
+  private async indexHeaderGroup(headers: readonly SessionHeader[]): Promise<boolean> {
+    const check = {}
+    const cwd = headers[0]?.cwd
+    for (const header of headers) {
+      this.headers.set(header.id, header)
+      this.sessionPaths.delete(header.id)
+      this.missingSessionPaths.delete(header.id)
+      this.invalidSessionPaths.delete(header.id)
+      this.pendingSessionPaths.delete(header.id)
+      this.pathChecks.set(header.id, check)
+      if (cwd !== undefined && fullyQualifiedWorkspacePath(cwd)) this.pendingSessionPaths.add(header.id)
+    }
+    let path: string | undefined
+    let missing = false
+    let reason = 'header has no cwd'
+    try {
+      if (cwd !== undefined) {
+        const canonical = await realpathNormalize(cwd)
+        if ((await stat(canonical)).isDirectory()) path = canonical
+        else reason = `cwd '${cwd}' is not a directory`
+      }
+    } catch (error) {
+      const code = error instanceof Error && 'code' in error ? error.code : undefined
+      const networkPath = cwd !== undefined && (cwd.startsWith('\\\\') || cwd.startsWith('//'))
+      missing = cwd !== undefined && fullyQualifiedWorkspacePath(cwd) && (code === 'ENOENT'
+        || networkPath && ['EACCES', 'ENOTCONN', 'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT',
+          'EHOSTUNREACH', 'EHOSTDOWN', 'ENETUNREACH', 'ENETDOWN', 'EIO'].includes(String(code)))
+      reason = `cwd '${cwd}' does not resolve`
+    }
+    if (this.pathIndexAbort.signal.aborted) return false
+    let applied = false
+    for (const header of headers) {
+      if (this.pathChecks.get(header.id) !== check) continue
+      applied = true
+      this.pendingSessionPaths.delete(header.id)
+      if (path !== undefined) this.sessionPaths.set(header.id, path)
+      else {
+        if (missing) this.missingSessionPaths.add(header.id)
+        this.invalidSessionPaths.set(header.id, reason)
+      }
+    }
+    return applied
   }
 
   /** Every stored session's header, projected from the persistence snapshot listing. */
@@ -859,10 +947,10 @@ export class WorkspaceRegistry extends Service {
     return snapshots.map(snapshot => snapshot.header)
   }
 
-  private async indexLiveSessions(): Promise<void> {
+  private async indexLiveSessions(startup = false): Promise<void> {
     const sessions = this.ctx.get('sessions')
     if (sessions === undefined) return
-    await this.indexHeaders(sessions.list().map(session => session.header))
+    await this.indexHeaders(sessions.list().map(session => session.header), startup)
   }
 
   private reportFilteredCandidates(): void {

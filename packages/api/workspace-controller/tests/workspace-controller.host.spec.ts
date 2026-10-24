@@ -332,6 +332,22 @@ describe('WorkspaceController commands', () => {
 })
 
 describe('WorkspaceController follow', () => {
+  it('pushes the current projection when background history validation completes', async () => {
+    const { controller, ctx, root } = await harness()
+    const workspace = await ctx.workspaceRegistry.create(stageDir(root, 'background-projection'))
+    const abort = new AbortController()
+    const iterator = controller.follow(abort.signal)[Symbol.asyncIterator]()
+    try {
+      await nextFrame(iterator)
+      ctx.emit('workspace/projection-changed', [workspace.id])
+      await expect(nextFrame(iterator)).resolves.toMatchObject({
+        type: 'upsert', workspace: { workspaceId: workspace.id, path: workspace.path, sessionIds: [] },
+      })
+    } finally {
+      abort.abort()
+      await iterator.return?.()
+    }
+  })
   it('seeds a new feed from existing rows and rejects an inconsistent registry commit', async () => {
     const { ctx, root } = await harness()
     const existing = await ctx.workspaceRegistry.create(stageDir(root, 'existing'))

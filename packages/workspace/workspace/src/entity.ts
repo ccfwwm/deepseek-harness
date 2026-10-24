@@ -40,7 +40,8 @@ export interface WorkspaceEntityHost {
 
   /**
    * Validate an already-accounted session, preserving ownership when its fully
-   * qualified cwd cannot resolve because a path component is missing.
+   * qualified cwd cannot resolve because a path component is missing, or
+   * while its startup filesystem probe is still pending.
    * @param id - Session already present in this workspace's candidate account.
    * @param path - Workspace's stored canonical directory.
    * @returns whether the candidate remains a member.

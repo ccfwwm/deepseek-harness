@@ -939,6 +939,7 @@ export function installFailLoud(
 const FIBER_PENDING = 0 as FiberState.PENDING
 const FIBER_ACTIVE = 2 as FiberState.ACTIVE
 const FIBER_FAILED = 3 as FiberState.FAILED
+const FIBER_LOADING = 1 as FiberState.LOADING
 const FIBER_DISPOSED = 4 as FiberState.DISPOSED
 
 /**
@@ -954,6 +955,9 @@ const requiredStartupEntryIds = new Set<string>([
   'web-runtime',
   'modules',
   'connection',
+  'workspace',
+  'session-controller',
+  'workspace-controller',
   'headless-runner',
   'acp',
   'sdk-jsonrpc-server',
@@ -1039,10 +1043,12 @@ async function importFailure(entry: Entry): Promise<unknown> {
  * An entry whose import failed reports the error importing it raises now; without
  * `importNow` nothing is imported and the entry reports a failed import without the import error.
  */
-async function inactiveEntries(ctx: Context, importNow = true): Promise<InactiveEntry[]> {
+async function inactiveEntries(
+  ctx: Context, importNow = true, entries: Iterable<Entry> = ctx.loader.entries(),
+): Promise<InactiveEntry[]> {
   const failures: InactiveEntry[] = []
   const rejectionReasons: unknown[] = []
-  for (const entry of ctx.loader.entries()) {
+  for (const entry of entries) {
     try {
       if (entry.disabled) continue
     } catch (error) {
@@ -1166,6 +1172,152 @@ export async function auditStartupEntries(
   if (failures.length > 0) warn(activationDiagnostic(binName, failures))
 }
 
+const startupReadiness = new WeakMap<Context, Promise<void>>()
+
+/** Join required fibers and their registered service providers, never unrelated lifecycles. */
+async function settleRequiredStartupFibers(entries: readonly Entry[]): Promise<void> {
+  for (;;) {
+    const fibers = new Set<Fiber>()
+    const visit = (fiber: Fiber): void => {
+      if (fibers.has(fiber)) return
+      fibers.add(fiber)
+      for (const name of Object.keys(fiber.inject)) {
+        // A service is published during construction but is unavailable until
+        // its provider finishes initialization. A PENDING consumer's await()
+        // alone returns immediately, so include its provider in readiness.
+        const provider = fiber.ctx.reflect._getImpl(name, false)?.fiber
+        if (provider) visit(provider)
+      }
+    }
+    for (const entry of entries) {
+      if (entry.fiber) visit(entry.fiber)
+    }
+    const pending = [...fibers].filter(fiber => fiber.inertia !== undefined)
+    if (pending.length === 0) return
+    await Promise.allSettled(pending.map(fiber => fiber.await()))
+    // Providers can publish another service while finishing initialization;
+    // refresh the closure before auditing consumers that have just activated.
+  }
+}
+
+function hasRequiredDescendant(entry: EntryOptions, requiredIds: ReadonlySet<string>): boolean {
+  if (requiredIds.has(entry.id)) return true
+  return Boolean(entry.group && Array.isArray(entry.config)
+    && entry.config.some((child: EntryOptions) => hasRequiredDescendant(child, requiredIds)))
+}
+
+/** Audit only bootstrap/core entries while optional startup fibers keep running. */
+async function auditRequiredStartupEntries(ctx: Context, binName: string): Promise<void> {
+  const entries = [...ctx.loader.entries()]
+  const requiredEntries = entries.filter(entry => requiredStartupEntryIds.has(entry.options.id))
+  const failures = await inactiveEntries(ctx, true, requiredEntries)
+  const required = new Set(failures.map(({ entry }) => entry))
+  if (required.size > 0) {
+    // Include optional rows that have already settled in the diagnostic, but
+    // omit rows whose imports or lifecycles are still in flight.
+    const optionalSettled = entries.filter(entry => !requiredStartupEntryIds.has(entry.options.id)
+      && entry !== bootstrapIncludes.get(ctx) && entry._initTask === undefined
+      && entry.fiber?.state !== FIBER_LOADING)
+    const optionalFailures = await inactiveEntries(ctx, true, optionalSettled)
+    const allFailures = [...failures, ...optionalFailures]
+    throw new StartupError(startupDiagnostic(binName, allFailures, required), allFailures.map(({ entry, outcome }) => ({
+      id: entry.options.id, module: entry.options.name, required: required.has(entry), fiberState: entry.fiber?.state, outcome,
+    })))
+  }
+}
+
+/**
+ * Wait for the initial root/include tree to mount and for required entries to
+ * activate. Optional entry imports and lifecycle work continue in the Loader
+ * background and cannot delay the host's readiness signal.
+ */
+export function waitForStartupReadiness(ctx: Context, binName = 'dsh'): Promise<void> {
+  const existing = startupReadiness.get(ctx)
+  if (existing) return existing
+  const readiness = (async () => {
+    const loader = ctx.get('loader')
+    if (!loader) return
+    const awaited = new Set<Fiber>()
+    const startupAwaited = new Set<Promise<void>>()
+    try {
+      // An Include or Group that contains a required descendant must finish
+      // mounting that subtree first. This discovers required rows at any
+      // nesting depth without waiting for unrelated sibling fibers.
+      while (ctx.get('loader') !== undefined) {
+        const entries = [...loader.entries()]
+        const carriers = entries.filter(entry => entry.options.name === 'cordis:include'
+          || hasRequiredDescendant(entry.options, requiredStartupEntryIds))
+        const startupTasks: Promise<void>[] = []
+        const tasks: Promise<void>[] = carriers.flatMap((entry) => {
+          // Optional Include rows are launched without awaiting their import
+          // in the parent group. Join only the short import step here. A full
+          // Include fiber may wait for every optional descendant, which would
+          // reintroduce the startup stall this selective readiness path is
+          // intended to avoid. Give it a bounded opportunity to materialize
+          // nested entries, then let the next pass inspect the Loader again.
+          if (entry._initTask) return [entry._initTask]
+          const startupReady = (entry.subtree as { startupReady?: Promise<void> } | undefined)?.startupReady
+          if (startupReady && !startupAwaited.has(startupReady)) {
+            startupAwaited.add(startupReady)
+            startupTasks.push(startupReady)
+            return [startupReady.catch(() => undefined)]
+          }
+          const fiber = entry.fiber
+          if (!fiber || awaited.has(fiber)) return []
+          // Mark the fiber before awaiting it.  An optional Include may stay
+          // pending for the lifetime of the Host; retrying the same bounded
+          // wait on every scan would spin forever and prevent readiness.
+          awaited.add(fiber)
+          const settled = fiber.await().then(() => undefined)
+          const bounded = Promise.race([
+            settled,
+            new Promise<void>(resolve => setTimeout(resolve, 25)),
+          ])
+          return [bounded]
+        })
+        if (tasks.length === 0) break
+        await Promise.allSettled(tasks)
+        await Promise.all(startupTasks)
+      }
+      if (ctx.get('loader') === undefined) return
+      const required = [...loader.entries()].filter(entry => requiredStartupEntryIds.has(entry.options.id))
+      await settleRequiredStartupFibers(required)
+      if (ctx.get('loader') !== undefined) await auditRequiredStartupEntries(ctx, binName)
+    } finally {
+      // The selective policy is only for initial startup. Recomposition,
+      // health checks and rollback continue using Loader's complete settle.
+      loader.startupRequiredIds = undefined
+    }
+  })()
+  startupReadiness.set(ctx, readiness)
+  return readiness
+}
+
+/** Report optional failures after successful readiness, without affecting it. */
+async function auditOptionalStartupEntries(ctx: Context, binName: string): Promise<void> {
+  const loader = ctx.get('loader')
+  if (!loader) return
+  const optionalEntries = () => [...loader.entries()].filter(entry => entry !== bootstrapIncludes.get(ctx)
+    && !requiredStartupEntryIds.has(entry.options.id))
+  await Promise.race([
+    loader.await(),
+    new Promise<void>(resolve => setTimeout(resolve, 25)),
+  ])
+  const settled = optionalEntries().filter(entry => entry._initTask === undefined && entry.fiber?.inertia === undefined)
+  const failures = await inactiveEntries(ctx, true, settled)
+  if (failures.length > 0) process.stderr.write(activationDiagnostic(binName, failures))
+  // Continue diagnostics after the Host is usable for imports that were still
+  // in flight at the readiness boundary.
+  if (settled.length !== optionalEntries().length) {
+    void loader.await().then(async () => {
+      if (ctx.get('loader') === undefined) return
+      const pending = optionalEntries().filter(entry => !settled.includes(entry))
+      const later = await inactiveEntries(ctx, true, pending)
+      if (later.length > 0) process.stderr.write(activationDiagnostic(binName, later))
+    }).catch(() => {})
+  }
+}
+
 /**
  * Boot the Loader against `absoluteConfigPath` and return only after the whole
  * tree settles. Relative entry names resolve against the config directory;
@@ -1229,17 +1381,31 @@ export async function boot(
     await ctx.plugin(Loader)
     await prepare?.(ctx)
     stage = 'plugin tree failed to load'
+    const loader = ctx.get('loader')
+    if (loader) loader.startupRequiredIds = requiredStartupEntryIds
     await mountRootInclude(ctx, absoluteConfigPath, patches, bareModuleBaseUrl, binName)
-    // A surface can finish and dispose the whole tree while startup is still
-    // in flight, before the last entry settles. The Loader service goes with
-    // it, and the activation audit describes a live tree — reading `ctx.loader`
-    // past this point would throw a TypeError over an app that exited exactly
-    // as asked. Re-check after settlement before auditing the tree.
-    await ctx.get('loader')?.await()
+    // Required entries gate readiness; optional entry imports and lifecycle
+    // work continue asynchronously and are diagnosed after they settle.
+    await waitForStartupReadiness(ctx, binName)
     if (ctx.get('loader') === undefined) return ctx
-    await auditStartupEntries(ctx, binName)
+    await auditOptionalStartupEntries(ctx, binName).catch((error: unknown) => {
+      ctx.logger.warn(`${binName}: optional startup diagnostics failed: ${String(error)}`)
+    })
     return ctx
   } catch (cause) {
+    if (cause instanceof StartupError) {
+      // Cleanup may itself be waiting for an in-flight plugin. Publish safe
+      // entry metadata first so supervisors can diagnose the original failure
+      // even when disposal has not yet completed. Do not echo plugin error
+      // values here: those may contain configuration or credentials.
+      const required = cause.entries.filter(entry => entry.required).map((entry) => {
+        const detail = entry.outcome.kind === 'pending'
+          ? `waiting for ${entry.outcome.missing.join(', ') || 'unknown service'}`
+          : entry.outcome.phase ?? 'activation failed'
+        return `${entry.id} (${entry.module}, state ${String(entry.fiberState)}): ${detail}`
+      })
+      process.stderr.write(`${binName}: required startup activation failed; releasing partial Host\n${required.join('\n')}\n`)
+    }
     // Root-fiber disposal contains cleanup failures per observer (Cordis
     // fiber.ts hardening) and a repeated call returns the settled single-shot
     // result, so this await cannot reject and replace `cause`.

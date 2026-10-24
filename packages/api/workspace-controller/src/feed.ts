@@ -62,6 +62,14 @@ export class WorkspaceFeed {
     this.archived = ctx.workspaceRegistry.archivedSessionIds.map(String)
     this.pinned = ctx.workspaceRegistry.pinnedSessionIds.map(String)
     ctx.on('domain/changed', (change: DomainChanged) => { this.changed(change) })
+    ctx.on('workspace/projection-changed', (ids) => {
+      for (const id of ids) {
+        const workspace = ctx.workspaceRegistry.get(id)
+        if (workspace !== undefined && this.knownIds.has(id)) {
+          this.publish({ type: 'upsert', workspace: workspaceView(workspace) })
+        }
+      }
+    })
     ctx.effect(() => () => {
       for (const follower of this.followers) follower.close()
       this.followers.clear()

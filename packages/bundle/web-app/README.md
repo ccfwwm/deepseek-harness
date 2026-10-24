@@ -110,7 +110,7 @@ Startup display and browser handoff receive the advertised root with its launch 
 
 ### Readiness
 
-The URL line and browser handoff are readiness signals: supervisors RPC as soon as they observe the line, and a browser requests the page as soon as it opens, so both run only after the Loader tree settles, the required-startup audit passes, and Connection authentication is available — or immediately in a hand-built tree without a Loader. Client combo JavaScript and source maps remain unmaterialized at this point. Optional plugin failures do not suppress readiness; a required startup failure or a tree disposed mid-boot announces nothing.
+The URL line and browser handoff are readiness signals: supervisors RPC as soon as they observe the line, and a browser requests the page as soon as it opens, so both run after required startup entries activate and Connection authentication is available — or immediately in a hand-built tree without a Loader. Optional imports and plugin lifecycles continue in the background, and optional failures do not suppress readiness; a required startup failure or a tree disposed mid-boot announces nothing.
 
 ### Source map
 

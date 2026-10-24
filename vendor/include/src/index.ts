@@ -174,6 +174,9 @@ export class Include extends EntryTree {
   private writeTask?: NodeJS.Timeout | undefined
   private pendingWrite?: EntryOptions[]
   private writeQueue: Promise<void> = Promise.resolve()
+  /** Resolves after the backing file is read, before child activation settles. */
+  private readonly startupReadyControl = Promise.withResolvers<void>()
+  readonly startupReady = this.startupReadyControl.promise
 
   constructor(ctx: Context, public config: Include.Config) {
     super(ctx)
@@ -244,18 +247,24 @@ export class Include extends EntryTree {
 
   async* [Service.init]() {
     try {
-      await this.read()
-    } catch (error) {
-      // Only a missing file falls back to `initial` (or the not-found error):
-      // an existing-but-invalid file must fail loud with its real parse error,
-      // never be mislabelled as absent or silently overwritten.
-      if ((error as NodeJS.ErrnoException | null)?.code !== 'ENOENT') throw error
-      if (this.config.initial) {
-        await this._writeFile(this.config.initial as any)
-        await this.read(true)
-      } else {
-        throw new Error(`config file not found: ${this.filename}`)
+      try {
+        await this.read()
+      } catch (error) {
+        // Only a missing file falls back to `initial` (or the not-found error):
+        // an existing-but-invalid file must fail loud with its real parse error,
+        // never be mislabelled as absent or silently overwritten.
+        if ((error as NodeJS.ErrnoException | null)?.code !== 'ENOENT') throw error
+        if (this.config.initial) {
+          await this._writeFile(this.config.initial as any)
+          await this.read(true)
+        } else {
+          throw new Error(`config file not found: ${this.filename}`)
+        }
       }
+      this.startupReadyControl.resolve()
+    } catch (error) {
+      this.startupReadyControl.reject(error)
+      throw error
     }
 
     yield () => this.stop()

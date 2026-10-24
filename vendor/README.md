@@ -62,6 +62,8 @@ Keep this log exhaustive — every divergence from upstream must be listed.
 
 24. **`timer/locale/{en,zh}.json` display metadata**: local English and Chinese titles and descriptions for the Settings plugin inventory. `timer/package.json` exports and publishes these locale resources.
 
+25. **`loader/src/{index,config/group}.ts` initial startup scheduling**: app-boot supplies required startup entry ids while it mounts the root Include. Entry groups start every configured child immediately, await only entries on required paths, and observe detached optional group-update rejections through Loader logging. App-boot then clears the startup policy; ordinary updates, recomposition, health checks, and rollback retain full-tree settlement. This lets hosts report readiness when their required services activate while optional imports and lifecycles continue in the background. Covered by `packages/boot/app-boot/tests/app-boot.spec.ts` and `packages/bundle/web-app/tests/web-app.spec.ts`.
+
 ## Sync procedure
 
 To update a vendored package from upstream:

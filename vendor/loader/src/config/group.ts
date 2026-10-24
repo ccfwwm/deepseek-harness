@@ -53,15 +53,53 @@ export class EntryGroup {
 
     // update inner plugins
     const ids = Reflect.ownKeys({ ...oldMap, ...newMap }) as string[]
-    await Promise.all(ids.map(async (id) => {
+    const startupRequired = this.ctx.loader.startupRequiredIds
+    const containsRequired = (options: EntryOptions): boolean => {
+      if (options.name === 'cordis:include') return true
+      if (startupRequired?.has(options.id)) return true
+      if (!options.group || !Array.isArray(options.config)) return false
+      return options.config.some(containsRequired)
+    }
+    const updates = ids.map(async (id) => {
       if (newMap[id]) {
-        await this.create(newMap[id]).catch((error) => {
+        const createdId = await this.create(newMap[id]).catch((error) => {
           this.ctx.logger.error(error)
+          return undefined
         })
+        if (startupRequired && createdId !== undefined && containsRequired(newMap[id])) {
+          const entry = this.tree.store[id] ?? this.tree.resolve(createdId)
+          if (entry?._initTask) await entry._initTask
+          // Tree carriers (Group/Include) create their child rows from their
+          // own service init. Waiting for the carrier fiber here would also
+          // wait for every optional descendant and defeat selective startup.
+          // The app-boot readiness pass observes the carrier's subtree and
+          // awaits only the required descendants after they materialize.
+          if (entry?.subtree) {
+            const startupReady = (entry.subtree as EntryTree & { startupReady?: Promise<void> }).startupReady
+            if (startupReady) await startupReady
+          } else if (entry && !entry.subgroup && entry.fiber) {
+            await entry.fiber.await()
+          }
+        }
       } else {
         this.remove(id)
       }
-    }))
+    })
+    if (!startupRequired) {
+      await Promise.all(updates)
+      return
+    }
+
+    // Start every row promptly, but let startup wait only for rows that are
+    // required themselves or contain a required descendant. Detached rows
+    // still report import/config/lifecycle failures through their normal
+    // Loader diagnostics and are included in later explicit Loader.await().
+    const pending = ids.flatMap((id, index) => newMap[id] && containsRequired(newMap[id])
+      ? [updates[index]]
+      : [])
+    void Promise.all(updates.filter((_, index) => !pending.includes(updates[index])))
+      .catch((error) => this.ctx.logger.error(error))
+    await Promise.all(pending)
   }
 
   stop() {

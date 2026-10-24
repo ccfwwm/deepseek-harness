@@ -58,6 +58,8 @@ interface Workspace {
    * and canonical cwd mismatches are never returned. A fully qualified cwd
    * whose realpath or directory stat fails with ENOENT preserves an existing
    * candidate, including a dangling symlink; other filesystem failures do not.
+   * Pending startup probes retain existing candidates until validation finishes.
+   * Network-path availability failures also preserve existing candidates.
    * A subsequent mutation prunes filtered candidates, not missing-directory
    * candidates. This does not admit new sessions or recreate directories.
    */

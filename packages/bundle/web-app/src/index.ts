@@ -17,7 +17,7 @@ import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { auditStartupEntries } from '@deepseek-ai/dsh-app-boot'
+import { waitForStartupReadiness } from '@deepseek-ai/dsh-app-boot'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import * as FrontendStatic from '@deepseek-ai/dsh-host-frontend-static'
 import { bindUrlHost, isLoopbackHost } from '@deepseek-ai/dsh-host-webserver'
@@ -53,7 +53,7 @@ export const inject = ['webServer']
 
 /** Plugin config: composed deployment settings plus per-invocation command-line values. */
 export interface Config {
-  /** Permit default-browser handoff after the Loader tree settles; an SSH launch suppresses it. */
+  /** Permit default-browser handoff after required startup entries activate; an SSH launch suppresses it. */
   openBrowser: boolean
   /** Print the URL line on activation; a non-interactive layer can turn it off. */
   printUrl: boolean
@@ -220,8 +220,8 @@ export function apply(ctx: Context, config: Config): void {
       // The URL line and browser handoff are readiness signals: supervisors RPC
       // as soon as they observe the line, while a browser requests the page as
       // soon as it opens. Neither may run while sibling rows such as the /api
-      // route owner are still mounting. Await Loader settlement first; a
-      // hand-built tree without a Loader is already the complete tree.
+      // route owner are still mounting. Wait for the application's required
+      // core entries; unrelated optional plugins continue in the background.
       const announceReady = (): void => {
         if (ANNOUNCED_ROOTS.has(connectionCtx.root)) return
         const webUrl = appRootUrl()
@@ -241,11 +241,10 @@ export function apply(ctx: Context, config: Config): void {
       // This row's own activation can precede a sibling failure. The app owns
       // readiness by waiting for its Loader tree, or announces at once in a
       // hand-built tree without Loader.
-      const settled = connectionCtx.get('loader')?.await()
-      if (settled === undefined) announceReady()
+      const loader = connectionCtx.get('loader')
+      if (loader === undefined) announceReady()
       else {
-        void settled.then(async () => {
-          await auditStartupEntries(connectionCtx.root, 'dsh web', () => {})
+        void waitForStartupReadiness(connectionCtx.root, 'dsh web').then(() => {
           // The tree can be disposed while the boot was in flight (early
           // SIGTERM); a URL line or browser tab for a dead server would only
           // mislead, and reading torn-down services would turn a clean shutdown
@@ -253,7 +252,7 @@ export function apply(ctx: Context, config: Config): void {
           if (connectionCtx.get('webServer') !== undefined
             && connectionCtx.get('connection') !== undefined) announceReady()
         }).catch(() => {
-          // Boot owns the failure diagnostic; readiness remains unpublished.
+          // Boot owns the required-failure diagnostic; readiness stays unpublished.
         })
       }
     })

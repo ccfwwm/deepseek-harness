@@ -85,7 +85,7 @@ function provideConnection(ctx: Context): void {
   } as never)
 }
 
-/** A fake Loader whose settlement the test controls (the URL line waits on it). */
+/** A fake Loader so the readiness helper owns publication timing in these tests. */
 function provideLoader(ctx: Context, settle: () => Promise<void> = async () => {}): void {
   ctx.provide('loader', { await: settle, entries: () => [] } as never)
 }
@@ -354,18 +354,19 @@ describe('web-app runtime glue', () => {
     await ctx.fiber.dispose()
   })
 
-  it('defers readiness publication until Loader settlement and drops it on failure or teardown', async () => {
+  it('defers readiness publication until core readiness and drops it on failure or teardown', async () => {
     stageDist()
     const openBrowser = vi.fn(async () => {})
     internals.openBrowser = openBrowser
-    // Settlement path: both actions wait for loader.await() so their consumers
-    // can request the complete app immediately.
+    // The host publishes only after required core services activate; optional
+    // plugin lifecycles do not participate in this readiness promise.
     const settled = new Context()
     settled.provide('webServer', fakeHttpServer().server)
     provideConnection(settled)
+    provideLoader(settled)
     let release: () => void
-    const settlement = new Promise<void>((resolve) => { release = resolve })
-    provideLoader(settled, () => settlement)
+    const readiness = new Promise<void>((resolve) => { release = resolve })
+    vi.spyOn(AppBoot, 'waitForStartupReadiness').mockReturnValue(readiness)
     const log = vi.spyOn(console, 'log').mockImplementation(() => {})
     apply(settled, new Config({ openBrowser: true, printUrl: true, surfaceContext: true }))
     await new Promise(resolve => setTimeout(resolve, 0))
@@ -377,21 +378,21 @@ describe('web-app runtime glue', () => {
     expect(openBrowser).toHaveBeenCalledWith('http://127.0.0.1:4567/?token=test-token')
     await settled.fiber.dispose()
 
-    // Failed path: Loader reports the sibling failure; the app prints no URL
-    // for a process that is about to exit.
+    // Failed required readiness prints no URL for a process that is exiting.
     log.mockClear()
     openBrowser.mockClear()
     const failed = new Context()
     failed.provide('webServer', fakeHttpServer().server)
     provideConnection(failed)
-    provideLoader(failed, async () => { throw new Error('boot failed') })
+    provideLoader(failed)
+    vi.spyOn(AppBoot, 'waitForStartupReadiness').mockRejectedValue(new Error('boot failed'))
     apply(failed, new Config({ openBrowser: true, printUrl: true, surfaceContext: true }))
     await new Promise(resolve => setTimeout(resolve, 0))
     expect(log).not.toHaveBeenCalled()
     expect(openBrowser).not.toHaveBeenCalled()
     await failed.fiber.dispose()
 
-    // Torn-down path: settlement resolves after the webserver is gone — no
+    // Torn-down path: readiness resolves after the webserver is gone — no
     // line, no crash.
     log.mockClear()
     openBrowser.mockClear()
@@ -402,8 +403,9 @@ describe('web-app runtime glue', () => {
     })
     await child
     let releaseTorn: () => void
-    const tornSettlement = new Promise<void>((resolve) => { releaseTorn = resolve })
-    provideLoader(torn, () => tornSettlement)
+    const tornReadiness = new Promise<void>((resolve) => { releaseTorn = resolve })
+    provideLoader(torn)
+    vi.spyOn(AppBoot, 'waitForStartupReadiness').mockReturnValue(tornReadiness)
     apply(torn, new Config({ openBrowser: true, printUrl: true, surfaceContext: true }))
     await new Promise(resolve => setTimeout(resolve, 0))
     await child.dispose() // the webServer service goes away
@@ -434,7 +436,7 @@ describe('web-app runtime glue', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {})
     const openBrowser = vi.fn(async () => {})
     internals.openBrowser = openBrowser
-    const audit = vi.spyOn(AppBoot, 'auditStartupEntries')
+    const audit = vi.spyOn(AppBoot, 'waitForStartupReadiness')
     apply(ctx, new Config({ openBrowser: true, printUrl: true, surfaceContext: false }))
     await vi.waitFor(() => { expect(audit).toHaveBeenCalledOnce() })
     await Promise.allSettled(audit.mock.results.map(result => result.value as Promise<void>))

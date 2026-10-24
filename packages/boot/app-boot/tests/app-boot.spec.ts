@@ -561,6 +561,9 @@ describe('auditStartupEntries', () => {
     'web-runtime',
     'modules',
     'connection',
+    'workspace',
+    'session-controller',
+    'workspace-controller',
     'headless-runner',
     'acp',
     'sdk-jsonrpc-server',
@@ -931,6 +934,147 @@ describe('boot', () => {
     }
   })
 
+  it('waits for an initializing provider of a required entry without joining unrelated optional work', async () => {
+    const dir = tmp()
+    const suffix = Math.random().toString(16).slice(2)
+    const providerReleaseName = `__DSH_PROVIDER_RELEASE_${suffix}__`
+    const optionalReleaseName = `__DSH_OPTIONAL_RELEASE_${suffix}__`
+    writeFileSync(join(dir, 'provider.mjs'), [
+      'export async function apply(ctx) {',
+      '  ctx.provide("startupDependency", true)',
+      `  await new Promise(resolve => { globalThis[${JSON.stringify(providerReleaseName)}] = resolve })`,
+      '}',
+      '',
+    ].join('\n'))
+    writeFileSync(join(dir, 'required.mjs'), [
+      'export const inject = ["startupDependency"]',
+      'export function apply(ctx) { ctx.provide("requiredReady", true) }',
+      '',
+    ].join('\n'))
+    writeFileSync(join(dir, 'optional.mjs'), [
+      'export async function apply() {',
+      `  await new Promise(resolve => { globalThis[${JSON.stringify(optionalReleaseName)}] = resolve })`,
+      '}',
+      '',
+    ].join('\n'))
+    writeFileSync(join(dir, 'cordis.yml'), [
+      '- id: provider',
+      '  name: ./provider.mjs',
+      '- id: modules',
+      '  name: ./required.mjs',
+      '- id: optional',
+      '  name: ./optional.mjs',
+      '',
+    ].join('\n'))
+    const globals = globalThis as Record<string, unknown>
+    let ctx: Context | undefined
+    const bootTask = boot(NAME, join(dir, 'cordis.yml'))
+    try {
+      await vi.waitFor(() => {
+        expect(globals[providerReleaseName]).toBeTypeOf('function')
+        expect(globals[optionalReleaseName]).toBeTypeOf('function')
+      })
+      expect(await Promise.race([
+        bootTask.then(() => 'ready', () => 'failed'),
+        new Promise(resolve => setTimeout(() => resolve('pending'), 50)),
+      ])).toBe('pending')
+      ;(globals[providerReleaseName] as () => void)()
+      const result = await Promise.race([
+        bootTask.then(value => ({ value }), error => ({ error })),
+        new Promise<{ timedOut: true }>(resolve => setTimeout(() => resolve({ timedOut: true }), 1000)),
+      ])
+      expect(result).toHaveProperty('value')
+      if ('value' in result) ctx = result.value
+      expect(ctx?.get('requiredReady')).toBe(true)
+      expect(ctx?.loader.resolve('include:optional').fiber?.state).toBe(1)
+    } finally {
+      ;(globals[providerReleaseName] as (() => void) | undefined)?.()
+      ;(globals[optionalReleaseName] as (() => void) | undefined)?.()
+      ctx ??= await bootTask.catch(() => undefined)
+      await ctx?.fiber.dispose()
+      Reflect.deleteProperty(globals, providerReleaseName)
+      Reflect.deleteProperty(globals, optionalReleaseName)
+    }
+  })
+
+  it('waits for required entries inside nested Includes without waiting for an optional import', async () => {
+    const dir = tmp()
+    const suffix = Math.random().toString(16).slice(2)
+    const optionalReleaseName = `__DSH_OPTIONAL_IMPORT_RELEASE_${suffix}__`
+    const requiredReleaseName = `__DSH_REQUIRED_APPLY_RELEASE_${suffix}__`
+    writeFileSync(join(dir, 'slow-optional.mjs'), [
+      `await new Promise(resolve => { globalThis[${JSON.stringify(optionalReleaseName)}] = resolve })`,
+      'export function apply(ctx) { ctx.provide("optionalReady", true) }',
+      '',
+    ].join('\n'))
+    writeFileSync(join(dir, 'required.mjs'), [
+      'export async function apply(ctx) {',
+      `  await new Promise(resolve => { globalThis[${JSON.stringify(requiredReleaseName)}] = resolve })`,
+      '  ctx.provide("requiredReady", true)',
+      '}',
+      '',
+    ].join('\n'))
+    writeFileSync(join(dir, 'nested.yml'), [
+      '- id: modules',
+      '  name: ./required.mjs',
+      '- id: slow-optional',
+      '  name: ./slow-optional.mjs',
+      '',
+    ].join('\n'))
+    const configPath = join(dir, 'cordis.yml')
+    writeFileSync(configPath, [
+      '- id: nested',
+      '  name: cordis:include',
+      '  config:',
+      '    path: nested.yml',
+      '',
+    ].join('\n'))
+    let ctx: Context | undefined
+    const bootTask = boot(NAME, configPath)
+    try {
+      await vi.waitFor(() => {
+        const globals = globalThis as Record<string, unknown>
+        expect(globals[optionalReleaseName]).toBeTypeOf('function')
+        expect(globals[requiredReleaseName]).toBeTypeOf('function')
+      })
+      const beforeRequiredActivation = await Promise.race([
+        bootTask.then(() => 'ready', () => 'failed'),
+        new Promise<'pending'>(resolve => setTimeout(() => resolve('pending'), 50)),
+      ])
+      expect(beforeRequiredActivation).toBe('pending')
+
+      const globals = globalThis as Record<string, unknown>
+      ;(globals[requiredReleaseName] as () => void)()
+      const afterRequiredActivation = await Promise.race([
+        bootTask.then(value => ({ value }), error => ({ error })),
+        new Promise<{ timedOut: true }>(resolve => setTimeout(() => resolve({ timedOut: true }), 1000)),
+      ])
+      expect(afterRequiredActivation).toHaveProperty('value')
+      if ('value' in afterRequiredActivation) ctx = afterRequiredActivation.value
+      expect(ctx?.loader.resolve('include:nested:modules').fiber?.state).toBe(2)
+      expect(ctx?.get('requiredReady')).toBe(true)
+      expect(ctx?.loader.resolve('include:nested:slow-optional').fiber).toBeUndefined()
+
+      ;(globals[optionalReleaseName] as () => void)()
+      await ctx!.loader.await()
+      expect(ctx!.loader.resolve('include:nested:slow-optional').fiber?.state).toBe(2)
+    } finally {
+      const globals = globalThis as Record<string, unknown>
+      ;(globals[requiredReleaseName] as (() => void) | undefined)?.()
+      ;(globals[optionalReleaseName] as (() => void) | undefined)?.()
+      if (ctx === undefined) ctx = await Promise.race([
+        bootTask.catch(() => undefined),
+        new Promise<undefined>(resolve => setTimeout(() => resolve(undefined), 1000)),
+      ])
+      if (ctx) {
+        await ctx.loader.await()
+        await ctx.fiber.dispose()
+      }
+      Reflect.deleteProperty(globals, requiredReleaseName)
+      Reflect.deleteProperty(globals, optionalReleaseName)
+    }
+  })
+
   it('can resolve bare plugins from the harness when the config project shadows their package name', async () => {
     const dir = tmp()
     const harness = tmp()
@@ -1120,6 +1264,7 @@ describe('boot', () => {
     let ctx: Context | undefined
     try {
       ctx = await boot(NAME, configPath)
+      await ctx.loader.await()
       expect(ctx.get('goodStarted')).toBe(true)
       const entries = [...ctx.loader.entries()]
       expect(entries.find(entry => entry.options.id === 'good')?.fiber?.state).toBe(2)

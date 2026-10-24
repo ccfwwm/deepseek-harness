@@ -190,8 +190,8 @@
     # Web glue owned by this bundle: resolves the built frontend dist (an
     # assembly fact of dsh-web-app, never user config), mounts the
     # frontend-static fallback owner, registers the bash runtime variable,
-    # prints the URL line, and opens the canonical URL after the full Loader
-    # tree settles and the required-entry audit passes. Invocation-only values
+    # prints the URL line, and opens the canonical URL after required startup
+    # entries activate; optional plugins continue in the background. Invocation-only values
     # come from the webStartup provider; the advertised application URL is
     # this row's `publicUrl`, otherwise the bind-address URL.
     - id: web-runtime

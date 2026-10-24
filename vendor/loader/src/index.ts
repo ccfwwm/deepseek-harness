@@ -86,6 +86,11 @@ export class Loader extends EntryTree {
 
   public builtins: Dict<any> = Object.create(null)
 
+  /** Entry ids required by the host's initial readiness check. During that
+   * check, unrelated entries may initialize in the background. Hosts clear
+   * this after readiness; ordinary updates retain the normal settle behavior. */
+  public startupRequiredIds: ReadonlySet<string> | undefined
+
   constructor(ctx: Context, public config: Loader.Config = {}) {
     super(ctx)
     if (config.baseUrl) {
